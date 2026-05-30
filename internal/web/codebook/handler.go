@@ -5,7 +5,7 @@ import (
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/errs"
-	"github.com/Duke1616/eflow/internal/service"
+	codebookSvc "github.com/Duke1616/eflow/internal/service/codebook"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/ginx"
@@ -14,10 +14,10 @@ import (
 
 type Handler struct {
 	capability.IRegistry
-	svc service.Codebook
+	svc codebookSvc.Codebook
 }
 
-func NewHandler(svc service.Codebook) *Handler {
+func NewHandler(svc codebookSvc.Codebook) *Handler {
 	return &Handler{
 		svc:       svc,
 		IRegistry: capability.NewRegistry("ticket", "codebook", "模板管理"),

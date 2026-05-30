@@ -5,7 +5,8 @@ import (
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/service"
+	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
+	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eflow/pkg/easyflow"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ekit/slice"
@@ -16,12 +17,12 @@ import (
 // Handler 整合工作流定义设计与流转地图的 Web 控制层路由器
 type Handler struct {
 	capability.IRegistry
-	svc       service.IWorkflow
-	engineSvc service.IEngine
+	svc       workflowSvc.IWorkflow
+	engineSvc engineSvc.IEngine
 }
 
 // NewHandler 初始化工作流 Web 控制器并接入 EIAM 统一安全权限防护
-func NewHandler(svc service.IWorkflow, engineSvc service.IEngine) *Handler {
+func NewHandler(svc workflowSvc.IWorkflow, engineSvc engineSvc.IEngine) *Handler {
 	return &Handler{
 		svc:       svc,
 		engineSvc: engineSvc,

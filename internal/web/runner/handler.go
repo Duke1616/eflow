@@ -5,7 +5,7 @@ import (
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/errs"
-	"github.com/Duke1616/eflow/internal/service"
+	runnerSvc "github.com/Duke1616/eflow/internal/service/runner"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/ginx"
@@ -14,10 +14,10 @@ import (
 
 type Handler struct {
 	capability.IRegistry
-	svc service.IRunner
+	svc runnerSvc.IRunner
 }
 
-func NewHandler(svc service.IRunner) *Handler {
+func NewHandler(svc runnerSvc.IRunner) *Handler {
 	return &Handler{
 		svc:       svc,
 		IRegistry: capability.NewRegistry("ticket", "runner", "执行器管理"),

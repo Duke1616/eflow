@@ -5,6 +5,9 @@ import (
 	"net"
 	"time"
 
+	"github.com/Duke1616/eflow/internal/web/codebook"
+	"github.com/Duke1616/eflow/internal/web/runner"
+	"github.com/Duke1616/eflow/internal/web/task"
 	"github.com/Duke1616/eflow/internal/web/template"
 	"github.com/Duke1616/eflow/internal/web/workflow"
 	"github.com/Duke1616/eiam/pkg/web/capability"
@@ -21,6 +24,7 @@ const Resource = "FLOW"
 func InitGinWebServer(mdls []gin.HandlerFunc, sdk *sdk.SDK,
 	syncer capability.Syncer, providers []capability.PermissionProvider,
 	templateHdl *template.Handler, workflowHdl *workflow.Handler,
+	codebookHdl *codebook.Handler, runnerHdl *runner.Handler, taskHdl *task.Handler,
 	listener net.Listener) *egin.Component {
 
 	server := egin.Load("server.egin").Build(egin.WithListener(listener))
@@ -37,6 +41,9 @@ func InitGinWebServer(mdls []gin.HandlerFunc, sdk *sdk.SDK,
 	// 注册各个业务模块的私有路由及 EIAM 敏防 Capability 网关防护
 	templateHdl.PrivateRoutes(server.Engine)
 	workflowHdl.PrivateRoutes(server.Engine)
+	codebookHdl.PrivateRoutes(server.Engine)
+	runnerHdl.PrivateRoutes(server.Engine)
+	taskHdl.PrivateRoutes(server.Engine)
 
 	// 异步启动 EIAM 资产注册控制器
 	go func() {
@@ -61,4 +68,3 @@ func InitGinMiddlewares() []gin.HandlerFunc {
 		middleware.NewCorsBuilder().Build(),
 	}
 }
-

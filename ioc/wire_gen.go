@@ -9,9 +9,17 @@ package ioc
 import (
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
-	"github.com/Duke1616/eflow/internal/service"
-	"github.com/Duke1616/eflow/internal/web/template"
-	"github.com/Duke1616/eflow/internal/web/workflow"
+	"github.com/Duke1616/eflow/internal/service/codebook"
+	"github.com/Duke1616/eflow/internal/service/engine"
+	"github.com/Duke1616/eflow/internal/service/runner"
+	"github.com/Duke1616/eflow/internal/service/task"
+	"github.com/Duke1616/eflow/internal/service/template"
+	"github.com/Duke1616/eflow/internal/service/workflow"
+	codebook2 "github.com/Duke1616/eflow/internal/web/codebook"
+	runner2 "github.com/Duke1616/eflow/internal/web/runner"
+	task2 "github.com/Duke1616/eflow/internal/web/task"
+	template2 "github.com/Duke1616/eflow/internal/web/template"
+	workflow2 "github.com/Duke1616/eflow/internal/web/workflow"
 	"github.com/Duke1616/eflow/pkg/easyflow"
 )
 
@@ -27,21 +35,35 @@ func InitApp() *App {
 	iTemplateDAO := dao.NewTemplateDAO(db)
 	iTemplateRepository := repository.NewTemplateRepository(iTemplateDAO)
 	workwxApp := InitWorkWx()
-	iTemplate := service.NewTemplateService(iTemplateRepository, workwxApp)
-	handler := template.NewHandler(iTemplate)
+	iTemplate := template.NewTemplateService(iTemplateRepository, workwxApp)
+	handler := template2.NewHandler(iTemplate)
 	iWorkflowDAO := dao.NewWorkflowDAO(db)
 	iWorkflowRepository := repository.NewWorkflowRepository(iWorkflowDAO)
 	iEngineDAO := dao.NewProcessEngineDAO(db)
 	iEngineRepository := repository.NewProcessEngineRepository(iEngineDAO)
-	iEngine := service.NewEngineService(iEngineRepository)
+	iEngine := engine.NewEngineService(iEngineRepository)
 	converter := easyflow.NewLogicFlowToEngineConvert()
-	iWorkflow := service.NewWorkflowService(iWorkflowRepository, iEngine, converter)
-	workflowHandler := workflow.NewHandler(iWorkflow, iEngine)
-	listener := InitListener()
-	component := InitGinWebServer(v, sdk, syncer, v2, handler, workflowHandler, listener)
+	iWorkflow := workflow.NewWorkflowService(iWorkflowRepository, iEngine, converter)
+	workflowHandler := workflow2.NewHandler(iWorkflow, iEngine)
+	codebookDAO := dao.NewCodebookDAO(db)
+	codebookRepository := repository.NewCodebookRepository(codebookDAO)
+	codebookCodebook := codebook.NewService(codebookRepository)
+	codebookHandler := codebook2.NewHandler(codebookCodebook)
+	iRunnerDAO := dao.NewRunnerDAO(db)
+	iRunnerRepository := repository.NewRunnerRepository(iRunnerDAO)
+	iRunner := runner.NewRunnerService(iRunnerRepository)
+	runnerHandler := runner2.NewHandler(iRunner)
+	taskDAO := dao.NewTaskDAO(db)
+	taskRepository := repository.NewTaskRepository(taskDAO)
 	clientConnInterface := InitECMDBGrpcClient()
+	taskServiceClient := InitTaskServiceClient(clientConnInterface)
+	taskTask := task.NewTaskService(taskRepository, iWorkflow, codebookCodebook, iRunner, iEngine, taskServiceClient)
+	taskHandler := task2.NewHandler(taskTask)
+	listener := InitListener()
+	component := InitGinWebServer(v, sdk, syncer, v2, handler, workflowHandler, codebookHandler, runnerHandler, taskHandler, listener)
 	endpointServiceClient := InitEndpointServiceClient(clientConnInterface)
-	v3 := InitTasks()
+	mq := InitMQ()
+	v3 := InitTasks(taskTask, mq)
 	app := &App{
 		Web:         component,
 		EndpointSvc: endpointServiceClient,

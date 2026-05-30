@@ -1,4 +1,4 @@
-package service
+package workflow
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
+	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eflow/pkg/easyflow"
 	"golang.org/x/sync/errgroup"
 )
@@ -57,12 +58,12 @@ type IWorkflow interface {
 
 type workflowService struct {
 	repo         repository.IWorkflowRepository
-	engineSvc    IEngine
+	engineSvc    engine.IEngine
 	engineCovert easyflow.Converter
 }
 
 // NewWorkflowService 初始化工作流业务服务层实例
-func NewWorkflowService(repo repository.IWorkflowRepository, engineSvc IEngine, engineCovert easyflow.Converter) IWorkflow {
+func NewWorkflowService(repo repository.IWorkflowRepository, engineSvc engine.IEngine, engineCovert easyflow.Converter) IWorkflow {
 	return &workflowService{
 		repo:         repo,
 		engineSvc:    engineSvc,

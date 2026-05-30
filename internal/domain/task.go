@@ -46,23 +46,32 @@ type TaskArgs map[string]interface{}
 // Task 自动化作业执行任务领域模型
 // 纯净领域对象，去除了表现层所有的 JSON struct tags
 type Task struct {
-	Id            int64       // 自动化作业唯一 ID
-	OrderId       int64       // 关联工单单据 ID
-	ProcessInstId int         // 关联工作流流程实例 ID
-	CodebookUid   string      // 关联的脚本库唯一 UID
-	Code          string      // 待运行的自动化脚本源码快照
-	Language      string      // 脚本编写语言 (python, shell 等)
-	Args          TaskArgs    // 流程变量额外透传的临时入参属性字典
-	Variables     []Variables // 作业绑定执行所输入的参数变量集合
-	Status        TaskStatus  // 任务当前的执行状态
-	Result        string      // 任务执行的日志或返回值结果
-	WantResult    string      // 期待的正确返回值 (用于节点条件自动决策)
-	ExternalId    string      // 分布式任务平台反馈给本系统的运行实例 ID
-	StartTime     int64       // 作业任务实际开始运行的时间 (毫秒时间戳)
-	EndTime       int64       // 作业任务完成运行的时间 (毫秒时间戳)
-	RetryCount    int         // 自动重试的计数值
-	Ctime         int64       // 创建时间 (毫秒级时间戳)
-	Utime         int64       // 更新时间 (毫秒级时间戳)
+	Id              int64       // 自动化作业唯一 ID
+	OrderId         int64       // 关联工单单据 ID
+	ProcessInstId   int         // 关联工作流流程实例 ID
+	CurrentNodeId   string      // 当前流程自动化节点 ID
+	TriggerPosition string      // 最近一次状态变更或异常触发位置
+	WorkflowId      int64       // 关联工作流定义 ID
+	CodebookUid     string      // 关联的脚本库唯一 UID
+	CodebookName    string      // 关联脚本库名称快照
+	Code            string      // 待运行的自动化脚本源码快照
+	Language        string      // 脚本编写语言 (python, shell 等)
+	Args            TaskArgs    // 流程变量额外透传的临时入参属性字典
+	Variables       []Variables // 作业绑定执行所输入的参数变量集合
+	Status          TaskStatus  // 任务当前的执行状态
+	Result          string      // 任务执行的日志或返回值结果
+	WantResult      string      // 期待的正确返回值 (用于节点条件自动决策)
+	ExternalId      string      // 分布式任务平台反馈给本系统的运行实例 ID
+	StartTime       int64       // 作业任务实际开始运行的时间 (毫秒时间戳)
+	EndTime         int64       // 作业任务完成运行的时间 (毫秒时间戳)
+	RetryCount      int         // 自动重试的计数值
+	IsTiming        bool        // 是否为定时任务
+	ScheduledTime   int64       // 计划执行时间 (毫秒时间戳)
+	Kind            Kind        // 执行派发渠道
+	Target          string      // 执行目标 (Topic 或 ServiceName)
+	Handler         string      // 执行方法
+	Ctime           int64       // 创建时间 (毫秒级时间戳)
+	Utime           int64       // 更新时间 (毫秒级时间戳)
 }
 
 // TaskResult 自动化作业执行的反馈结果对象模型
@@ -84,3 +93,28 @@ type Variables struct {
 	Value  string // 变量值
 	Secret bool   // 是否属于敏感加密参数
 }
+
+type TriggerPosition string
+
+func (t TriggerPosition) ToString() string {
+	return string(t)
+}
+
+const (
+	TriggerPositionTaskWaiting          TriggerPosition = "任务等待"
+	TriggerPositionReadyToStartNode     TriggerPosition = "准备启动节点"
+	TriggerPositionDispatchDelivered    TriggerPosition = "分发已送达执行端，当前任务执行中"
+	TriggerPositionTaskExecutionSuccess TriggerPosition = "任务执行成功"
+	TriggerPositionTaskExecutionFailed  TriggerPosition = "任务执行失败"
+
+	TriggerPositionManualRetry            TriggerPosition = "人工手动重试"
+	TriggerPositionAutoRetry              TriggerPosition = "自动补发任务"
+	TriggerPositionAutoRetryLimitExceeded TriggerPosition = "超过最大重试次数"
+	TriggerPositionManualSuccess          TriggerPosition = "手动修改状态为成功"
+
+	TriggerPositionErrorGetProcessInst        TriggerPosition = "获取流程实例失败"
+	TriggerPositionErrorGetProcessInfo        TriggerPosition = "获取流程信息失败"
+	TriggerPositionErrorExtractAutomationInfo TriggerPosition = "提取自动化信息失败"
+	TriggerPositionErrorGetDispatcherNode     TriggerPosition = "获取调度节点失败"
+	TriggerPositionErrorGetTaskTemplate       TriggerPosition = "获取任务模版失败"
+)

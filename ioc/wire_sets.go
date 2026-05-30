@@ -3,7 +3,15 @@ package ioc
 import (
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
-	"github.com/Duke1616/eflow/internal/service"
+	codebookSvc "github.com/Duke1616/eflow/internal/service/codebook"
+	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
+	runnerSvc "github.com/Duke1616/eflow/internal/service/runner"
+	taskSvc "github.com/Duke1616/eflow/internal/service/task"
+	templateSvc "github.com/Duke1616/eflow/internal/service/template"
+	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
+	"github.com/Duke1616/eflow/internal/web/codebook"
+	"github.com/Duke1616/eflow/internal/web/runner"
+	"github.com/Duke1616/eflow/internal/web/task"
 	"github.com/Duke1616/eflow/internal/web/template"
 	"github.com/Duke1616/eflow/internal/web/workflow"
 	"github.com/Duke1616/eflow/pkg/easyflow"
@@ -22,7 +30,7 @@ var (
 		InitWorkWx,
 		dao.NewTemplateDAO,
 		repository.NewTemplateRepository,
-		service.NewTemplateService,
+		templateSvc.NewTemplateService,
 		template.NewHandler,
 	)
 
@@ -30,7 +38,7 @@ var (
 	WorkflowSet = wire.NewSet(
 		dao.NewWorkflowDAO,
 		repository.NewWorkflowRepository,
-		service.NewWorkflowService,
+		workflowSvc.NewWorkflowService,
 		workflow.NewHandler,
 		easyflow.NewLogicFlowToEngineConvert,
 	)
@@ -39,7 +47,32 @@ var (
 	EngineSet = wire.NewSet(
 		dao.NewProcessEngineDAO,
 		repository.NewProcessEngineRepository,
-		service.NewEngineService,
+		engineSvc.NewEngineService,
+	)
+
+	// CodebookSet 自动化脚本库模块 Provider 集合
+	CodebookSet = wire.NewSet(
+		dao.NewCodebookDAO,
+		repository.NewCodebookRepository,
+		codebookSvc.NewService,
+		codebook.NewHandler,
+	)
+
+	// RunnerSet 自动化执行器模块 Provider 集合
+	RunnerSet = wire.NewSet(
+		dao.NewRunnerDAO,
+		repository.NewRunnerRepository,
+		runnerSvc.NewRunnerService,
+		runner.NewHandler,
+	)
+
+	// TaskSet 自动化任务模块 Provider 集合
+	TaskSet = wire.NewSet(
+		InitTaskServiceClient,
+		dao.NewTaskDAO,
+		repository.NewTaskRepository,
+		taskSvc.NewTaskService,
+		task.NewHandler,
 	)
 
 	// WebSet Web 服务 Provider 集合
@@ -54,10 +87,12 @@ var (
 		InitGinMiddlewares,
 		InitGinWebServer,
 		InitTasks,
+		BaseSet,
 		TemplateSet,
 		WorkflowSet,
 		EngineSet,
+		CodebookSet,
+		RunnerSet,
+		TaskSet,
 	)
 )
-
-
