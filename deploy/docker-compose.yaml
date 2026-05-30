@@ -1,0 +1,18 @@
+version: '3'
+services:
+  eflow:
+    restart: always
+    container_name: eflow
+    image: duke1616/eflow:latest
+    command: ./eflow server
+    ports:
+      - 8766:8766
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./prod.yaml:/app/config/config.yaml
+
+networks:
+  default:
+    name: ecmdb
+    external: true

@@ -1,0 +1,32 @@
+log:
+  debug: true
+
+mysql:
+  dsn: "root:password@tcp(127.0.0.1:3306)/eflow?charset=utf8mb4&collation=utf8mb4_general_ci&parseTime=True&loc=Local&timeout=1s&readTimeout=3s&writeTimeout=3s&multiStatements=true&interpolateParams=true"
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+
+kafka:
+  network: tcp
+  addresses:
+    - 127.0.0.1:9094
+
+etcd:
+  endpoints:
+    - 127.0.0.1:2379
+
+web:
+  host: "0.0.0.0"
+  port: 8766
+
+policy:
+  auth_url: http://127.0.0.1:9000
+  discovery_url: http://127.0.0.1:9000
+
+grpc:
+  client:
+    eflow:
+      name: "eflow"
+      auth_token: "1234567890"

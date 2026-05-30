@@ -1,0 +1,11 @@
+mysql:
+  dsn: "root:password@tcp(mysql:3306)/eflow?charset=utf8mb4&collation=utf8mb4_general_ci&parseTime=True&loc=Local&timeout=1s&readTimeout=3s&writeTimeout=3s&multiStatements=true&interpolateParams=true"
+
+kafka:
+  network: tcp
+  addresses:
+    - kafka:9092
+
+etcd:
+  endpoints:
+    - etcd:2379

@@ -1,0 +1,25 @@
+version: '3'
+tasks:
+  default:
+    desc: 命令提示
+    cmds:
+      - task --list-all
+  run:
+    desc: 启动流程引擎服务
+    cmds:
+      - EGO_DEBUG=true go run main.go server --config=config/config.yaml
+
+  endpoint:
+    desc: 注入 web 路由端点
+    cmds:
+      - EGO_DEBUG=true go run main.go endpoint --config=config/config.yaml
+
+  gen:
+    desc: 代码生成（Wire 依赖注入）
+    cmds:
+      - wire ./ioc/
+
+  mock:
+    desc: 生成 Mock 代码
+    cmds:
+      - go generate ./...
