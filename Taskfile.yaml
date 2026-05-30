@@ -7,12 +7,7 @@ tasks:
   run:
     desc: 启动流程引擎服务
     cmds:
-      - EGO_DEBUG=true go run main.go server --config=config/config.yaml
-
-  endpoint:
-    desc: 注入 web 路由端点
-    cmds:
-      - EGO_DEBUG=true go run main.go endpoint --config=config/config.yaml
+      - EGO_DEBUG=true go run main.go server
 
   gen:
     desc: 代码生成（Wire 依赖注入）

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Duke1616/eflow/ioc"
 	"github.com/fsnotify/fsnotify"
 	"github.com/gotomicro/ego"
@@ -24,7 +25,7 @@ func main() {
 	}
 
 	dir, _ := os.Getwd()
-	defaultCfg := dir + "/config/config.yaml"
+	defaultCfg := dir + "/config/prod.yaml"
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", defaultCfg, "配置文件路径")
 
 	cobra.OnInitialize(initViper)
@@ -45,13 +46,19 @@ func main() {
 }
 
 func startServer() {
-	app := ioc.InitApp()
+	app, err := ioc.InitApp()
+	if err != nil {
+		elog.Panic("init_app_failed", elog.FieldErr(err))
+	}
+
+	// 注册流程引擎驱动事件
+	engine.RegisterEvents(app.Event)
 
 	// 启动后台任务
 	ctx := context.Background()
 	app.StartBackgroundTasks(ctx)
 
-	if err := ego.New().Serve(app.GetServers()...).Run(); err != nil {
+	if err = ego.New().Serve(app.GetServers()...).Run(); err != nil {
 		elog.Panic("app_run_error", elog.FieldErr(err))
 	}
 }

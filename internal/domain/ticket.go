@@ -142,12 +142,12 @@ type FormValue struct {
 
 // TaskForm 流程任务某一步骤下的静态数据和审批动作表单数据实体
 type TaskForm struct {
-	Id      int64       // 快照 ID
-	OrderId int64       // 关联工单 ID
-	TaskId  int         // 关联的底层任务节点 ID
-	Name    string      // 步骤节点名称
-	Key     string      // 节点 key 标识
-	Type    string      // 快照表单类型
-	Value   interface{} // 填写的表单具体值
-	Ctime   int64       // 快照创建时间
+	Id       int64       // 快照 ID
+	TicketId int64       // 关联工单 ID
+	TaskId   int         // 关联的底层任务节点 ID
+	Name     string      // 步骤节点名称
+	Key      string      // 节点 key 标识
+	Type     string      // 快照表单类型
+	Value    interface{} // 填写的表单具体值
+	Ctime    int64       // 快照创建时间
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	endpointv1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/endpoint/v1"
+	"github.com/Duke1616/eflow/internal/service/event/easyflow"
 	"github.com/gotomicro/ego/server"
 	"github.com/gotomicro/ego/server/egin"
 )
@@ -17,6 +18,7 @@ type Task interface {
 type App struct {
 	Web         *egin.Component
 	EndpointSvc endpointv1.EndpointServiceClient
+	Event       *easyflow.ProcessEvent
 	Tasks       []Task
 }
 

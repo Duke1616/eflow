@@ -14,10 +14,10 @@ import (
 
 type Handler struct {
 	capability.IRegistry
-	svc taskSvc.Task
+	svc taskSvc.Service
 }
 
-func NewHandler(svc taskSvc.Task) *Handler {
+func NewHandler(svc taskSvc.Service) *Handler {
 	return &Handler{
 		svc:       svc,
 		IRegistry: capability.NewRegistry("ticket", "task", "自动化任务管理"),

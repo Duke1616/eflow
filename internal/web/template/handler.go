@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/pkg/rule"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
-	"github.com/Duke1616/eflow/pkg/rule"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/ginx"
@@ -18,11 +18,11 @@ import (
 // Handler 整合工单模板及分类分组的 Web 路由处理器
 type Handler struct {
 	capability.IRegistry
-	svc templateSvc.ITemplate
+	svc templateSvc.Service
 }
 
 // NewHandler 初始化工单模板控制器并接入 EIAM 统一安全权限保护
-func NewHandler(svc templateSvc.ITemplate) *Handler {
+func NewHandler(svc templateSvc.Service) *Handler {
 	return &Handler{
 		svc:       svc,
 		IRegistry: capability.NewRegistry("ticket", "template", "工单模板管理"),

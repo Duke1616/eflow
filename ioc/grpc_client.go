@@ -1,7 +1,10 @@
 package ioc
 
 import (
+	teamv1 "github.com/Duke1616/ecmdb/api/proto/gen/ealert/team"
 	endpointv1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/endpoint/v1"
+	rotav1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/rota/v1"
+	userv1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/user/v1"
 	executorv1 "github.com/Duke1616/ecmdb/api/proto/gen/etask/executor/v1"
 	taskv1 "github.com/Duke1616/ecmdb/api/proto/gen/etask/task/v1"
 	"github.com/spf13/viper"
@@ -33,6 +36,11 @@ func InitECMDBGrpcClient() grpc.ClientConnInterface {
 	return cc
 }
 
+// InitUserServiceClient 初始化 ECMDB User gRPC 客户端
+func InitUserServiceClient(cc grpc.ClientConnInterface) userv1.UserServiceClient {
+	return userv1.NewUserServiceClient(cc)
+}
+
 // InitEndpointServiceClient 初始化 Endpoint 服务客户端
 func InitEndpointServiceClient(cc grpc.ClientConnInterface) endpointv1.EndpointServiceClient {
 	return endpointv1.NewEndpointServiceClient(cc)
@@ -44,4 +52,12 @@ func InitTaskServiceClient(cc grpc.ClientConnInterface) taskv1.TaskServiceClient
 
 func InitTaskExecutionServiceClient(cc grpc.ClientConnInterface) executorv1.TaskExecutionServiceClient {
 	return executorv1.NewTaskExecutionServiceClient(cc)
+}
+
+func InitTeamServiceClient(cc grpc.ClientConnInterface) teamv1.TeamServiceClient {
+	return teamv1.NewTeamServiceClient(cc)
+}
+
+func InitRotaServiceClient(cc grpc.ClientConnInterface) rotav1.OnCallServiceClient {
+	return rotav1.NewOnCallServiceClient(cc)
 }

@@ -12,12 +12,12 @@ import (
 
 	taskv1 "github.com/Duke1616/ecmdb/api/proto/gen/etask/task/v1"
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/service/codebook"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eflow/internal/service/runner"
 	"github.com/Duke1616/eflow/internal/service/workflow"
-	"github.com/Duke1616/eflow/pkg/easyflow"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
 	"golang.org/x/sync/errgroup"
@@ -31,7 +31,7 @@ const (
 	DAY    Unit = 3
 )
 
-type Task interface {
+type Service interface {
 	CreateTask(ctx context.Context, orderId int64, processInstId int, nodeId string) (domain.Task, error)
 	StartTask(ctx context.Context, id int64) error
 	RetryTask(ctx context.Context, id int64) error
@@ -54,17 +54,17 @@ type Task interface {
 
 type taskService struct {
 	repo        repository.TaskRepository
-	engineSvc   engine.IEngine
-	workflowSvc workflow.IWorkflow
-	codebookSvc codebook.Codebook
-	runnerSvc   runner.IRunner
+	engineSvc   engine.Service
+	workflowSvc workflow.Service
+	codebookSvc codebook.Service
+	runnerSvc   runner.Service
 	grpcClient  taskv1.TaskServiceClient
 	scheduler   *taskScheduler
 	logger      *elog.Component
 }
 
-func NewTaskService(repo repository.TaskRepository, workflowSvc workflow.IWorkflow, codebookSvc codebook.Codebook,
-	runnerSvc runner.IRunner, engineSvc engine.IEngine, grpcClient taskv1.TaskServiceClient) Task {
+func NewTaskService(repo repository.TaskRepository, workflowSvc workflow.Service, codebookSvc codebook.Service,
+	runnerSvc runner.Service, engineSvc engine.Service, grpcClient taskv1.TaskServiceClient) Service {
 	return &taskService{
 		repo:        repo,
 		engineSvc:   engineSvc,

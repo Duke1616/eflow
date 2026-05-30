@@ -29,7 +29,7 @@ type TemplateFavorite struct {
 
 // TableName 指定物理表名，规避 GORM 默认复数表名机制可能引发的找表报错
 func (TemplateFavorite) TableName() string {
-	return "c_template_favorite"
+	return "template_favorite"
 }
 
 // TemplateGroup 模版分组实体定义
@@ -44,7 +44,7 @@ type TemplateGroup struct {
 
 // TableName 指定物理表名
 func (TemplateGroup) TableName() string {
-	return "c_template_group"
+	return "template_group"
 }
 
 // Template 工单模版实体定义
@@ -68,7 +68,7 @@ type Template struct {
 
 // TableName 指定物理表名
 func (Template) TableName() string {
-	return "c_template"
+	return "template"
 }
 
 // ITemplateCoreDAO 工单模板核心物理数据访问接口

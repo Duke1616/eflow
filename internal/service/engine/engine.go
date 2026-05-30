@@ -8,14 +8,14 @@ import (
 	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
-	"github.com/Duke1616/eflow/pkg/easyflow"
 	"github.com/ecodeclub/ekit/slice"
 	"golang.org/x/sync/errgroup"
 )
 
-// IEngine 流程引擎服务接口
-type IEngine interface {
+// Service 流程引擎服务接口
+type Service interface {
 	// ListTodoTasks 查看指定用户的待办任务列表，支持按时间排序和分页检索
 	ListTodoTasks(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, int64, error)
 	// ListByStartUser 获取我发起的流程实例历史列表，支持分页
@@ -77,7 +77,7 @@ type engineService struct {
 }
 
 // NewEngineService 初始化流程引擎服务层
-func NewEngineService(repo repository.IEngineRepository) IEngine {
+func NewEngineService(repo repository.IEngineRepository) Service {
 	return &engineService{
 		repo: repo,
 	}

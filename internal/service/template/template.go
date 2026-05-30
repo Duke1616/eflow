@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/pkg/hash"
 	"github.com/Duke1616/eflow/internal/repository"
-	"github.com/Duke1616/eflow/pkg/hash"
 	"github.com/xen0n/go-workwx"
 	"golang.org/x/sync/errgroup"
 )
@@ -59,8 +59,8 @@ type ITemplateFavoriteService interface {
 	ListFavoriteTemplates(ctx context.Context, userId int64) ([]domain.Template, error)
 }
 
-// ITemplate 工单模板大组合业务服务接口 (通过接口隔离拆分，再经接口嵌入组合，兼顾高内聚与向后兼容)
-type ITemplate interface {
+// Service 工单模板大组合业务服务接口 (通过接口隔离拆分，再经接口嵌入组合，兼顾高内聚与向后兼容)
+type Service interface {
 	ITemplateCoreService
 	ITemplateGroupService
 	ITemplateFavoriteService
@@ -72,7 +72,7 @@ type templateService struct {
 }
 
 // NewTemplateService 初始化模板业务服务
-func NewTemplateService(repo repository.ITemplateRepository, workApp *workwx.WorkwxApp) ITemplate {
+func NewTemplateService(repo repository.ITemplateRepository, workApp *workwx.WorkwxApp) Service {
 	return &templateService{
 		repo:    repo,
 		workApp: workApp,

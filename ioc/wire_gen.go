@@ -7,26 +7,39 @@
 package ioc
 
 import (
+	"github.com/Duke1616/eflow/internal/event/process"
+	template3 "github.com/Duke1616/eflow/internal/event/template"
+	ticket3 "github.com/Duke1616/eflow/internal/event/ticket"
+	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/internal/service/codebook"
+	"github.com/Duke1616/eflow/internal/service/department"
 	"github.com/Duke1616/eflow/internal/service/engine"
+	"github.com/Duke1616/eflow/internal/service/event/assignees"
+	"github.com/Duke1616/eflow/internal/service/event/strategy"
+	"github.com/Duke1616/eflow/internal/service/event/strategy/automation"
+	"github.com/Duke1616/eflow/internal/service/event/strategy/carbon_copy"
+	"github.com/Duke1616/eflow/internal/service/event/strategy/chat"
+	"github.com/Duke1616/eflow/internal/service/event/strategy/start"
+	"github.com/Duke1616/eflow/internal/service/event/strategy/user"
 	"github.com/Duke1616/eflow/internal/service/runner"
 	"github.com/Duke1616/eflow/internal/service/task"
 	"github.com/Duke1616/eflow/internal/service/template"
+	"github.com/Duke1616/eflow/internal/service/ticket"
 	"github.com/Duke1616/eflow/internal/service/workflow"
 	codebook2 "github.com/Duke1616/eflow/internal/web/codebook"
 	runner2 "github.com/Duke1616/eflow/internal/web/runner"
 	task2 "github.com/Duke1616/eflow/internal/web/task"
 	template2 "github.com/Duke1616/eflow/internal/web/template"
+	ticket2 "github.com/Duke1616/eflow/internal/web/ticket"
 	workflow2 "github.com/Duke1616/eflow/internal/web/workflow"
-	"github.com/Duke1616/eflow/pkg/easyflow"
 )
 
 // Injectors from wire.go:
 
 // InitApp 初始化完整应用
-func InitApp() *App {
+func InitApp() (*App, error) {
 	v := InitGinMiddlewares()
 	sdk := InitPolicySDK()
 	syncer := InitPermSyncer()
@@ -35,39 +48,98 @@ func InitApp() *App {
 	iTemplateDAO := dao.NewTemplateDAO(db)
 	iTemplateRepository := repository.NewTemplateRepository(iTemplateDAO)
 	workwxApp := InitWorkWx()
-	iTemplate := template.NewTemplateService(iTemplateRepository, workwxApp)
-	handler := template2.NewHandler(iTemplate)
+	service := template.NewTemplateService(iTemplateRepository, workwxApp)
+	handler := template2.NewHandler(service)
 	iWorkflowDAO := dao.NewWorkflowDAO(db)
 	iWorkflowRepository := repository.NewWorkflowRepository(iWorkflowDAO)
 	iEngineDAO := dao.NewProcessEngineDAO(db)
 	iEngineRepository := repository.NewProcessEngineRepository(iEngineDAO)
-	iEngine := engine.NewEngineService(iEngineRepository)
+	engineService := engine.NewEngineService(iEngineRepository)
 	converter := easyflow.NewLogicFlowToEngineConvert()
-	iWorkflow := workflow.NewWorkflowService(iWorkflowRepository, iEngine, converter)
-	workflowHandler := workflow2.NewHandler(iWorkflow, iEngine)
+	workflowService := workflow.NewWorkflowService(iWorkflowRepository, engineService, converter)
+	workflowHandler := workflow2.NewHandler(workflowService, engineService)
 	codebookDAO := dao.NewCodebookDAO(db)
 	codebookRepository := repository.NewCodebookRepository(codebookDAO)
-	codebookCodebook := codebook.NewService(codebookRepository)
-	codebookHandler := codebook2.NewHandler(codebookCodebook)
+	codebookService := codebook.NewService(codebookRepository)
+	codebookHandler := codebook2.NewHandler(codebookService)
 	iRunnerDAO := dao.NewRunnerDAO(db)
 	iRunnerRepository := repository.NewRunnerRepository(iRunnerDAO)
-	iRunner := runner.NewRunnerService(iRunnerRepository)
-	runnerHandler := runner2.NewHandler(iRunner)
+	runnerService := runner.NewRunnerService(iRunnerRepository)
+	runnerHandler := runner2.NewHandler(runnerService)
 	taskDAO := dao.NewTaskDAO(db)
 	taskRepository := repository.NewTaskRepository(taskDAO)
 	clientConnInterface := InitECMDBGrpcClient()
 	taskServiceClient := InitTaskServiceClient(clientConnInterface)
-	taskTask := task.NewTaskService(taskRepository, iWorkflow, codebookCodebook, iRunner, iEngine, taskServiceClient)
-	taskHandler := task2.NewHandler(taskTask)
-	listener := InitListener()
-	component := InitGinWebServer(v, sdk, syncer, v2, handler, workflowHandler, codebookHandler, runnerHandler, taskHandler, listener)
-	endpointServiceClient := InitEndpointServiceClient(clientConnInterface)
+	taskService := task.NewTaskService(taskRepository, workflowService, codebookService, runnerService, engineService, taskServiceClient)
+	taskHandler := task2.NewHandler(taskService)
+	ticketDAO := dao.NewTicketDAO(db)
+	taskFormDAO := dao.NewTaskFormDAO(db)
+	ticketRepository := repository.NewTicketRepository(ticketDAO, taskFormDAO)
 	mq := InitMQ()
-	v3 := InitTasks(taskTask, mq)
+	ticketEventProducer, err := InitTicketEventProducer(mq)
+	if err != nil {
+		return nil, err
+	}
+	ticketService := ticket.NewService(ticketRepository, service, engineService, workflowService, ticketEventProducer)
+	userServiceClient := InitUserServiceClient(clientConnInterface)
+	ticketHandler := ticket2.NewHandler(ticketService, engineService, userServiceClient, workflowService)
+	listener := InitListener()
+	component := InitGinWebServer(v, sdk, syncer, v2, handler, workflowHandler, codebookHandler, runnerHandler, taskHandler, ticketHandler, listener)
+	endpointServiceClient := InitEndpointServiceClient(clientConnInterface)
+	orderStatusModifyEventProducer, err := InitOrderStatusModifyEventProducer(mq)
+	if err != nil {
+		return nil, err
+	}
+	appointResolver := assignees.NewAppointResolver(userServiceClient)
+	founderResolver := assignees.NewFounderResolver(userServiceClient)
+	departmentDAO := dao.NewDepartmentDAO(db)
+	departmentRepository := repository.NewDepartmentRepository(departmentDAO)
+	departmentService := department.NewService(departmentRepository)
+	leaderResolver := assignees.NewLeaderResolver(userServiceClient, departmentService)
+	mainLeaderResolver := assignees.NewMainLeaderResolver(userServiceClient, departmentService)
+	onCallServiceClient := InitRotaServiceClient(clientConnInterface)
+	onCallResolver := assignees.NewOnCallResolver(onCallServiceClient, userServiceClient)
+	teamServiceClient := InitTeamServiceClient(clientConnInterface)
+	teamResolver := assignees.NewTeamResolver(teamServiceClient, userServiceClient)
+	templateResolver := assignees.NewTemplateResolver(userServiceClient)
+	resolveEngine := InitResolveEngine(appointResolver, founderResolver, leaderResolver, mainLeaderResolver, onCallResolver, teamResolver, templateResolver)
+	strategyService := strategy.NewService(userServiceClient, service, taskService, ticketService, engineService, resolveEngine)
+	notification := user.NewNotification(strategyService)
+	automationNotification := automation.NewNotification(strategyService)
+	startNotification := start.NewNotification(strategyService)
+	chatNotification := chat.NewNotification(strategyService, teamServiceClient)
+	carbon_copyNotification := carbon_copy.NewNotification(strategyService)
+	sendStrategy := InitSendStrategy(strategyService, notification, automationNotification, startNotification, chatNotification, carbon_copyNotification)
+	processEvent := InitWorkflowEngineOnce(db, engineService, orderStatusModifyEventProducer, taskService, ticketService, workflowService, sendStrategy)
+	taskExecutionServiceClient := InitTaskExecutionServiceClient(clientConnInterface)
+	processEventConsumer, err := process.NewProcessEventConsumer(mq, workflowService, ticketService)
+	if err != nil {
+		return nil, err
+	}
+	userService := ticket3.NewUserServiceAdapter(userServiceClient)
+	wechatTicketConsumer, err := ticket3.NewWechatTicketConsumer(ticketService, service, userService, mq)
+	if err != nil {
+		return nil, err
+	}
+	client := InitLarkClient()
+	larkCallbackTicketConsumer, err := ticket3.NewLarkCallbackTicketConsumer(mq, engineService, ticketService, service, userService, workflowService, client)
+	if err != nil {
+		return nil, err
+	}
+	wechatTicketEventProducer, err := template3.NewWechatTicketEventProducer(mq)
+	if err != nil {
+		return nil, err
+	}
+	wechatApprovalCallbackConsumer, err := template3.NewWechatApprovalCallbackConsumer(service, mq, wechatTicketEventProducer, workwxApp)
+	if err != nil {
+		return nil, err
+	}
+	v3 := InitTasks(taskService, engineService, taskExecutionServiceClient, mq, processEventConsumer, wechatTicketConsumer, larkCallbackTicketConsumer, wechatApprovalCallbackConsumer)
 	app := &App{
 		Web:         component,
 		EndpointSvc: endpointServiceClient,
+		Event:       processEvent,
 		Tasks:       v3,
 	}
-	return app
+	return app, nil
 }

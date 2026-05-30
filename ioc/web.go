@@ -9,6 +9,7 @@ import (
 	"github.com/Duke1616/eflow/internal/web/runner"
 	"github.com/Duke1616/eflow/internal/web/task"
 	"github.com/Duke1616/eflow/internal/web/template"
+	"github.com/Duke1616/eflow/internal/web/ticket"
 	"github.com/Duke1616/eflow/internal/web/workflow"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/Duke1616/eiam/pkg/web/middleware"
@@ -18,13 +19,12 @@ import (
 	"github.com/gotomicro/ego/server/egin"
 )
 
-const Resource = "FLOW"
-
 // InitGinWebServer 初始化并装载 Gin Web Server，显式挂载工单模板和工作流的 API 私有路由
 func InitGinWebServer(mdls []gin.HandlerFunc, sdk *sdk.SDK,
 	syncer capability.Syncer, providers []capability.PermissionProvider,
 	templateHdl *template.Handler, workflowHdl *workflow.Handler,
 	codebookHdl *codebook.Handler, runnerHdl *runner.Handler, taskHdl *task.Handler,
+	ticketHdl *ticket.Handler,
 	listener net.Listener) *egin.Component {
 
 	server := egin.Load("server.egin").Build(egin.WithListener(listener))
@@ -44,6 +44,7 @@ func InitGinWebServer(mdls []gin.HandlerFunc, sdk *sdk.SDK,
 	codebookHdl.PrivateRoutes(server.Engine)
 	runnerHdl.PrivateRoutes(server.Engine)
 	taskHdl.PrivateRoutes(server.Engine)
+	ticketHdl.PrivateRoutes(server.Engine)
 
 	// 异步启动 EIAM 资产注册控制器
 	go func() {

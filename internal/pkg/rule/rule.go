@@ -4,7 +4,6 @@ import (
 	"github.com/mitchellh/mapstructure"
 )
 
-// Rule 单个表单渲染与校验控件规格模型
 type Rule struct {
 	Type     string                 `json:"type"`
 	Field    string                 `json:"field"`
@@ -14,13 +13,14 @@ type Rule struct {
 	Options  []Options              `json:"options"`
 }
 
-// Options 下拉单选等辅助选项值
 type Options struct {
 	Label string      `json:"label"`
 	Value interface{} `json:"value"`
 }
 
-// FlattenRules 将多级嵌套的树状表单控件结构扁平化为一维切片 (递归处理)
+type Rules []Rule
+
+// FlattenRules 扁平化处理函数，排除 type 为 "col" 和 "fcRow" 的规则本身，但保留它们的子规则
 func FlattenRules(rules []Rule) []Rule {
 	var flattened []Rule
 	flatten(rules, &flattened)
@@ -50,7 +50,7 @@ func flatten(rules []Rule, res *[]Rule) {
 	}
 }
 
-// ParseRules 反序列化接口类型的 rules 并扁平化解析输出 Rule 数据集
+// ParseRules 解析模版字段
 func ParseRules(ruleData interface{}) ([]Rule, error) {
 	var rules []Rule
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
@@ -66,4 +66,14 @@ func ParseRules(ruleData interface{}) ([]Rule, error) {
 	}
 
 	return FlattenRules(rules), nil
+}
+
+const (
+	SystemProvide = 1
+	WechatProvide = 2
+)
+
+type Data struct {
+	Provide  uint8
+	OderData map[string]interface{}
 }

@@ -10,8 +10,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// IRunner 执行器（Runner）服务接口
-type IRunner interface {
+// Service 执行器（Runner）服务接口
+type Service interface {
 	// Create 注册一个新的执行器节点
 	Create(ctx context.Context, req domain.Runner) (int64, error)
 	// Update 更新现有执行器的属性与配置信息
@@ -41,7 +41,7 @@ type runnerService struct {
 }
 
 // NewRunnerService 初始化执行器服务实例
-func NewRunnerService(repo repository.IRunnerRepository) IRunner {
+func NewRunnerService(repo repository.IRunnerRepository) Service {
 	return &runnerService{
 		repo: repo,
 	}

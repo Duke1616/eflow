@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	easyflow2 "github.com/Duke1616/eflow/internal/pkg/easyflow"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
-	"github.com/Duke1616/eflow/pkg/easyflow"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/ginx"
@@ -17,12 +17,12 @@ import (
 // Handler 整合工作流定义设计与流转地图的 Web 控制层路由器
 type Handler struct {
 	capability.IRegistry
-	svc       workflowSvc.IWorkflow
-	engineSvc engineSvc.IEngine
+	svc       workflowSvc.Service
+	engineSvc engineSvc.Service
 }
 
 // NewHandler 初始化工作流 Web 控制器并接入 EIAM 统一安全权限防护
-func NewHandler(svc workflowSvc.IWorkflow, engineSvc engineSvc.IEngine) *Handler {
+func NewHandler(svc workflowSvc.Service, engineSvc engineSvc.Service) *Handler {
 	return &Handler{
 		svc:       svc,
 		engineSvc: engineSvc,
@@ -205,12 +205,12 @@ func (h *Handler) FindOrderGraph(ctx *ginx.Context, req OrderGraphReq) (ginx.Res
 
 	// 6. 将原始 LogicFlow 中的 Edges 序列化，使用 easyflow 画布算法根据轨迹状态点亮目标连线
 	edgesJSON, _ := json.Marshal(flow.FlowData.Edges)
-	var edges []easyflow.Edge
+	var edges []easyflow2.Edge
 	if err = json.Unmarshal(edgesJSON, &edges); err != nil {
 		return SystemErrorResult, err
 	}
 
-	edges = easyflow.UpdateEdgeProperties(edges, edgeMap, nodeStatusMap)
+	edges = easyflow2.UpdateEdgeProperties(edges, edgeMap, nodeStatusMap)
 
 	// 7. 将更新好点亮轨迹属性后的 Edges 重新解包转换回前端渲染所需的 domain.FlowEdge 结构并呈递
 	var newEdges []domain.FlowEdge

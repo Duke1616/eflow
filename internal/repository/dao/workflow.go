@@ -29,7 +29,7 @@ type Workflow struct {
 
 // TableName 指定物理表名
 func (Workflow) TableName() string {
-	return "c_workflow"
+	return "workflow"
 }
 
 // LogicFlow 前端流程设计器对应的 JSON 表达结构
@@ -52,7 +52,7 @@ type NotifyBinding struct {
 
 // TableName 指定物理表名
 func (NotifyBinding) TableName() string {
-	return "c_workflow_notify_binding"
+	return "workflow_notify_binding"
 }
 
 // Snapshot 流程定义发布版本画布快照物理实体
@@ -279,4 +279,3 @@ func (g *gormWorkflowDAO) FindSnapshotByProcess(ctx context.Context, processID, 
 		First(&s).Error
 	return s, err
 }
-

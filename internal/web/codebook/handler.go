@@ -14,10 +14,10 @@ import (
 
 type Handler struct {
 	capability.IRegistry
-	svc codebookSvc.Codebook
+	svc codebookSvc.Service
 }
 
-func NewHandler(svc codebookSvc.Codebook) *Handler {
+func NewHandler(svc codebookSvc.Service) *Handler {
 	return &Handler{
 		svc:       svc,
 		IRegistry: capability.NewRegistry("ticket", "codebook", "模板管理"),

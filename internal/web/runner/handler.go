@@ -14,10 +14,10 @@ import (
 
 type Handler struct {
 	capability.IRegistry
-	svc runnerSvc.IRunner
+	svc runnerSvc.Service
 }
 
-func NewHandler(svc runnerSvc.IRunner) *Handler {
+func NewHandler(svc runnerSvc.Service) *Handler {
 	return &Handler{
 		svc:       svc,
 		IRegistry: capability.NewRegistry("ticket", "runner", "执行器管理"),

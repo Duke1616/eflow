@@ -8,10 +8,10 @@ import (
 )
 
 // InitApp 初始化完整应用
-func InitApp() *App {
+func InitApp() (*App, error) {
 	wire.Build(
 		WebSet,
 		wire.Struct(new(App), "*"),
 	)
-	return new(App)
+	return nil, nil
 }

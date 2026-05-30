@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type Codebook interface {
+type Service interface {
 	// Create 创建一条全新的脚本模板业务数据
 	Create(ctx context.Context, req domain.Codebook) (int64, error)
 	// GetByID 根据 ID 查询详细 of 脚本模板数据
@@ -34,7 +34,7 @@ type service struct {
 	repo repository.CodebookRepository
 }
 
-func NewService(repo repository.CodebookRepository) Codebook {
+func NewService(repo repository.CodebookRepository) Service {
 	return &service{
 		repo: repo,
 	}
