@@ -7,12 +7,11 @@ import (
 	"github.com/spf13/viper"
 )
 
-const defaultConfigFile = "cmd/migrate/migrate.yaml"
-
 // Config 是迁移命令的完整运行配置。
 type Config struct {
 	MongoDSN           string
 	MongoDBName        string
+	MySQLSrcDSN        string
 	MySQLDstDSN        string
 	BatchSize          int
 	Timeout            time.Duration
@@ -23,26 +22,21 @@ type Config struct {
 	ConfigFile         string
 }
 
-// Load 从专用迁移配置文件读取配置，并补齐安全默认值。
+// Load 从全局 viper（已由 root 命令初始化）读取迁移配置。
+// 目标端 MySQL 复用应用主库 mysql.dsn，源端从 migration.source 读取。
 func Load() (Config, error) {
-	v := viper.New()
-	v.SetConfigFile(defaultConfigFile)
-	v.SetConfigType("yaml")
-	if err := v.ReadInConfig(); err != nil {
-		return Config{}, fmt.Errorf("读取迁移配置 %s 失败: %w", defaultConfigFile, err)
-	}
-
 	cfg := Config{
-		MongoDSN:           v.GetString("source.mongo.dsn"),
-		MongoDBName:        v.GetString("source.mongo.database"),
-		MySQLDstDSN:        v.GetString("destination.mysql.dsn"),
-		BatchSize:          v.GetInt("migration.batch_size"),
-		Timeout:            v.GetDuration("migration.timeout"),
-		AutoMigrate:        v.GetBool("migration.auto_migrate"),
-		ResetAutoIncrement: v.GetBool("migration.reset_auto_increment"),
-		Truncate:           v.GetBool("migration.truncate"),
-		DryRun:             v.GetBool("migration.dry_run"),
-		ConfigFile:         v.ConfigFileUsed(),
+		MongoDSN:           viper.GetString("migration.source.mongo.dsn"),
+		MongoDBName:        viper.GetString("migration.source.mongo.database"),
+		MySQLSrcDSN:        viper.GetString("migration.source.mysql.dsn"),
+		MySQLDstDSN:        viper.GetString("mysql.dsn"),
+		BatchSize:          viper.GetInt("migration.batch_size"),
+		Timeout:            viper.GetDuration("migration.timeout"),
+		AutoMigrate:        viper.GetBool("migration.auto_migrate"),
+		ResetAutoIncrement: viper.GetBool("migration.reset_auto_increment"),
+		Truncate:           viper.GetBool("migration.truncate"),
+		DryRun:             viper.GetBool("migration.dry_run"),
+		ConfigFile:         viper.ConfigFileUsed(),
 	}
 
 	if cfg.BatchSize == 0 {
@@ -62,13 +56,16 @@ func (cfg Config) validate() error {
 		return fmt.Errorf("migration.timeout 必须大于 0")
 	}
 	if cfg.MongoDSN == "" {
-		return fmt.Errorf("source.mongo.dsn 不能为空")
+		return fmt.Errorf("migration.source.mongo.dsn 不能为空")
 	}
 	if cfg.MongoDBName == "" {
-		return fmt.Errorf("source.mongo.database 不能为空")
+		return fmt.Errorf("migration.source.mongo.database 不能为空")
+	}
+	if cfg.MySQLSrcDSN == "" {
+		return fmt.Errorf("migration.source.mysql.dsn 不能为空")
 	}
 	if cfg.MySQLDstDSN == "" {
-		return fmt.Errorf("destination.mysql.dsn 不能为空")
+		return fmt.Errorf("mysql.dsn 不能为空")
 	}
 	return nil
 }

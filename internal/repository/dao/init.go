@@ -12,6 +12,7 @@ func InitTables(db *gorm.DB) error {
 		&TemplateFavorite{},
 		&Workflow{},
 		&NotifyBinding{},
+		&Snapshot{},
 		&Ticket{},
 		&TaskForm{},
 		&Runner{},

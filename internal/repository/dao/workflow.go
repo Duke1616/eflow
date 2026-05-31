@@ -69,7 +69,7 @@ type Snapshot struct {
 
 // TableName 指定物理表名
 func (Snapshot) TableName() string {
-	return "c_workflow_snapshot"
+	return "workflow_snapshot"
 }
 
 // IWorkflowCoreDAO 工作流核心物理数据访问接口

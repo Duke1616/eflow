@@ -1,4 +1,4 @@
-package main
+package migrate
 
 import (
 	"context"
@@ -8,9 +8,28 @@ import (
 	"github.com/Duke1616/eflow/cmd/migrate/internal/config"
 	"github.com/Duke1616/eflow/cmd/migrate/internal/migration"
 	"github.com/Duke1616/eflow/cmd/migrate/internal/migrations"
+	"github.com/spf13/cobra"
 )
 
-func main() {
+// NewCommand 返回 migrate 子命令。
+func NewCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "执行数据迁移",
+		Run: func(cmd *cobra.Command, args []string) {
+			runMigrate()
+		},
+	}
+
+	return cmd
+}
+
+func init() {
+	log.SetOutput(os.Stdout)
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+}
+
+func runMigrate() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal(err)
@@ -25,9 +44,4 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Println("迁移完成")
-}
-
-func init() {
-	log.SetOutput(os.Stdout)
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 }

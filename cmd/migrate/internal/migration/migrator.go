@@ -8,11 +8,13 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // MigrationEnv 保存单次迁移执行期间共享的数据源连接。
 type MigrationEnv struct {
 	MongoDB   *mongo.Database
+	MySQLSrc  *gorm.DB
 	MySQLDst  *gorm.DB
 	BatchSize int
 	DryRun    bool
@@ -99,6 +101,67 @@ func (m *mongoMigrator[M, D]) Migrate(ctx context.Context, env MigrationEnv) (Re
 	return result, nil
 }
 
+// MySQLMigration 定义 MySQL 源到 MySQL 目标的表级 1:1 迁移规格。
+type MySQLMigration[T any] interface {
+	Name() string
+	Source() any
+	Destination() any
+}
+
+type mysqlMigrator[T any] struct {
+	migration MySQLMigration[T]
+}
+
+// NewMySQLMigrator 使用具体迁移规格创建 MySQL 源迁移器。
+func NewMySQLMigrator[T any](migration MySQLMigration[T]) Migrator {
+	return &mysqlMigrator[T]{
+		migration: migration,
+	}
+}
+
+func (m *mysqlMigrator[T]) Name() string {
+	return m.migration.Name()
+}
+
+func (m *mysqlMigrator[T]) Destination() any {
+	return m.migration.Destination()
+}
+
+func (m *mysqlMigrator[T]) Migrate(ctx context.Context, env MigrationEnv) (Result, error) {
+	var result Result
+	var offset int
+	for {
+		batch := make([]T, 0, env.BatchSize)
+		if err := env.MySQLSrc.WithContext(ctx).
+			Model(m.migration.Source()).
+			Order("id asc").
+			Offset(offset).
+			Limit(env.BatchSize).
+			Find(&batch).Error; err != nil {
+			return result, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		result.Read += int64(len(batch))
+		written, err := writeBatch(ctx, env, batch)
+		if err != nil {
+			return result, err
+		}
+		result.Converted += int64(len(batch))
+		result.Written += written
+		offset += len(batch)
+	}
+	if result.Read == 0 {
+		table, err := tableName(env.MySQLSrc, m.migration.Source())
+		if err != nil {
+			return result, err
+		}
+		log.Printf("[%s] 源表 %s 为空", m.Name(), table)
+	}
+	return result, nil
+}
+
 func writeBatch[D any](ctx context.Context, env MigrationEnv, records []D) (int64, error) {
 	if len(records) == 0 {
 		return 0, nil
@@ -106,7 +169,10 @@ func writeBatch[D any](ctx context.Context, env MigrationEnv, records []D) (int6
 	if env.DryRun {
 		return 0, nil
 	}
-	if err := env.MySQLDst.WithContext(ctx).CreateInBatches(records, env.BatchSize).Error; err != nil {
+	err := env.MySQLDst.WithContext(ctx).
+		Clauses(clause.OnConflict{UpdateAll: true}).
+		CreateInBatches(records, env.BatchSize).Error
+	if err != nil {
 		return 0, err
 	}
 	return int64(len(records)), nil

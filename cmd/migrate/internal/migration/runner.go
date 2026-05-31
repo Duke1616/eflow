@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
+	"time"
 
+	easyEngine "github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Duke1616/eflow/cmd/migrate/internal/config"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -13,6 +16,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
 )
 
@@ -45,6 +49,15 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("探测源端 MongoDB 失败: %w", err)
 	}
 
+	mysqlSRC, err := openMySQL(r.cfg.MySQLSrcDSN)
+	if err != nil {
+		return fmt.Errorf("连接源端 MySQL 失败: %w", err)
+	}
+	if err = pingMySQL(ctx, mysqlSRC); err != nil {
+		return fmt.Errorf("探测源端 MySQL 失败: %w", err)
+	}
+	defer closeMySQL("源端 MySQL", mysqlSRC)
+
 	mysqlDST, err := openMySQL(r.cfg.MySQLDstDSN)
 	if err != nil {
 		return fmt.Errorf("连接目标端 MySQL 失败: %w", err)
@@ -56,6 +69,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	env := MigrationEnv{
 		MongoDB:   mongoClient.Database(r.cfg.MongoDBName),
+		MySQLSrc:  mysqlSRC,
 		MySQLDst:  mysqlDST,
 		BatchSize: r.cfg.BatchSize,
 		DryRun:    r.cfg.DryRun,
@@ -63,7 +77,14 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	if r.cfg.AutoMigrate && !r.cfg.DryRun {
 		log.Println("正在初始化目标端表结构")
+		// 工单任务
 		if err = dao.InitTables(mysqlDST); err != nil {
+			return fmt.Errorf("初始化目标端表结构失败: %w", err)
+		}
+
+		// 流程引擎
+		easyEngine.DB = mysqlDST
+		if err = easyEngine.DatabaseInitialize(); err != nil {
 			return fmt.Errorf("初始化目标端表结构失败: %w", err)
 		}
 	}
@@ -93,8 +114,18 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 func openMySQL(dsn string) (*gorm.DB, error) {
+	newLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             3 * time.Second,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  true,
+		},
+	)
 	return gorm.Open(mysql.Open(dsn), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{SingularTable: true},
+		Logger:         newLogger,
 	})
 }
 

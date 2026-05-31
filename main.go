@@ -1,22 +1,18 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 
-	"github.com/Bunny3th/easy-workflow/workflow/engine"
-	"github.com/Duke1616/eflow/ioc"
+	"github.com/Duke1616/eflow/cmd/migrate"
+	"github.com/Duke1616/eflow/cmd/server"
 	"github.com/fsnotify/fsnotify"
-	"github.com/gotomicro/ego"
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-var (
-	cfgFile string
-)
+var cfgFile string
 
 func main() {
 	rootCmd := &cobra.Command{
@@ -30,36 +26,11 @@ func main() {
 
 	cobra.OnInitialize(initViper)
 
-	serverCmd := &cobra.Command{
-		Use:   "server",
-		Short: "启动服务节点",
-		Run: func(cmd *cobra.Command, args []string) {
-			startServer()
-		},
-	}
-
-	rootCmd.AddCommand(serverCmd)
+	rootCmd.AddCommand(server.NewCommand())
+	rootCmd.AddCommand(migrate.NewCommand())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
-	}
-}
-
-func startServer() {
-	app, err := ioc.InitApp()
-	if err != nil {
-		elog.Panic("init_app_failed", elog.FieldErr(err))
-	}
-
-	// 注册流程引擎驱动事件
-	engine.RegisterEvents(app.Event)
-
-	// 启动后台任务
-	ctx := context.Background()
-	app.StartBackgroundTasks(ctx)
-
-	if err = ego.New().Serve(app.GetServers()...).Run(); err != nil {
-		elog.Panic("app_run_error", elog.FieldErr(err))
 	}
 }
 
