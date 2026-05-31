@@ -7,17 +7,16 @@ import (
 
 	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
-	userv1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/user/v1"
+	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	easyflow2 "github.com/Duke1616/eflow/internal/pkg/easyflow"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
+	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/ginx"
-	"github.com/ecodeclub/ginx/gctx"
-	"github.com/ecodeclub/ginx/session"
 	"github.com/gin-gonic/gin"
 )
 
@@ -47,7 +46,7 @@ func (h *Handler) PublicRoutes(server *gin.Engine) {
 
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/ticket")
-	g.POST("/create", h.Capability("创建工单", "create").
+	g.POST("/create", h.Capability("创建工单", "add").
 		Handle(ginx.B[CreateTicketReq](h.CreateTicket)),
 	)
 	g.POST("/detail/process_inst_id", h.Capability("查询工单详情", "detail").
@@ -59,13 +58,13 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g.POST("/todo", h.Capability("查询所有待办工单", "todo").
 		Handle(ginx.B[Todo](h.TodoAll)),
 	)
-	g.POST("/todo/user", h.Capability("查询我的待办工单", "todo").
+	g.POST("/todo/user", h.Capability("查询我的待办工单", "my_todo").
 		Handle(ginx.B[Todo](h.TodoByUser)),
 	)
 	g.POST("/history", h.Capability("查询历史工单", "history").
 		Handle(ginx.B[HistoryReq](h.History)),
 	)
-	g.POST("/start/user", h.Capability("查询我发起的工单", "myStart").
+	g.POST("/start/user", h.Capability("查询我发起的工单", "my_start").
 		Handle(ginx.B[StartUserReq](h.StartUser)),
 	)
 	g.POST("/pass", h.Capability("同意工单审批", "pass").
@@ -80,8 +79,11 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g.POST("/revoke", h.Capability("撤销工单", "revoke").
 		Handle(ginx.B[RevokeOrderReq](h.Revoke)),
 	)
-	g.POST("/task/form_config", h.Capability("获取任务节点表单配置", "formConfig").
+	g.POST("/task/form_config", h.Capability("获取任务节点表单配置", "form_config").
 		Handle(ginx.B[TaskFormConfigReq](h.GetTaskFormConfig)),
+	)
+	g.POST("/upstream/:task_id", h.Capability("查询上游处理节点", "upstream").
+		Handle(ginx.W(h.Upstream)),
 	)
 }
 
@@ -526,13 +528,12 @@ func (h *Handler) getUsers(ctx context.Context, instances []domain.Instance) (ma
 }
 
 func (h *Handler) getSessUsername(ctx *ginx.Context) (string, error) {
-	sess, err := session.Get(&gctx.Context{Context: ctx.Context})
-	if err != nil {
-		return "", fmt.Errorf("获取 Session 失败: %w", err)
+	uid := ctxutil.GetUserID(ctx).Int64()
+	if uid == 0 {
+		return "", fmt.Errorf("获取 UserID 失败: %d", uid)
 	}
-
-	resp, err := h.userSvc.FindByIds(ctx.Context, &userv1.FindByIdsReq{
-		Ids: []int64{sess.Claims().Uid},
+	resp, err := h.userSvc.QueryByIds(ctx.Context, &userv1.QueryByIdsReq{
+		Ids: []int64{uid},
 	})
 	if err != nil || len(resp.Users) == 0 {
 		return "", fmt.Errorf("查询 gRPC 用户信息失败: %w", err)
@@ -542,13 +543,13 @@ func (h *Handler) getSessUsername(ctx *ginx.Context) (string, error) {
 }
 
 func (h *Handler) verifyUser(ctx *ginx.Context, taskId int) error {
-	sess, err := session.Get(&gctx.Context{Context: ctx.Context})
-	if err != nil {
-		return err
+	uid := ctxutil.GetUserID(ctx).Int64()
+	if uid == 0 {
+		return fmt.Errorf("获取 UserID 失败: %d", uid)
 	}
 
-	resp, err := h.userSvc.FindByIds(ctx.Context, &userv1.FindByIdsReq{
-		Ids: []int64{sess.Claims().Uid},
+	resp, err := h.userSvc.QueryByIds(ctx.Context, &userv1.QueryByIdsReq{
+		Ids: []int64{uid},
 	})
 	if err != nil || len(resp.Users) == 0 {
 		return fmt.Errorf("获取用户信息失败")
@@ -572,7 +573,7 @@ func (h *Handler) getUserMap(ctx context.Context, uns []string) (map[string]stri
 	if len(uns) == 0 {
 		return make(map[string]string), nil
 	}
-	resp, err := h.userSvc.FindByUsernames(ctx, &userv1.FindByUsernamesReq{
+	resp, err := h.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
 		Usernames: uns,
 	})
 	if err != nil {
@@ -582,4 +583,19 @@ func (h *Handler) getUserMap(ctx context.Context, uns []string) (map[string]stri
 	return slice.ToMapV(resp.Users, func(element *userv1.User) (string, string) {
 		return element.Username, element.DisplayName
 	}), nil
+}
+
+// Upstream 查询指定任务节点的上游处理节点及历史流转进度
+func (h *Handler) Upstream(ctx *ginx.Context) (ginx.Result, error) {
+	taskID, err := ctx.Param("task_id").AsInt()
+	if err != nil {
+		return systemErrorResult, err
+	}
+
+	upstream, err := h.engineSvc.Upstream(ctx.Context, taskID)
+	if err != nil {
+		return ginx.Result{}, err
+	}
+
+	return ginx.Result{Data: upstream}, nil
 }

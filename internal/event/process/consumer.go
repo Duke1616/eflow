@@ -67,9 +67,14 @@ func (c *ProcessEventConsumer) Consume(ctx context.Context) error {
 		return fmt.Errorf("查询流程信息失败: %w", err)
 	}
 
-	_, err = engine.InstanceStart(flow.ProcessId, "业务申请", flow.Name, evt.Variables)
+	instanceId, err := engine.InstanceStart(flow.ProcessId, "业务申请", flow.Name, evt.Variables)
 	if err != nil {
 		return fmt.Errorf("启动流程引擎失败: %w", err)
+	}
+
+	// 将生成的流程引擎实例 ID 回写反登记到对应工单上，激活流程实例绑定关系
+	if err = c.ticketSvc.BindProcessInstanceID(ctx, evt.Id, instanceId); err != nil {
+		return fmt.Errorf("绑定工单流程引擎实例ID失败: %w", err)
 	}
 
 	return nil

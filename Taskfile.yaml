@@ -13,6 +13,7 @@ tasks:
     desc: 代码生成（Wire 依赖注入）
     cmds:
       - wire ./ioc/
+      - buf generate api/proto
 
   mock:
     desc: 生成 Mock 代码

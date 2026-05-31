@@ -47,13 +47,12 @@ type TaskArgs map[string]interface{}
 // 纯净领域对象，去除了表现层所有的 JSON struct tags
 type Task struct {
 	Id              int64       // 自动化作业唯一 ID
-	OrderId         int64       // 关联工单单据 ID
+	TicketID        int64       // 关联工单单据 ID
 	ProcessInstId   int         // 关联工作流流程实例 ID
 	CurrentNodeId   string      // 当前流程自动化节点 ID
 	TriggerPosition string      // 最近一次状态变更或异常触发位置
 	WorkflowId      int64       // 关联工作流定义 ID
 	CodebookUid     string      // 关联的脚本库唯一 UID
-	CodebookName    string      // 关联脚本库名称快照
 	Code            string      // 待运行的自动化脚本源码快照
 	Language        string      // 脚本编写语言 (python, shell 等)
 	Args            TaskArgs    // 流程变量额外透传的临时入参属性字典

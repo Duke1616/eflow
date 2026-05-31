@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	userv1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/user/v1"
+	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 )
 
 // UserService 定义统一的业务用户查询接口，整合本系统与三方推送身份映射
@@ -26,7 +26,7 @@ func NewUserServiceAdapter(client userv1.UserServiceClient) UserService {
 
 // FindByUsername 通过用户名查用户信息 (由 gRPC FindByUsernames 支撑实现)
 func (a *userServiceAdapter) FindByUsername(ctx context.Context, username string) (*userv1.User, error) {
-	resp, err := a.client.FindByUsernames(ctx, &userv1.FindByUsernamesReq{
+	resp, err := a.client.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
 		Usernames: []string{username},
 	})
 	if err != nil {
@@ -40,7 +40,7 @@ func (a *userServiceAdapter) FindByUsername(ctx context.Context, username string
 
 // FindByUsernames 批量通过用户名查询用户信息 (由 gRPC FindByUsernames 支撑实现)
 func (a *userServiceAdapter) FindByUsernames(ctx context.Context, usernames []string) ([]*userv1.User, error) {
-	resp, err := a.client.FindByUsernames(ctx, &userv1.FindByUsernamesReq{
+	resp, err := a.client.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
 		Usernames: usernames,
 	})
 	if err != nil {

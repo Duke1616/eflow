@@ -15,17 +15,16 @@ type ListTaskReq struct {
 	Page
 }
 
-type ListTaskByInstanceIdReq struct {
-	InstanceId int `json:"instance_id"`
+type ListTaskByInstanceIDReq struct {
+	InstanceID int `json:"instance_id"`
 	Page
 }
 
 type Task struct {
 	Id              int64  `json:"id"`
-	OrderId         int64  `json:"order_id"`
+	TicketID        int64  `json:"ticket_id"`
 	Kind            string `json:"kind"`
 	CodebookUid     string `json:"codebook_uid"`
-	CodebookName    string `json:"codebook_name"`
 	Target          string `json:"target"`
 	Handler         string `json:"handler"`
 	Status          Status `json:"status"`

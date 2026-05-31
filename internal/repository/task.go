@@ -13,28 +13,50 @@ import (
 
 var ErrTaskNotFound = gorm.ErrRecordNotFound
 
+// TaskRepository 自动化作业任务的数据仓储接口
 type TaskRepository interface {
+	// CreateTask 在仓储物理层持久化创建一个新的作业任务
 	CreateTask(ctx context.Context, req domain.Task) (domain.Task, error)
-	FindByProcessInstId(ctx context.Context, processInstId int, nodeId string) (domain.Task, error)
+	// FindByProcessInstID 根据工作流实例 ID 与对应的当前节点 ID 查找特定的任务记录
+	FindByProcessInstID(ctx context.Context, processInstID int, nodeID string) (domain.Task, error)
+	// FindOrCreate 尝试根据实例 ID 和节点 ID 查询作业任务，若不存在则调用 CreateTask 进行逻辑兜底创建
 	FindOrCreate(ctx context.Context, req domain.Task) (domain.Task, error)
-	FindById(ctx context.Context, id int64) (domain.Task, error)
+	// FindByID 精确查找指定作业任务自增主键的持久化数据
+	FindByID(ctx context.Context, id int64) (domain.Task, error)
+	// UpdateTask 更新已存在任务的全部非空物理字段及属性
 	UpdateTask(ctx context.Context, req domain.Task) (int64, error)
+	// UpdateTaskStatus 更新特定任务的执行状态及触发位置信息
 	UpdateTaskStatus(ctx context.Context, req domain.TaskResult) (int64, error)
+	// UpdateVariables 设置并批量覆写任务绑定的参数环境变量快照
 	UpdateVariables(ctx context.Context, id int64, variables []domain.Variables) (int64, error)
+	// ListTask 分页抓取全量作业任务列表
 	ListTask(ctx context.Context, offset, limit int64) ([]domain.Task, error)
+	// ListTaskByStatus 根据状态分页过滤拉取任务
 	ListTaskByStatus(ctx context.Context, offset, limit int64, status uint8) ([]domain.Task, error)
+	// ListTaskByStatusAndKind 根据执行协议类型（如 GRPC/KAFKA）与当前状态联合筛选分页列表
 	ListTaskByStatusAndKind(ctx context.Context, offset, limit int64, status uint8, kind string) ([]domain.Task, error)
+	// Total 根据状态统计底层满足条件的数据总数
 	Total(ctx context.Context, status uint8) (int64, error)
+	// TotalByStatusAndKind 根据类型与状态联合统计总数
 	TotalByStatusAndKind(ctx context.Context, status uint8, kind string) (int64, error)
+	// UpdateArgs 单独更新任务下发时透传的自定义参数快照
 	UpdateArgs(ctx context.Context, id int64, args map[string]interface{}) (int64, error)
+	// ListSuccessTasksByUtime 拉取处于特定更新时间之后且状态成功的所有任务，以便自愈轮询层安全执行
 	ListSuccessTasksByUtime(ctx context.Context, offset, limit int64, utime int64) ([]domain.Task, error)
+	// TotalByUtime 统计在特定时间戳之后状态成功的任务总行数
 	TotalByUtime(ctx context.Context, utime int64) (int64, error)
-	FindTaskResult(ctx context.Context, instanceId int, nodeId string) (domain.Task, error)
+	// FindTaskByNodeID 查询指定流程实例与节点的持久化最终作业结果
+	FindTaskByNodeID(ctx context.Context, instanceID int, nodeID string) (domain.Task, error)
+	// ListReadyTasks 获取已达计划执行时间且状态属于待触发的就绪任务列表
 	ListReadyTasks(ctx context.Context, limit int64) ([]domain.Task, error)
-	ListTaskByInstanceId(ctx context.Context, offset, limit int64, instanceId int) ([]domain.Task, error)
-	TotalByInstanceId(ctx context.Context, instanceId int) (int64, error)
+	// ListTaskByInstanceID 分页过滤提取指定流程实例下的全部子任务列表
+	ListTaskByInstanceID(ctx context.Context, offset, limit int64, instanceID int) ([]domain.Task, error)
+	// TotalByInstanceID 统计特定实例下属的子任务记录总量
+	TotalByInstanceID(ctx context.Context, instanceID int) (int64, error)
+	// MarkTaskAsAutoPassed 将已成功处理过的作业任务标记为已自动通过状态，防止流程重复流转
 	MarkTaskAsAutoPassed(ctx context.Context, id int64) error
-	UpdateExternalId(ctx context.Context, id int64, externalId string) error
+	// UpdateExternalID 绑定持久层与三方分布式引擎（如任务调度平台）的外部作业实例映射
+	UpdateExternalID(ctx context.Context, id int64, externalID string) error
 }
 
 type taskRepository struct {
@@ -53,13 +75,13 @@ func (repo *taskRepository) CreateTask(ctx context.Context, req domain.Task) (do
 	return repo.toDomain(t), nil
 }
 
-func (repo *taskRepository) FindByProcessInstId(ctx context.Context, processInstId int, nodeId string) (domain.Task, error) {
-	task, err := repo.dao.FindByProcessInstId(ctx, processInstId, nodeId)
+func (repo *taskRepository) FindByProcessInstID(ctx context.Context, processInstID int, nodeID string) (domain.Task, error) {
+	task, err := repo.dao.FindByProcessInstID(ctx, processInstID, nodeID)
 	return repo.toDomain(task), err
 }
 
 func (repo *taskRepository) FindOrCreate(ctx context.Context, req domain.Task) (domain.Task, error) {
-	task, err := repo.dao.FindByProcessInstId(ctx, req.ProcessInstId, req.CurrentNodeId)
+	task, err := repo.dao.FindByProcessInstID(ctx, req.ProcessInstId, req.CurrentNodeId)
 	if err == nil {
 		return repo.toDomain(task), nil
 	}
@@ -69,8 +91,8 @@ func (repo *taskRepository) FindOrCreate(ctx context.Context, req domain.Task) (
 	return repo.CreateTask(ctx, req)
 }
 
-func (repo *taskRepository) FindById(ctx context.Context, id int64) (domain.Task, error) {
-	task, err := repo.dao.FindById(ctx, id)
+func (repo *taskRepository) FindByID(ctx context.Context, id int64) (domain.Task, error) {
+	task, err := repo.dao.FindByID(ctx, id)
 	return repo.toDomain(task), err
 }
 
@@ -124,8 +146,8 @@ func (repo *taskRepository) TotalByUtime(ctx context.Context, utime int64) (int6
 	return repo.dao.TotalByUtime(ctx, utime)
 }
 
-func (repo *taskRepository) FindTaskResult(ctx context.Context, instanceId int, nodeId string) (domain.Task, error) {
-	task, err := repo.dao.FindTaskResult(ctx, instanceId, nodeId)
+func (repo *taskRepository) FindTaskByNodeID(ctx context.Context, instanceID int, nodeID string) (domain.Task, error) {
+	task, err := repo.dao.FindTaskByNodeID(ctx, instanceID, nodeID)
 	return repo.toDomain(task), err
 }
 
@@ -134,21 +156,21 @@ func (repo *taskRepository) ListReadyTasks(ctx context.Context, limit int64) ([]
 	return slice.Map(ts, func(idx int, src dao.Task) domain.Task { return repo.toDomain(src) }), err
 }
 
-func (repo *taskRepository) ListTaskByInstanceId(ctx context.Context, offset, limit int64, instanceId int) ([]domain.Task, error) {
-	ts, err := repo.dao.ListTaskByInstanceId(ctx, offset, limit, instanceId)
+func (repo *taskRepository) ListTaskByInstanceID(ctx context.Context, offset, limit int64, instanceID int) ([]domain.Task, error) {
+	ts, err := repo.dao.ListTaskByInstanceID(ctx, offset, limit, instanceID)
 	return slice.Map(ts, func(idx int, src dao.Task) domain.Task { return repo.toDomain(src) }), err
 }
 
-func (repo *taskRepository) TotalByInstanceId(ctx context.Context, instanceId int) (int64, error) {
-	return repo.dao.TotalByInstanceId(ctx, instanceId)
+func (repo *taskRepository) TotalByInstanceID(ctx context.Context, instanceID int) (int64, error) {
+	return repo.dao.TotalByInstanceID(ctx, instanceID)
 }
 
 func (repo *taskRepository) MarkTaskAsAutoPassed(ctx context.Context, id int64) error {
 	return repo.dao.MarkTaskAsAutoPassed(ctx, id)
 }
 
-func (repo *taskRepository) UpdateExternalId(ctx context.Context, id int64, externalId string) error {
-	return repo.dao.UpdateExternalId(ctx, id, externalId)
+func (repo *taskRepository) UpdateExternalID(ctx context.Context, id int64, externalID string) error {
+	return repo.dao.UpdateExternalID(ctx, id, externalID)
 }
 
 func (repo *taskRepository) toUpdateEntity(req domain.TaskResult) dao.Task {
@@ -167,20 +189,17 @@ func (repo *taskRepository) toUpdateEntity(req domain.TaskResult) dao.Task {
 func (repo *taskRepository) toEntity(req domain.Task) dao.Task {
 	return dao.Task{
 		Id:              req.Id,
-		OrderId:         req.OrderId,
+		TicketID:        req.TicketID,
 		ProcessInstId:   req.ProcessInstId,
 		CurrentNodeId:   req.CurrentNodeId,
 		TriggerPosition: req.TriggerPosition,
 		WorkflowId:      req.WorkflowId,
 		CodebookUid:     req.CodebookUid,
-		CodebookName:    req.CodebookName,
 		Code:            req.Code,
 		Language:        req.Language,
 		Args:            sqlx.JsonField[domain.TaskArgs]{Val: req.Args, Valid: true},
-		Variables: sqlx.JsonField[[]dao.Variables]{
-			Val: slice.Map(req.Variables, func(idx int, src domain.Variables) dao.Variables {
-				return dao.Variables{Key: src.Key, Value: src.Value, Secret: src.Secret}
-			}),
+		Variables: sqlx.JsonField[[]domain.Variables]{
+			Val:   req.Variables,
 			Valid: true,
 		},
 		Status:        req.Status.ToUint8(),
@@ -201,33 +220,30 @@ func (repo *taskRepository) toEntity(req domain.Task) dao.Task {
 func (repo *taskRepository) toDomain(req dao.Task) domain.Task {
 	t := domain.Task{
 		Id:              req.Id,
-		OrderId:         req.OrderId,
+		TicketID:        req.TicketID,
 		ProcessInstId:   req.ProcessInstId,
 		CurrentNodeId:   req.CurrentNodeId,
 		TriggerPosition: req.TriggerPosition,
 		WorkflowId:      req.WorkflowId,
 		CodebookUid:     req.CodebookUid,
-		CodebookName:    req.CodebookName,
 		Code:            req.Code,
 		Language:        req.Language,
 		Args:            req.Args.Val,
-		Variables: slice.Map(req.Variables.Val, func(idx int, src dao.Variables) domain.Variables {
-			return domain.Variables{Key: src.Key, Value: src.Value, Secret: src.Secret}
-		}),
-		Status:        domain.TaskStatus(req.Status),
-		Result:        req.Result,
-		WantResult:    req.WantResult,
-		ExternalId:    req.ExternalId,
-		StartTime:     req.StartTime,
-		EndTime:       req.EndTime,
-		RetryCount:    req.RetryCount,
-		IsTiming:      req.IsTiming,
-		ScheduledTime: req.ScheduledTime,
-		Kind:          domain.Kind(req.Kind),
-		Target:        req.Target,
-		Handler:       req.Handler,
-		Ctime:         req.Ctime,
-		Utime:         req.Utime,
+		Variables:       req.Variables.Val,
+		Status:          domain.TaskStatus(req.Status),
+		Result:          req.Result,
+		WantResult:      req.WantResult,
+		ExternalId:      req.ExternalId,
+		StartTime:       req.StartTime,
+		EndTime:         req.EndTime,
+		RetryCount:      req.RetryCount,
+		IsTiming:        req.IsTiming,
+		ScheduledTime:   req.ScheduledTime,
+		Kind:            domain.Kind(req.Kind),
+		Target:          req.Target,
+		Handler:         req.Handler,
+		Ctime:           req.Ctime,
+		Utime:           req.Utime,
 	}
 	if t.Args == nil {
 		t.Args = domain.TaskArgs{}

@@ -6,8 +6,8 @@ import (
 	executorv1 "github.com/Duke1616/ecmdb/api/proto/gen/etask/executor/v1"
 	processConsumer "github.com/Duke1616/eflow/internal/event/process"
 	taskConsumer "github.com/Duke1616/eflow/internal/event/task"
-	ticketConsumer "github.com/Duke1616/eflow/internal/event/ticket"
 	templateConsumer "github.com/Duke1616/eflow/internal/event/template"
+	ticketConsumer "github.com/Duke1616/eflow/internal/event/ticket"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	serviceTask "github.com/Duke1616/eflow/internal/service/task"
 	"github.com/ecodeclub/mq-api"
@@ -22,7 +22,7 @@ func InitTasks(
 	q mq.MQ,
 	processConsumer *processConsumer.ProcessEventConsumer,
 	wechatConsumer *ticketConsumer.WechatTicketConsumer,
-	larkConsumer *ticketConsumer.LarkCallbackTicketConsumer,
+	larkwsServer *ticketConsumer.LarkCallbackTicketServer,
 	wechatCallbackConsumer *templateConsumer.WechatApprovalCallbackConsumer,
 ) []Task {
 	consumer, err := taskConsumer.NewExecuteResultConsumer(q, taskSvc)
@@ -38,7 +38,7 @@ func InitTasks(
 		serviceTask.NewTaskExecutionSyncJob(taskSvc, executorSvc, 100, 10*time.Second),
 		processConsumer,
 		wechatConsumer,
-		larkConsumer,
+		larkwsServer,
 		wechatCallbackConsumer,
 	}
 }

@@ -26,13 +26,27 @@ func NewHandler(svc taskSvc.Service) *Handler {
 
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/task")
-	g.POST("/list", h.Capability("查询任务列表", "list").Handle(ginx.B[ListTaskReq](h.ListTask)))
-	g.POST("/list/by_instance_id", h.Capability("按流程实例查询任务", "listByInstanceId").Handle(ginx.B[ListTaskByInstanceIdReq](h.ListTaskByInstanceId)))
-	g.POST("/update/args", h.Capability("修改任务参数", "updateArgs").Handle(ginx.B[UpdateArgsReq](h.UpdateArgs)))
-	g.POST("/update/variables", h.Capability("修改任务变量", "updateVariables").Handle(ginx.B[UpdateVariablesReq](h.UpdateVariableReq)))
-	g.POST("/retry", h.Capability("重试任务", "retry").Handle(ginx.B[RetryReq](h.Retry)))
-	g.POST("/success", h.Capability("手动置为成功", "success").Handle(ginx.B[UpdateStatusToSuccessReq](h.UpdateStatusToSuccess)))
-	g.GET("/logs/:task_id", h.Capability("查询任务日志", "logs").Handle(ginx.W(h.Logs)))
+	g.POST("/list", h.Capability("查询任务列表", "view").
+		Handle(ginx.B[ListTaskReq](h.ListTask)),
+	)
+	g.POST("/list/by_instance_id", h.Capability("按流程实例查询任务", "view_by_instance_id").
+		Handle(ginx.B[ListTaskByInstanceIDReq](h.ListTaskByInstanceID)),
+	)
+	g.POST("/update/args", h.Capability("修改任务参数", "update_args").
+		Handle(ginx.B[UpdateArgsReq](h.UpdateArgs)),
+	)
+	g.POST("/update/variables", h.Capability("修改任务变量", "update_variables").
+		Handle(ginx.B[UpdateVariablesReq](h.UpdateVariableReq)),
+	)
+	g.POST("/retry", h.Capability("重试任务", "retry").
+		Handle(ginx.B[RetryReq](h.Retry)),
+	)
+	g.POST("/success", h.Capability("手动置为成功", "success").
+		Handle(ginx.B[UpdateStatusToSuccessReq](h.UpdateStatusToSuccess)),
+	)
+	g.GET("/logs/:task_id", h.Capability("查询任务日志", "logs").
+		Handle(ginx.W(h.Logs)),
+	)
 }
 
 func (h *Handler) ListTask(ctx *ginx.Context, req ListTaskReq) (ginx.Result, error) {
@@ -51,8 +65,8 @@ func (h *Handler) ListTask(ctx *ginx.Context, req ListTaskReq) (ginx.Result, err
 	}, nil
 }
 
-func (h *Handler) ListTaskByInstanceId(ctx *ginx.Context, req ListTaskByInstanceIdReq) (ginx.Result, error) {
-	ws, total, err := h.svc.ListTaskByInstanceId(ctx.Context, req.Offset, req.Limit, req.InstanceId)
+func (h *Handler) ListTaskByInstanceID(ctx *ginx.Context, req ListTaskByInstanceIDReq) (ginx.Result, error) {
+	ws, total, err := h.svc.ListTaskByInstanceID(ctx.Context, req.Offset, req.Limit, req.InstanceID)
 	if err != nil {
 		return systemErrorResult, err
 	}
@@ -84,7 +98,7 @@ func (h *Handler) Logs(ctx *ginx.Context) (ginx.Result, error) {
 	if err != nil {
 		return systemErrorResult, err
 	}
-	tInfo, err := h.svc.Detail(ctx.Context, id)
+	tInfo, err := h.svc.FindTaskByID(ctx.Context, id)
 	if err != nil {
 		return systemErrorResult, err
 	}
@@ -128,12 +142,11 @@ func (h *Handler) toTaskVo(req domain.Task) Task {
 	}
 	return Task{
 		Id:              req.Id,
-		OrderId:         req.OrderId,
+		TicketID:        req.TicketID,
 		Language:        req.Language,
 		Code:            req.Code,
 		Kind:            string(req.Kind),
 		CodebookUid:     req.CodebookUid,
-		CodebookName:    req.CodebookName,
 		Target:          req.Target,
 		Handler:         req.Handler,
 		Status:          Status(req.Status),

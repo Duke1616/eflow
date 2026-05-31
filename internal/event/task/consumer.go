@@ -63,7 +63,7 @@ func (c *ExecuteResultConsumer) Consume(ctx context.Context) error {
 		triggerPosition = domain.TriggerPositionTaskExecutionFailed
 	}
 
-	_, err = c.svc.UpdateTaskResult(ctx, domain.TaskResult{
+	_, err = c.svc.UpdateTaskStatus(ctx, domain.TaskResult{
 		Id:              evt.TaskId,
 		Result:          evt.Result,
 		WantResult:      evt.WantResult,

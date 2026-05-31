@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	userv1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/user/v1"
+	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/pkg/resolve"
@@ -31,7 +31,7 @@ func (r *MainLeaderResolver) Resolve(ctx context.Context, target resolve.Target)
 		return nil, fmt.Errorf("缺少发起人信息")
 	}
 
-	resp, err := r.userSvc.FindByUsernames(ctx, &userv1.FindByUsernamesReq{
+	resp, err := r.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
 		Usernames: []string{target.Values[0]},
 	})
 	if err != nil {
@@ -56,7 +56,7 @@ func (r *MainLeaderResolver) Resolve(ctx context.Context, target resolve.Target)
 		return nil, nil
 	}
 
-	respMain, err := r.userSvc.FindByUsernames(ctx, &userv1.FindByUsernamesReq{
+	respMain, err := r.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
 		Usernames: []string{depart.MainLeader},
 	})
 	if err != nil {

@@ -1,33 +1,24 @@
 package ioc
 
 import (
-	teamv1 "github.com/Duke1616/ecmdb/api/proto/gen/ealert/team"
-	endpointv1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/endpoint/v1"
-	rotav1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/rota/v1"
-	userv1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/user/v1"
-	executorv1 "github.com/Duke1616/ecmdb/api/proto/gen/etask/executor/v1"
-	taskv1 "github.com/Duke1616/ecmdb/api/proto/gen/etask/task/v1"
+	"github.com/Duke1616/eflow/internal/client/ecmdb"
+	"github.com/Duke1616/eflow/internal/client/eiam"
+	grpcpkg "github.com/Duke1616/etask/pkg/grpc"
+	"github.com/Duke1616/etask/pkg/grpc/registry"
 	"github.com/spf13/viper"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // InitECMDBGrpcClient 初始化 ECMDB gRPC 客户端
-func InitECMDBGrpcClient() grpc.ClientConnInterface {
-	type ClientConfig struct {
-		Name      string `mapstructure:"name"`
-		AuthToken string `mapstructure:"auth_token"`
-	}
-
-	var cfg ClientConfig
+func InitECMDBGrpcClient(reg registry.Registry) ecmdb.ECMDBConn {
+	var cfg grpcpkg.ClientConfig
 	if err := viper.UnmarshalKey("grpc.client.ecmdb", &cfg); err != nil {
 		panic(err)
 	}
 
-	// TODO: 接入服务发现后替换为动态解析
-	cc, err := grpc.NewClient(
-		cfg.Name,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	cc, err := grpcpkg.NewClientConn(
+		reg,
+		grpcpkg.WithServiceName(cfg.Name),
+		grpcpkg.WithClientJWTAuth(cfg.AuthToken),
 	)
 	if err != nil {
 		panic(err)
@@ -36,28 +27,21 @@ func InitECMDBGrpcClient() grpc.ClientConnInterface {
 	return cc
 }
 
-// InitUserServiceClient 初始化 ECMDB User gRPC 客户端
-func InitUserServiceClient(cc grpc.ClientConnInterface) userv1.UserServiceClient {
-	return userv1.NewUserServiceClient(cc)
-}
+// InitEIAMGrpcClient 初始化 EIAM gRPC 客户端
+func InitEIAMGrpcClient(reg registry.Registry) eiam.EIAMConn {
+	var cfg grpcpkg.ClientConfig
+	if err := viper.UnmarshalKey("grpc.client.eiam", &cfg); err != nil {
+		panic(err)
+	}
 
-// InitEndpointServiceClient 初始化 Endpoint 服务客户端
-func InitEndpointServiceClient(cc grpc.ClientConnInterface) endpointv1.EndpointServiceClient {
-	return endpointv1.NewEndpointServiceClient(cc)
-}
+	cc, err := grpcpkg.NewClientConn(
+		reg,
+		grpcpkg.WithServiceName(cfg.Name),
+		grpcpkg.WithClientJWTAuth(cfg.AuthToken),
+	)
+	if err != nil {
+		panic(err)
+	}
 
-func InitTaskServiceClient(cc grpc.ClientConnInterface) taskv1.TaskServiceClient {
-	return taskv1.NewTaskServiceClient(cc)
-}
-
-func InitTaskExecutionServiceClient(cc grpc.ClientConnInterface) executorv1.TaskExecutionServiceClient {
-	return executorv1.NewTaskExecutionServiceClient(cc)
-}
-
-func InitTeamServiceClient(cc grpc.ClientConnInterface) teamv1.TeamServiceClient {
-	return teamv1.NewTeamServiceClient(cc)
-}
-
-func InitRotaServiceClient(cc grpc.ClientConnInterface) rotav1.OnCallServiceClient {
-	return rotav1.NewOnCallServiceClient(cc)
+	return cc
 }

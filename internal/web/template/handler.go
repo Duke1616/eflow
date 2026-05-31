@@ -7,11 +7,10 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
+	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/ginx"
-	"github.com/ecodeclub/ginx/gctx"
-	"github.com/ecodeclub/ginx/session"
 	"github.com/gin-gonic/gin"
 )
 
@@ -33,52 +32,52 @@ func NewHandler(svc templateSvc.Service) *Handler {
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	// --- Template 工单模板业务路由 ---
 	g := server.Group("/api/template")
-	g.POST("/detail", h.Capability("查询工单模板详情", "detail").
-		Handle(ginx.B[DetailTemplateReq](h.DetailTemplate)),
+	g.GET("/detail/:id", h.Capability("查询工单模板详情", "get").
+		Handle(ginx.W(h.DetailTemplate)),
 	)
-	g.POST("/list", h.Capability("查询工单模板列表", "list").
+	g.POST("/list", h.Capability("查询工单模板列表", "view").
 		Handle(ginx.B[ListTemplateReq](h.ListTemplate)),
 	)
 	g.POST("/list/pipeline", h.Capability("分类聚合工单模板", "pipeline").
 		Handle(ginx.W(h.Pipeline)),
 	)
-	g.POST("/by_ids", h.Capability("批量获取模板详情", "listByIds").
+	g.POST("/by_ids", h.Capability("批量获取模板详情", "view_by_ids").
 		Handle(ginx.B[FindByTemplateIds](h.FindByTemplateIds)),
 	)
-	g.POST("/get_by_workflow_id", h.Capability("按流程ID获取模板", "listByWorkflowId").
+	g.POST("/get_by_workflow_id", h.Capability("按流程ID获取模板", "view_by_workflow_id").
 		Handle(ginx.B[GetTemplatesByWorkFlowIdReq](h.GetTemplatesByWorkflowId)),
 	)
-	g.POST("/rules/by_workflow_id", h.Capability("获取流程绑定模板校验链", "rulesByWorkflowId").
+	g.POST("/rules/by_workflow_id", h.Capability("获取流程绑定模板校验链", "rules_by_workflow_id").
 		Handle(ginx.B[GetRulesByWorkFlowIdReq](h.GetRulesByWorkFlowId)),
 	)
-	g.POST("/list/by_keyword", h.Capability("模糊搜索模板", "listByKeyword").
+	g.POST("/list/by_keyword", h.Capability("模糊搜索模板", "view_by_keyword").
 		Handle(ginx.B[ByKeywordReq](h.ByKeyword)),
 	)
-	g.POST("/favorite/toggle", h.Capability("收藏或取消工单模板", "toggleFavorite").
+	g.POST("/favorite/toggle", h.Capability("收藏或取消工单模板", "toggle_favorite").
 		Handle(ginx.B[ToggleFavoriteReq](h.ToggleFavorite)),
 	)
-	g.POST("/favorite/list", h.Capability("查询模板收藏夹", "listFavorite").
+	g.POST("/favorite/list", h.Capability("查询模板收藏夹", "view_favorite").
 		Handle(ginx.W(h.ListFavoriteTemplates)),
 	)
-	g.POST("/create", h.Capability("创建工单模板", "create").
+	g.POST("/create", h.Capability("创建工单模板", "add").
 		Handle(ginx.B[CreateTemplateReq](h.CreateTemplate)),
 	)
-	g.POST("/update", h.Capability("修改工单模板", "update").
+	g.POST("/update", h.Capability("修改工单模板", "edit").
 		Handle(ginx.B[UpdateTemplateReq](h.UpdateTemplate)),
 	)
-	g.POST("/delete", h.Capability("删除工单模板", "delete").
-		Handle(ginx.B[DeleteTemplateReq](h.DeleteTemplate)),
+	g.DELETE("/delete/:id", h.Capability("删除工单模板", "delete").
+		Handle(ginx.W(h.DeleteTemplate)),
 	)
 
 	// --- TemplateGroup 工单分类分组路由 ---
 	gg := server.Group("/api/template/group")
-	gg.POST("/list", h.Capability("查询模板分组列表", "listGroup").
+	gg.POST("/list", h.Capability("查询模板分组列表", "view_group").
 		Handle(ginx.B[Page](h.ListTemplateGroup)),
 	)
-	gg.POST("/by_ids", h.Capability("批量查询模板组", "listGroupByIds").
+	gg.POST("/by_ids", h.Capability("批量查询模板组", "view_group_by_ids").
 		Handle(ginx.B[FindTemplateGroupsByIdsReq](h.FindTemplateGroupByIds)),
 	)
-	gg.POST("/create", h.Capability("创建模板分类", "createGroup").
+	gg.POST("/create", h.Capability("创建模板分类", "add_group").
 		Handle(ginx.B[CreateTemplateGroupReq](h.CreateTemplateGroup)),
 	)
 }
@@ -123,12 +122,13 @@ func (h *Handler) FindByTemplateIds(ctx *ginx.Context, req FindByTemplateIds) (g
 }
 
 // DetailTemplate 获取单个模板的详细属性
-func (h *Handler) DetailTemplate(ctx *ginx.Context, req DetailTemplateReq) (ginx.Result, error) {
-	if req.Id <= 0 {
-		return ErrTemplateInvalidId, nil
+func (h *Handler) DetailTemplate(ctx *ginx.Context) (ginx.Result, error) {
+	id, err := ctx.Param("id").Int64()
+	if err != nil {
+		return ErrTemplateInvalidId, err
 	}
 
-	t, err := h.svc.DetailTemplate(ctx.Context, req.Id)
+	t, err := h.svc.DetailTemplate(ctx.Context, id)
 	if err != nil {
 		return SystemErrorResult, err
 	}
@@ -204,12 +204,13 @@ func (h *Handler) ListTemplate(ctx *ginx.Context, req ListTemplateReq) (ginx.Res
 }
 
 // DeleteTemplate 删除指定的模板实体
-func (h *Handler) DeleteTemplate(ctx *ginx.Context, req DeleteTemplateReq) (ginx.Result, error) {
-	if req.Id <= 0 {
-		return ErrTemplateInvalidId, nil
+func (h *Handler) DeleteTemplate(ctx *ginx.Context) (ginx.Result, error) {
+	id, err := ctx.Param("id").Int64()
+	if err != nil {
+		return ErrTemplateInvalidId, err
 	}
 
-	count, err := h.svc.DeleteTemplate(ctx.Context, req.Id)
+	count, err := h.svc.DeleteTemplate(ctx.Context, id)
 	if err != nil {
 		return SystemErrorResult, err
 	}
@@ -389,13 +390,13 @@ func (h *Handler) ListTemplateGroup(ctx *ginx.Context, req Page) (ginx.Result, e
 }
 
 // --- 辅助映射处理转换 ---
-
 func (h *Handler) getUid(ctx *ginx.Context) (int64, error) {
-	sess, err := session.Get(&gctx.Context{Context: ctx.Context})
-	if err != nil {
-		return 0, fmt.Errorf("获取 Session 失败: %w", err)
+	uid := ctxutil.GetUserID(ctx).Int64()
+	if uid == 0 {
+		return 0, fmt.Errorf("获取 UserID 失败: %d", uid)
 	}
-	return sess.Claims().Uid, nil
+
+	return uid, nil
 }
 
 func (h *Handler) toDomain(req CreateTemplateReq) (domain.Template, error) {

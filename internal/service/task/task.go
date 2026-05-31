@@ -31,24 +31,41 @@ const (
 	DAY    Unit = 3
 )
 
+// Service 自动化任务管理服务接口
 type Service interface {
-	CreateTask(ctx context.Context, orderId int64, processInstId int, nodeId string) (domain.Task, error)
+	// CreateTask 根据流程节点信息创建并初始化自动化任务
+	CreateTask(ctx context.Context, ticketID int64, processInstID int, nodeID string) (domain.Task, error)
+	// StartTask 启动指定任务的下发和执行逻辑
 	StartTask(ctx context.Context, id int64) error
+	// RetryTask 手动触发重试失败任务
 	RetryTask(ctx context.Context, id int64) error
+	// AutoRetryTask 自动重试机制触发的任务执行
 	AutoRetryTask(ctx context.Context, id int64) error
+	// UpdateTaskStatus 更新任务在流程中的生命周期状态
 	UpdateTaskStatus(ctx context.Context, req domain.TaskResult) (int64, error)
-	UpdateTaskResult(ctx context.Context, req domain.TaskResult) (int64, error)
+	// UpdateArgs 覆写修改任务下发参数
 	UpdateArgs(ctx context.Context, id int64, args map[string]interface{}) (int64, error)
+	// UpdateVariables 覆写修改任务运行的环境变量
 	UpdateVariables(ctx context.Context, id int64, variables []domain.Variables) (int64, error)
+	// ListTaskByStatus 分页获取特定状态下的任务列表
 	ListTaskByStatus(ctx context.Context, offset, limit int64, status uint8) ([]domain.Task, int64, error)
+	// ListTaskByStatusAndKind 根据类型与状态筛选分页拉取任务
 	ListTaskByStatusAndKind(ctx context.Context, offset, limit int64, status uint8, kind string) ([]domain.Task, int64, error)
+	// ListTask 分页拉取所有任务
 	ListTask(ctx context.Context, offset, limit int64) ([]domain.Task, int64, error)
-	ListTaskByInstanceId(ctx context.Context, offset, limit int64, instanceId int) ([]domain.Task, int64, error)
+	// ListTaskByInstanceID 根据实例 ID 分页筛选对应的子任务列表
+	ListTaskByInstanceID(ctx context.Context, offset, limit int64, instanceID int) ([]domain.Task, int64, error)
+	// ListSuccessTasksByUtime 拉取在指定更新时间之后且状态为成功的所有任务
 	ListSuccessTasksByUtime(ctx context.Context, offset, limit int64, utime int64) ([]domain.Task, int64, error)
-	FindTaskResult(ctx context.Context, instanceId int, nodeId string) (domain.Task, error)
-	Detail(ctx context.Context, id int64) (domain.Task, error)
+	// FindTaskByNodeID 根据流程实例 ID 与节点 ID 查询关联的自动化任务实体
+	FindTaskByNodeID(ctx context.Context, instanceID int, nodeID string) (domain.Task, error)
+	// FindTaskByID 查询指定主键 ID 任务的完整详细属性
+	FindTaskByID(ctx context.Context, id int64) (domain.Task, error)
+	// MarkTaskAsAutoPassed 强制将指定任务标记为自动通过，以进行容灾或人工干预流程推进
 	MarkTaskAsAutoPassed(ctx context.Context, id int64) error
-	UpdateExternalId(ctx context.Context, id int64, externalId string) error
+	// UpdateExternalID 绑定该任务与调度系统分配的外部 ID 映射关系
+	UpdateExternalID(ctx context.Context, id int64, externalID string) error
+	// ListReadyTasks 检索所有处于待触发就绪状态的定时任务列表
 	ListReadyTasks(ctx context.Context, limit int64) ([]domain.Task, error)
 }
 
@@ -77,13 +94,13 @@ func NewTaskService(repo repository.TaskRepository, workflowSvc workflow.Service
 	}
 }
 
-func (s *taskService) CreateTask(ctx context.Context, orderId int64, processInstId int, nodeId string) (domain.Task, error) {
+func (s *taskService) CreateTask(ctx context.Context, ticketID int64, processInstID int, nodeID string) (domain.Task, error) {
 	task, err := s.repo.FindOrCreate(ctx, domain.Task{
-		ProcessInstId:   processInstId,
+		ProcessInstId:   processInstID,
 		TriggerPosition: domain.TriggerPositionTaskWaiting.ToString(),
-		CurrentNodeId:   nodeId,
+		CurrentNodeId:   nodeID,
 		Status:          domain.WAITING,
-		OrderId:         orderId,
+		TicketID:        ticketID,
 	})
 	if err != nil {
 		return domain.Task{}, err
@@ -102,7 +119,7 @@ func (s *taskService) CreateTask(ctx context.Context, orderId int64, processInst
 }
 
 func (s *taskService) StartTask(ctx context.Context, id int64) error {
-	task, err := s.repo.FindById(ctx, id)
+	task, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -115,7 +132,7 @@ func (s *taskService) RetryTask(ctx context.Context, id int64) error {
 		TriggerPosition: domain.TriggerPositionManualRetry.ToString(),
 		RetryCount:      -1,
 	})
-	task, err := s.repo.FindById(ctx, id)
+	task, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -123,7 +140,7 @@ func (s *taskService) RetryTask(ctx context.Context, id int64) error {
 }
 
 func (s *taskService) AutoRetryTask(ctx context.Context, id int64) error {
-	task, err := s.repo.FindById(ctx, id)
+	task, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -144,16 +161,12 @@ func (s *taskService) UpdateTaskStatus(ctx context.Context, req domain.TaskResul
 	return s.repo.UpdateTaskStatus(ctx, req)
 }
 
-func (s *taskService) UpdateTaskResult(ctx context.Context, req domain.TaskResult) (int64, error) {
-	return s.UpdateTaskStatus(ctx, req)
-}
-
 func (s *taskService) UpdateArgs(ctx context.Context, id int64, args map[string]interface{}) (int64, error) {
 	return s.repo.UpdateArgs(ctx, id, args)
 }
 
 func (s *taskService) UpdateVariables(ctx context.Context, id int64, variables []domain.Variables) (int64, error) {
-	task, err := s.repo.FindById(ctx, id)
+	task, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return 0, err
 	}
@@ -222,18 +235,18 @@ func (s *taskService) ListTask(ctx context.Context, offset, limit int64) ([]doma
 	return ts, total, eg.Wait()
 }
 
-func (s *taskService) ListTaskByInstanceId(ctx context.Context, offset, limit int64, instanceId int) ([]domain.Task, int64, error) {
+func (s *taskService) ListTaskByInstanceID(ctx context.Context, offset, limit int64, instanceID int) ([]domain.Task, int64, error) {
 	var eg errgroup.Group
 	var ts []domain.Task
 	var total int64
 	eg.Go(func() error {
 		var err error
-		ts, err = s.repo.ListTaskByInstanceId(ctx, offset, limit, instanceId)
+		ts, err = s.repo.ListTaskByInstanceID(ctx, offset, limit, instanceID)
 		return err
 	})
 	eg.Go(func() error {
 		var err error
-		total, err = s.repo.TotalByInstanceId(ctx, instanceId)
+		total, err = s.repo.TotalByInstanceID(ctx, instanceID)
 		return err
 	})
 	return ts, total, eg.Wait()
@@ -256,20 +269,20 @@ func (s *taskService) ListSuccessTasksByUtime(ctx context.Context, offset, limit
 	return ts, total, eg.Wait()
 }
 
-func (s *taskService) FindTaskResult(ctx context.Context, instanceId int, nodeId string) (domain.Task, error) {
-	return s.repo.FindTaskResult(ctx, instanceId, nodeId)
+func (s *taskService) FindTaskByNodeID(ctx context.Context, instanceID int, nodeID string) (domain.Task, error) {
+	return s.repo.FindTaskByNodeID(ctx, instanceID, nodeID)
 }
 
-func (s *taskService) Detail(ctx context.Context, id int64) (domain.Task, error) {
-	return s.repo.FindById(ctx, id)
+func (s *taskService) FindTaskByID(ctx context.Context, id int64) (domain.Task, error) {
+	return s.repo.FindByID(ctx, id)
 }
 
 func (s *taskService) MarkTaskAsAutoPassed(ctx context.Context, id int64) error {
 	return s.repo.MarkTaskAsAutoPassed(ctx, id)
 }
 
-func (s *taskService) UpdateExternalId(ctx context.Context, id int64, externalId string) error {
-	return s.repo.UpdateExternalId(ctx, id, externalId)
+func (s *taskService) UpdateExternalID(ctx context.Context, id int64, externalID string) error {
+	return s.repo.UpdateExternalID(ctx, id, externalID)
 }
 
 func (s *taskService) ListReadyTasks(ctx context.Context, limit int64) ([]domain.Task, error) {
@@ -304,14 +317,13 @@ func (s *taskService) prepareTask(ctx context.Context, task domain.Task) (domain
 
 	task.WorkflowId = flow.Id
 	task.CodebookUid = codebook.Identifier
-	task.CodebookName = codebook.Name
 	task.Code = codebook.Code
 	task.Language = codebook.Language
 	task.Kind = runner.Kind
 	task.Target = runner.Target
 	task.Handler = runner.Handler
 	task.Variables = runner.Variables
-	task.Args = domain.TaskArgs{"order_id": task.OrderId, "process_inst_id": task.ProcessInstId}
+	task.Args = domain.TaskArgs{"ticket_id": task.TicketID, "process_inst_id": task.ProcessInstId}
 	task.Status = domain.WAITING
 	task.IsTiming = automation.IsTiming
 	task.ScheduledTime = s.calculateScheduledTime(automation, task.Args)
@@ -349,7 +361,7 @@ func (s *taskService) dispatchGRPC(ctx context.Context, task domain.Task) error 
 	vars, _ := json.Marshal(task.Variables)
 	hash := s.sumHash(taskId, task.Code, string(args), string(vars))
 	resp, err := s.grpcClient.CreateTask(ctx, &taskv1.CreateTaskRequest{
-		Name:     fmt.Sprintf("%s_%s", task.CodebookName, hash),
+		Name:     fmt.Sprintf("%s_%s", task.CodebookUid, hash),
 		Type:     taskv1.TaskType_ONE_TIME,
 		CronExpr: s.calculateCronExpr(task),
 		GrpcConfig: &taskv1.GrpcConfig{
@@ -369,7 +381,7 @@ func (s *taskService) dispatchGRPC(ctx context.Context, task domain.Task) error 
 	if resp.Code != taskv1.TaskErrorCode_SUCCESS {
 		return fmt.Errorf("任务平台业务错误: %s (code: %d)", resp.Message, resp.Code)
 	}
-	return s.repo.UpdateExternalId(ctx, task.Id, strconv.FormatInt(resp.Id, 10))
+	return s.repo.UpdateExternalID(ctx, task.Id, strconv.FormatInt(resp.Id, 10))
 }
 
 func (s *taskService) retry(ctx context.Context, task domain.Task, auto bool) error {

@@ -3,7 +3,7 @@ package assignees
 import (
 	"context"
 
-	userv1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/user/v1"
+	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/pkg/resolve"
@@ -28,7 +28,7 @@ func (r *TemplateResolver) Resolve(ctx context.Context, target resolve.Target) (
 		return nil, nil
 	}
 
-	resp, err := r.userSvc.FindByUsernames(ctx, &userv1.FindByUsernamesReq{
+	resp, err := r.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
 		Usernames: target.Values,
 	})
 	if err != nil {

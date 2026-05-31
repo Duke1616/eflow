@@ -33,7 +33,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g.POST("/list", h.Capability("查询执行器列表", "view").
 		Handle(ginx.B[ListRunnerReq](h.ListRunner)),
 	)
-	g.POST("/list/tags", h.Capability("查询执行器标签", "listTags").
+	g.POST("/list/tags", h.Capability("查询执行器标签", "tags").
 		Handle(ginx.W(h.ListTags)),
 	)
 	g.GET("/detail/:id", h.Capability("查询执行器详情", "get").
@@ -45,13 +45,13 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g.DELETE("/delete/:id", h.Capability("删除执行器", "delete").
 		Handle(ginx.W(h.DeleteRunner)),
 	)
-	g.POST("/list/by_ids", h.Capability("根据ID批量查询执行器", "listByIds").
+	g.POST("/list/by_ids", h.Capability("根据ID批量查询执行器", "view_by_ids").
 		Handle(ginx.B[ListRunnerByIds](h.ListByIds)),
 	)
-	g.POST("/list/by_codebook_uid", h.Capability("根据脚本查询关联执行器", "listByCodebookUid").
+	g.POST("/list/by_codebook_uid", h.Capability("根据脚本查询关联执行器", "view_by_codebook_uid").
 		Handle(ginx.B[ListByCodebookIdReq](h.ListByCodebookId)),
 	)
-	g.POST("/list/exclude_codebook_uid", h.Capability("查询未关联脚本执行器", "listExcludeCodebookUid").
+	g.POST("/list/exclude_codebook_uid", h.Capability("查询未关联脚本执行器", "view_exclude_codebook_uid").
 		Handle(ginx.B[ListByCodebookIdReq](h.ListExcludeCodebookUid)),
 	)
 }

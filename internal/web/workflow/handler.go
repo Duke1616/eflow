@@ -35,27 +35,27 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/workflow")
 
 	// 流程主实体写动作防护
-	g.POST("/create", h.Capability("创建流程定义", "create").
+	g.POST("/create", h.Capability("创建流程定义", "add").
 		Handle(ginx.B[CreateReq](h.Create)),
 	)
-	g.POST("/update", h.Capability("修改流程定义", "update").
+	g.POST("/update", h.Capability("修改流程定义", "edit").
 		Handle(ginx.B[UpdateReq](h.Update)),
 	)
-	g.POST("/delete", h.Capability("删除流程定义", "delete").
-		Handle(ginx.B[DeleteReq](h.Delete)),
+	g.DELETE("/delete/:id", h.Capability("删除流程定义", "delete").
+		Handle(ginx.W(h.Delete)),
 	)
 	g.POST("/deploy", h.Capability("发布部署流程", "deploy").
 		Handle(ginx.B[DeployReq](h.Deploy)),
 	)
 
 	// 流程主实体读动作及模糊搜索
-	g.POST("/list", h.Capability("查询流程模板列表", "list").
+	g.POST("/list", h.Capability("查询流程模板列表", "view").
 		Handle(ginx.B[ListReq](h.List)),
 	)
-	g.POST("/list/by_keyword", h.Capability("模糊检索流程模板", "listByKeyword").
+	g.POST("/list/by_keyword", h.Capability("模糊检索流程模板", "view_by_keyword").
 		Handle(ginx.B[ByKeywordReq](h.ByKeyword)),
 	)
-	g.GET("/detail/:id", h.Capability("查看工作流详情", "detail").
+	g.GET("/detail/:id", h.Capability("查看工作流详情", "get").
 		Handle(ginx.W(h.Detail)),
 	)
 
@@ -160,8 +160,13 @@ func (h *Handler) Update(ctx *ginx.Context, req UpdateReq) (ginx.Result, error) 
 }
 
 // Delete 物理删除选定的流程定义图，返回受影响行数
-func (h *Handler) Delete(ctx *ginx.Context, req DeleteReq) (ginx.Result, error) {
-	count, err := h.svc.Delete(ctx.Context, req.Id)
+func (h *Handler) Delete(ctx *ginx.Context) (ginx.Result, error) {
+	id, err := ctx.Param("id").Int64()
+	if err != nil {
+		return SystemErrorResult, fmt.Errorf("ID 格式错误: %w", err)
+	}
+
+	count, err := h.svc.Delete(ctx.Context, id)
 	if err != nil {
 		return SystemErrorResult, err
 	}

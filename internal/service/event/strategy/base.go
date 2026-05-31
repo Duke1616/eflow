@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
-	userv1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/user/v1"
+	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/pkg/resolve"
@@ -151,7 +151,7 @@ func (s *service) FetchRequiredData(ctx context.Context, info Info, nodes []easy
 	})
 
 	errGroup.Go(func() error {
-		resp, err := s.userSvc.FindByUsernames(ctx, &userv1.FindByUsernamesReq{
+		resp, err := s.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
 			Usernames: []string{info.Order.CreateBy},
 		})
 		if err != nil {
@@ -262,7 +262,7 @@ func (s *service) wantAllResult(ctx context.Context, instanceId int, nodes []eas
 }
 
 func (s *service) fetchResult(ctx context.Context, instanceID int, nodeID string) (map[string]interface{}, error) {
-	result, err := s.taskSvc.FindTaskResult(ctx, instanceID, nodeID)
+	result, err := s.taskSvc.FindTaskByNodeID(ctx, instanceID, nodeID)
 	if err != nil {
 		return nil, err
 	}

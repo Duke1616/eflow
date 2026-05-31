@@ -129,7 +129,7 @@ func (j *TaskExecutionSyncJob) batchSyncTaskExecutions(ctx context.Context, task
 			var updateErr error
 			switch latestExec.Status {
 			case executorv1.ExecutionStatus_SUCCESS:
-				_, updateErr = j.svc.UpdateTaskResult(ctx, domain.TaskResult{
+				_, updateErr = j.svc.UpdateTaskStatus(ctx, domain.TaskResult{
 					Id:              t.Id,
 					Status:          domain.SUCCESS,
 					Result:          "任务执行成功",
@@ -137,7 +137,7 @@ func (j *TaskExecutionSyncJob) batchSyncTaskExecutions(ctx context.Context, task
 					TriggerPosition: domain.TriggerPositionTaskExecutionSuccess.ToString(),
 				})
 			case executorv1.ExecutionStatus_FAILED, executorv1.ExecutionStatus_FAILED_RETRYABLE, executorv1.ExecutionStatus_FAILED_RESCHEDULABLE:
-				_, updateErr = j.svc.UpdateTaskResult(ctx, domain.TaskResult{
+				_, updateErr = j.svc.UpdateTaskStatus(ctx, domain.TaskResult{
 					Id:              t.Id,
 					Status:          domain.FAILED,
 					Result:          "任务执行失败",

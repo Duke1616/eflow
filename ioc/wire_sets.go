@@ -34,6 +34,8 @@ import (
 	"github.com/Duke1616/eflow/internal/web/template"
 	"github.com/Duke1616/eflow/internal/web/ticket"
 	"github.com/Duke1616/eflow/internal/web/workflow"
+	"github.com/Duke1616/eflow/internal/client/ecmdb"
+	"github.com/Duke1616/eflow/internal/client/eiam"
 	"github.com/ecodeclub/mq-api"
 	"github.com/google/wire"
 	"gorm.io/gorm"
@@ -89,8 +91,6 @@ var (
 
 	// TaskSet 自动化任务模块 Provider 集合
 	TaskSet = wire.NewSet(
-		InitTaskServiceClient,
-		InitTaskExecutionServiceClient,
 		dao.NewTaskDAO,
 		repository.NewTaskRepository,
 		taskSvc.NewTaskService,
@@ -112,10 +112,6 @@ var (
 		dao.NewDepartmentDAO,
 		repository.NewDepartmentRepository,
 		departmentSvc.NewService,
-
-		// 外部 gRPC 客户端依赖
-		InitTeamServiceClient,
-		InitRotaServiceClient,
 
 		// 7个审批人解析器
 		assignees.NewAppointResolver,
@@ -144,7 +140,8 @@ var (
 		InitLarkClient,
 		ticketEvent.NewUserServiceAdapter,
 		ticketEvent.NewWechatTicketConsumer,
-		ticketEvent.NewLarkCallbackTicketConsumer,
+		ticketEvent.NewLarkCallbackHandler,
+		ticketEvent.NewLarkCallbackTicketServer,
 		templateEvent.NewWechatTicketEventProducer,
 		templateEvent.NewWechatApprovalCallbackConsumer,
 		InitOrderStatusModifyEventProducer,
@@ -152,13 +149,23 @@ var (
 		process.NewProcessEventConsumer,
 	)
 
+	grpcSet = wire.NewSet(
+		InitRegistry,
+		InitEIAMGrpcClient,
+		InitECMDBGrpcClient,
+
+		// 引入本地客户端网关
+		ecmdb.NewECMDBClient,
+		eiam.NewEIAMClient,
+
+		// 导出具体的 Client，直接满足底层 Service 的注入需求！
+		wire.FieldsOf(new(*ecmdb.ECMDBClient), "TaskClient", "ExecutorClient", "TeamClient", "RotaClient"),
+		wire.FieldsOf(new(*eiam.EIAMClient), "UserClient"),
+	)
 	// WebSet Web 服务 Provider 集合
 	WebSet = wire.NewSet(
 		InitDB,
-		InitECMDBGrpcClient,
-		InitUserServiceClient,
 		InitTicketEventProducer,
-		InitEndpointServiceClient,
 		InitPolicySDK,
 		InitPermSyncer,
 		InitProviders,
@@ -166,6 +173,7 @@ var (
 		InitGinMiddlewares,
 		InitGinWebServer,
 		InitTasks,
+		grpcSet,
 		BaseSet,
 		TemplateSet,
 		WorkflowSet,

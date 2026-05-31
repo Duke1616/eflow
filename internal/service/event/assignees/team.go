@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	teamv1 "github.com/Duke1616/ecmdb/api/proto/gen/ealert/team"
-	userv1 "github.com/Duke1616/ecmdb/api/proto/gen/ecmdb/user/v1"
+	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/pkg/resolve"
@@ -62,7 +62,7 @@ func (r *TeamResolver) Resolve(ctx context.Context, target resolve.Target) ([]do
 	}
 
 	// 根据用户名批量查询人员详情
-	respUsers, err := r.userSvc.FindByUsernames(ctx, &userv1.FindByUsernamesReq{
+	respUsers, err := r.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
 		Usernames: usernames,
 	})
 	if err != nil {
