@@ -123,7 +123,7 @@ func (h *Handler) FindByTemplateIds(ctx *ginx.Context, req FindByTemplateIds) (g
 
 // DetailTemplate 获取单个模板的详细属性
 func (h *Handler) DetailTemplate(ctx *ginx.Context) (ginx.Result, error) {
-	id, err := ctx.Param("id").Int64()
+	id, err := ctx.Param("id").AsInt64()
 	if err != nil {
 		return ErrTemplateInvalidId, err
 	}
@@ -205,7 +205,7 @@ func (h *Handler) ListTemplate(ctx *ginx.Context, req ListTemplateReq) (ginx.Res
 
 // DeleteTemplate 删除指定的模板实体
 func (h *Handler) DeleteTemplate(ctx *ginx.Context) (ginx.Result, error) {
-	id, err := ctx.Param("id").Int64()
+	id, err := ctx.Param("id").AsInt64()
 	if err != nil {
 		return ErrTemplateInvalidId, err
 	}

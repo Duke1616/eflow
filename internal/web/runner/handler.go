@@ -119,7 +119,7 @@ func (h *Handler) ListByIds(ctx *ginx.Context, req ListRunnerByIds) (ginx.Result
 }
 
 func (h *Handler) DeleteRunner(ctx *ginx.Context) (ginx.Result, error) {
-	id, err := ctx.Param("id").Int64()
+	id, err := ctx.Param("id").AsInt64()
 	if err != nil {
 		return ErrRunnerInvalidId, err
 	}
@@ -135,7 +135,7 @@ func (h *Handler) DeleteRunner(ctx *ginx.Context) (ginx.Result, error) {
 }
 
 func (h *Handler) Detail(ctx *ginx.Context) (ginx.Result, error) {
-	id, err := ctx.Param("id").Int64()
+	id, err := ctx.Param("id").AsInt64()
 	if err != nil {
 		return ErrRunnerInvalidId, err
 	}

@@ -58,7 +58,6 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g.GET("/detail/:id", h.Capability("查看工作流详情", "get").
 		Handle(ginx.W(h.Detail)),
 	)
-
 	// 工单审批流转状态轨迹轨迹地图
 	g.POST("/graph", h.Capability("查询工单流转地图", "graph").
 		Handle(ginx.B[OrderGraphReq](h.FindOrderGraph)),
@@ -132,7 +131,7 @@ func (h *Handler) Deploy(ctx *ginx.Context, req DeployReq) (ginx.Result, error) 
 
 // Detail 获取指定流程定义主键 ID 的完整明细配置 (含 Edge/Node JSON 画布数据)
 func (h *Handler) Detail(ctx *ginx.Context) (ginx.Result, error) {
-	id, err := ctx.Param("id").Int64()
+	id, err := ctx.Param("id").AsInt64()
 	if err != nil {
 		return SystemErrorResult, fmt.Errorf("ID 格式错误: %w", err)
 	}
@@ -161,7 +160,7 @@ func (h *Handler) Update(ctx *ginx.Context, req UpdateReq) (ginx.Result, error) 
 
 // Delete 物理删除选定的流程定义图，返回受影响行数
 func (h *Handler) Delete(ctx *ginx.Context) (ginx.Result, error) {
-	id, err := ctx.Param("id").Int64()
+	id, err := ctx.Param("id").AsInt64()
 	if err != nil {
 		return SystemErrorResult, fmt.Errorf("ID 格式错误: %w", err)
 	}
@@ -246,11 +245,11 @@ func (h *Handler) toDomain(req CreateReq) domain.Workflow {
 	if req.FlowData != nil {
 		edges := make([]domain.FlowEdge, len(req.FlowData.Edges))
 		for i, e := range req.FlowData.Edges {
-			edges[i] = domain.FlowEdge(e)
+			edges[i] = e
 		}
 		nodes := make([]domain.FlowNode, len(req.FlowData.Nodes))
 		for i, n := range req.FlowData.Nodes {
-			nodes[i] = domain.FlowNode(n)
+			nodes[i] = n
 		}
 		res.FlowData = domain.LogicFlow{
 			Edges: edges,
@@ -274,11 +273,11 @@ func (h *Handler) toUpdateDomain(req UpdateReq) domain.Workflow {
 	if req.FlowData != nil {
 		edges := make([]domain.FlowEdge, len(req.FlowData.Edges))
 		for i, e := range req.FlowData.Edges {
-			edges[i] = domain.FlowEdge(e)
+			edges[i] = e
 		}
 		nodes := make([]domain.FlowNode, len(req.FlowData.Nodes))
 		for i, n := range req.FlowData.Nodes {
-			nodes[i] = domain.FlowNode(n)
+			nodes[i] = n
 		}
 		res.FlowData = domain.LogicFlow{
 			Edges: edges,
@@ -304,11 +303,11 @@ func (h *Handler) toWorkflowVo(req domain.Workflow) Workflow {
 	if len(req.FlowData.Nodes) > 0 || len(req.FlowData.Edges) > 0 {
 		nodes := make([]map[string]interface{}, len(req.FlowData.Nodes))
 		for i, n := range req.FlowData.Nodes {
-			nodes[i] = map[string]interface{}(n)
+			nodes[i] = n
 		}
 		edges := make([]map[string]interface{}, len(req.FlowData.Edges))
 		for i, e := range req.FlowData.Edges {
-			edges[i] = map[string]interface{}(e)
+			edges[i] = e
 		}
 		res.FlowData = &LogicFlow{
 			Nodes: nodes,

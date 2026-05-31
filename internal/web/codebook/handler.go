@@ -56,7 +56,7 @@ func (h *Handler) Create(ctx *ginx.Context, req CreateReq) (ginx.Result, error) 
 }
 
 func (h *Handler) Detail(ctx *ginx.Context) (ginx.Result, error) {
-	id, err := ctx.Param("id").Int64()
+	id, err := ctx.Param("id").AsInt64()
 	if err != nil {
 		return ErrCodebookInvalidId, err
 	}
@@ -100,7 +100,7 @@ func (h *Handler) Update(ctx *ginx.Context, req UpdateReq) (ginx.Result, error) 
 }
 
 func (h *Handler) Delete(ctx *ginx.Context) (ginx.Result, error) {
-	id, err := ctx.Param("id").Int64()
+	id, err := ctx.Param("id").AsInt64()
 	if err != nil {
 		return ErrCodebookInvalidId, err
 	}
