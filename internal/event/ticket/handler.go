@@ -168,7 +168,6 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) erro
 				elog.Int("任务ID", taskId),
 				elog.Int64("工单ID", ticketId),
 			)
-			return err
 		}
 		return h.withdraw(ctx, evt, remark)
 	case Reject:
@@ -179,7 +178,6 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) erro
 				elog.String("任务ID", evt.GetTaskId()),
 				elog.String("工单ID", evt.GetTicketId()),
 			)
-			return err
 		}
 		return h.withdraw(ctx, evt, remark)
 	case Progress:
@@ -208,13 +206,11 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) erro
 		if err != nil {
 			remark = "你的节点任务已经结束，无法进行撤回，详情登录系统查看"
 			h.logger.Error("飞书回调消息，撤销工单失败", elog.FieldErr(err))
-			return err
 		}
 
 		err = h.svc.UpdateStatusByProcessInstanceID(ctx, ticketResp.Process.InstanceId, domain.WITHDRAW.ToUint8())
 		if err != nil {
 			h.logger.Error("撤销变更流程状态失败", elog.FieldErr(err))
-			return err
 		}
 
 		return h.withdraw(ctx, evt, remark)
@@ -453,12 +449,50 @@ func (h *larkCallbackHandler) withdraw(ctx context.Context, callback LarkCallbac
 		return err
 	}
 
-	h.logger.Info("【降级卡片变态更新】飞书卡态更新成功",
-		elog.String("UserId", callback.GetUserId()),
-		elog.String("Creator", userInfo.DisplayName),
-		elog.String("TemplateName", t.Name),
-		elog.Any("Fields", ruleFields),
-		elog.String("Remark", remark),
-	)
+	// 发送消息通知
+	if _, err = h.sender.Send(ctx, notification.Notification{
+		Receiver:     callback.GetUserId(),
+		ReceiverType: feishu.ReceiveIDTypeUserID,
+		MessageID:    callback.GetMessageId(),
+		Channel:      notification.ChannelLarkCard,
+		Template: notification.Template{
+			Name:  domain.NotifyTypeProgress,
+			Title: rule.GenerateTitle(userInfo.DisplayName, t.Name),
+			Fields: slice.Map(ruleFields, func(idx int, src rule.Field) notification.Field {
+				return notification.Field{
+					IsShort: src.IsShort,
+					Tag:     src.Tag,
+					Content: src.Content,
+				}
+			}),
+			Values: getCallbackValue(callback),
+			Remark: remark,
+		},
+	}); err != nil {
+		return fmt.Errorf("修改飞书消息失败: %w", err)
+	}
+
 	return nil
+}
+
+func getCallbackValue(callback LarkCallback) []notification.Value {
+	fields := []struct {
+		Key   string
+		Value string
+	}{
+		{"order_id", callback.GetTicketId()},
+		{"task_id", callback.GetTaskId()},
+		{"user_id", callback.GetUserId()},
+		{"action", string(Progress)},
+	}
+
+	values := make([]notification.Value, 0, len(fields))
+	for _, field := range fields {
+		values = append(values, notification.Value{
+			Key:   field.Key,
+			Value: field.Value,
+		})
+	}
+
+	return values
 }
