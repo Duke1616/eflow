@@ -32,12 +32,32 @@ type LarkCallback struct {
 	Value     map[string]interface{} `json:"value"`
 }
 
+func (l *LarkCallback) GetTenantId() int64 {
+	if l.Value == nil {
+		return 0
+	}
+	if v, ok := l.Value["tenant_id"].(string); ok {
+		tid, _ := strconv.ParseInt(v, 10, 64)
+		return tid
+	}
+	if v, ok := l.Value["tenant_id"].(float64); ok {
+		return int64(v)
+	}
+	if v, ok := l.Value["tenant_id"].(int64); ok {
+		return v
+	}
+	return 0
+}
+
 func (l *LarkCallback) GetMessageId() string {
 	return l.MessageId
 }
 
 func (l *LarkCallback) GetTicketId() string {
-	if v, ok := l.Value["order_id"].(string); ok {
+	if l.Value == nil {
+		return ""
+	}
+	if v, ok := l.Value["ticket_id"].(string); ok {
 		return v
 	}
 	return ""
@@ -46,7 +66,7 @@ func (l *LarkCallback) GetTicketId() string {
 func (l *LarkCallback) GetTicketIdInt() (int64, error) {
 	val := l.GetTicketId()
 	if val == "" {
-		return 0, fmt.Errorf("order_id is empty")
+		return 0, fmt.Errorf("ticket_id is empty")
 	}
 	return strconv.ParseInt(val, 10, 64)
 }

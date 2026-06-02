@@ -9,8 +9,7 @@ import (
 	"github.com/Duke1616/eflow/internal/client/ecmdb"
 	"github.com/Duke1616/eflow/internal/client/eiam"
 	"github.com/Duke1616/eflow/internal/client/etask"
-	"github.com/Duke1616/eflow/internal/event/process"
-	templateEvent "github.com/Duke1616/eflow/internal/event/template"
+	"github.com/Duke1616/eflow/internal/event"
 	ticketEvent "github.com/Duke1616/eflow/internal/event/ticket"
 	eflowEasyflow "github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/pkg/resolve"
@@ -40,7 +39,7 @@ import (
 	"github.com/Duke1616/eflow/internal/web/template"
 	"github.com/Duke1616/eflow/internal/web/ticket"
 	"github.com/Duke1616/eflow/internal/web/workflow"
-	"github.com/ecodeclub/mq-api"
+	"github.com/Duke1616/eflow/pkg/mqx"
 	"github.com/google/wire"
 	"gorm.io/gorm"
 )
@@ -143,18 +142,19 @@ var (
 		// 消息通知分发器
 		InitSendStrategy,
 
-				// 流程状态与核心反射事件处理器/Kafka 消费者/三方回调/审批模板自愈
+		// 流程状态与核心反射事件处理器/Kafka 消费者/三方回调/审批模板自愈
 		InitLarkClient,
 		ticketEvent.NewUserServiceAdapter,
-		ticketEvent.NewWechatTicketConsumer,
+		InitWechatTicketConsumer,
 		ticketEvent.NewLarkCallbackHandler,
 		InitLarkDispatcher,
 		InitLarkServer,
-		templateEvent.NewWechatTicketEventProducer,
-		templateEvent.NewWechatApprovalCallbackConsumer,
-		InitOrderStatusModifyEventProducer,
+		InitWechatTicketEventProducer,
+		InitWechatApprovalCallbackConsumer,
+		InitTicketStatusModifyEventProducer,
 		InitWorkflowEngineOnce,
-		process.NewProcessEventConsumer,
+		InitProcessEventConsumer,
+		InitExecuteResultConsumer,
 
 		// 初始化通知发送器
 		InitNotificationSender,
@@ -203,17 +203,9 @@ var (
 	)
 )
 
-func InitTicketEventProducer(q mq.MQ) (ticketSvc.TicketEventProducer, error) {
-	return ticketEvent.NewTicketEventProducer(q)
-}
-
-func InitOrderStatusModifyEventProducer(q mq.MQ) (process.OrderStatusModifyEventProducer, error) {
-	return process.NewOrderStatusModifyEventProducer(q)
-}
-
 var engineOnce = sync.Once{}
 
-func InitWorkflowEngineOnce(db *gorm.DB, engineSvc engineSvc.Service, producer process.OrderStatusModifyEventProducer,
+func InitWorkflowEngineOnce(db *gorm.DB, engineSvc engineSvc.Service, producer mqx.Producer[event.TicketStatusModifyEvent],
 	taskSvc taskSvc.Service, ticketSvc ticketSvc.Service, workflowSvc workflowSvc.Service,
 	strategy strategy.SendStrategy) *easyflow.ProcessEvent {
 	event := easyflow.NewProcessEvent(producer, engineSvc, taskSvc, ticketSvc, workflowSvc, strategy)

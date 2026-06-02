@@ -45,8 +45,8 @@ type IEngineDAO interface {
 	GetAutomationTask(ctx context.Context, currentNodeId string, processInstId int) (model.Task, error)
 	// GetTasksByInstUsers 查询指定流程实例中待指定用户处理的未完成任务
 	GetTasksByInstUsers(ctx context.Context, processInstId int, userIds []string) ([]model.Task, error)
-	// GetOrderIdByVariable 从流程实例的全局变量中检索关联的工单 ID
-	GetOrderIdByVariable(ctx context.Context, processInstId int) (string, error)
+	// GetTicketIdByVariable 从流程实例的全局变量中检索关联的工单 ID
+	GetTicketIdByVariable(ctx context.Context, processInstId int) (string, error)
 	// GetProxyNodeID 根据前置节点获取代理流转任务节点信息
 	GetProxyNodeID(ctx context.Context, processInstId int, prevNodeID string) (model.Task, error)
 	// GetProxyNodeByProcessInstId 通过流程实例 ID 获取自动流转的代理任务
@@ -197,10 +197,19 @@ func (g *gormEngineDAO) GetTasksByCurrentNodeId(ctx context.Context, processInst
 	return res, err
 }
 
-func (g *gormEngineDAO) GetOrderIdByVariable(ctx context.Context, processInstId int) (string, error) {
+func (g *gormEngineDAO) GetTicketIdByVariable(ctx context.Context, processInstId int) (string, error) {
 	var res database.ProcInstVariable
+	// 1. 优先检索规范化重构后的新键 ticket_id
 	err := g.db.WithContext(ctx).Model(&database.ProcInstVariable{}).Table("proc_inst_variable").
-		Where("proc_inst_id = ? AND `key` = ?", processInstId, `order_id`).
+		Where("proc_inst_id = ? AND `key` = ?", processInstId, "ticket_id").
+		First(&res).Error
+	if err == nil {
+		return res.Value, nil
+	}
+
+	// 2. 如果不存在，退避匹配老数据中的历史键 order_id，确保平滑升级 100% 成功
+	err = g.db.WithContext(ctx).Model(&database.ProcInstVariable{}).Table("proc_inst_variable").
+		Where("proc_inst_id = ? AND `key` = ?", processInstId, "order_id").
 		First(&res).Error
 
 	return res.Value, err

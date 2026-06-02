@@ -10,6 +10,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
+	"github.com/Duke1616/eflow/pkg/mqx"
 	"github.com/ecodeclub/mq-api"
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/xen0n/go-workwx"
@@ -25,19 +26,14 @@ type WechatTicketConsumer struct {
 }
 
 // NewWechatTicketConsumer 构造企业微信 OA 审批流回调事件消费者
-func NewWechatTicketConsumer(svc ticketSvc.Service, templateSvc templateSvc.Service, userSvc UserService, q mq.MQ) (*WechatTicketConsumer, error) {
-	groupID := "wechat_create_ticket"
-	consumer, err := q.Consumer(WechatTicketEventName, groupID)
-	if err != nil {
-		return nil, err
-	}
+func NewWechatTicketConsumer(svc ticketSvc.Service, templateSvc templateSvc.Service, userSvc UserService, consumer mq.Consumer) *WechatTicketConsumer {
 	return &WechatTicketConsumer{
 		svc:         svc,
 		consumer:    consumer,
 		userSvc:     userSvc,
 		templateSvc: templateSvc,
 		logger:      elog.DefaultLogger,
-	}, nil
+	}
 }
 
 // Start 启动企业微信工单同步事件消费协程
@@ -55,7 +51,7 @@ func (c *WechatTicketConsumer) Start(ctx context.Context) {
 
 // Consume 监听消费单条企业微信 OA 同步消息
 func (c *WechatTicketConsumer) Consume(ctx context.Context) error {
-	cm, err := c.consumer.Consume(ctx)
+	ctx, cm, err := mqx.ConsumeMessage(ctx, c.consumer)
 	if err != nil {
 		return fmt.Errorf("获取消息失败: %w", err)
 	}

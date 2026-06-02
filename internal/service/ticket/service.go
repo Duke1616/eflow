@@ -13,7 +13,7 @@ import (
 	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/event"
-	easyflow2 "github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
@@ -281,15 +281,15 @@ func (s *ticketService) Pass(ctx context.Context, taskId int, comment string, ex
 	}
 
 	// 4. 解析 node 节点数据并定位当前执行节点
-	nodes, _ := easyflow2.ParseNodes(snapshot.FlowData.Nodes)
-	node, ok := slice.Find(nodes, func(node easyflow2.Node) bool {
+	nodes, _ := easyflow.ParseNodes(snapshot.FlowData.Nodes)
+	node, ok := slice.Find(nodes, func(node easyflow.Node) bool {
 		return node.ID == taskInfo.NodeID
 	})
 	if !ok {
 		return fmt.Errorf("当前执行节点在流程图中不存在: %s", taskInfo.NodeID)
 	}
 
-	property, err := easyflow2.ToNodeProperty[easyflow2.UserProperty](node)
+	property, err := easyflow.ToNodeProperty[easyflow.UserProperty](node)
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ func (s *ticketService) Pass(ctx context.Context, taskId int, comment string, ex
 
 	for _, field := range property.Fields {
 		// tips 类型仅作为纯文本展示，不做持久化归集
-		if field.Type == easyflow2.FieldTips {
+		if field.Type == easyflow.FieldTips {
 			continue
 		}
 
@@ -373,7 +373,7 @@ func (s *ticketService) Reject(ctx context.Context, taskId int, comment string) 
 }
 
 // validateField 校验表单字段的规则约束
-func (s *ticketService) validateField(field easyflow2.Field, exists bool, val any) error {
+func (s *ticketService) validateField(field easyflow.Field, exists bool, val any) error {
 	if field.Required && (!exists || val == nil || val == "") {
 		return fmt.Errorf("%w: [%s] 为必填项，请输入填写", ValidationError, field.Name)
 	}
@@ -405,7 +405,7 @@ func (s *ticketService) sendGenerateFlowEvent(ctx context.Context, req domain.Ti
 
 	// 传递工单 ID 用以引擎事件绑定
 	variables = append(variables, event.Variables{
-		Key:   "order_id",
+		Key:   "ticket_id",
 		Value: strconv.FormatInt(ticketId, 10),
 	})
 

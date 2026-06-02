@@ -83,7 +83,7 @@ func (n *Notification) asyncHandleCarbonCopy(ctx context.Context, info strategy.
 					Name:     domain.NotifyTypeCC,
 					Title:    title,
 					Fields:   fields,
-					Values:   []notification.Value{{Key: "order_id", Value: info.Ticket.Id}},
+					Values:   notification.GenerateCallbackValues(info.Ticket.Id, "", info.Ticket.TenantID),
 					HideForm: true,
 				},
 			}

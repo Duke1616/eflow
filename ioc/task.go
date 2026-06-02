@@ -10,7 +10,6 @@ import (
 	ticketConsumer "github.com/Duke1616/eflow/internal/event/ticket"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	serviceTask "github.com/Duke1616/eflow/internal/service/task"
-	"github.com/ecodeclub/mq-api"
 )
 
 // InitTasks 初始化所有后台任务
@@ -19,19 +18,14 @@ func InitTasks(
 	taskSvc serviceTask.Service,
 	engineSvc engine.Service,
 	executorSvc executorv1.TaskExecutionServiceClient,
-	q mq.MQ,
+	executeResultConsumer *taskConsumer.ExecuteResultConsumer,
 	processConsumer *processConsumer.ProcessEventConsumer,
 	wechatConsumer *ticketConsumer.WechatTicketConsumer,
 	larkWsServer *ticketConsumer.LarkCallbackTicketServer,
 	wechatCallbackConsumer *templateConsumer.WechatApprovalCallbackConsumer,
 ) []Task {
-	consumer, err := taskConsumer.NewExecuteResultConsumer(q, taskSvc)
-	if err != nil {
-		panic(err)
-	}
-
 	return []Task{
-		consumer,
+		executeResultConsumer,
 		serviceTask.NewStartTaskJob(taskSvc, 100, 10*time.Second),
 		serviceTask.NewTaskRecoveryJob(taskSvc, 100, time.Minute),
 		serviceTask.NewPassProcessTaskJob(taskSvc, engineSvc, 100, 10*time.Second, 10, 0),

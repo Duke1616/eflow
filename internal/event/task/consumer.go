@@ -9,6 +9,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/event"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
+	"github.com/Duke1616/eflow/pkg/mqx"
 	"github.com/ecodeclub/mq-api"
 	"github.com/gotomicro/ego/core/elog"
 )
@@ -21,17 +22,12 @@ type ExecuteResultConsumer struct {
 }
 
 // NewExecuteResultConsumer 构造任务执行结果消费者
-func NewExecuteResultConsumer(q mq.MQ, svc taskSvc.Service) (*ExecuteResultConsumer, error) {
-	// NOTE: 在此建立专属消费群组，防止与其他后台状态同步事件发生消费争抢
-	consumer, err := q.Consumer(event.ExecuteResultEventName, "task_receive_execute")
-	if err != nil {
-		return nil, err
-	}
+func NewExecuteResultConsumer(consumer mq.Consumer, svc taskSvc.Service) *ExecuteResultConsumer {
 	return &ExecuteResultConsumer{
 		consumer: consumer,
 		svc:      svc,
 		logger:   elog.DefaultLogger,
-	}, nil
+	}
 }
 
 // Start 启动后台消费协程
@@ -48,10 +44,11 @@ func (c *ExecuteResultConsumer) Start(ctx context.Context) {
 
 // Consume 消费 Kafka 中的单条执行状态消息并触发本地业务状态机扭转
 func (c *ExecuteResultConsumer) Consume(ctx context.Context) error {
-	cm, err := c.consumer.Consume(ctx)
+	ctx, cm, err := mqx.ConsumeMessage(ctx, c.consumer)
 	if err != nil {
 		return fmt.Errorf("获取消息失败: %w", err)
 	}
+
 	var evt event.ExecuteResultEvent
 	if err = json.Unmarshal(cm.Value, &evt); err != nil {
 		return fmt.Errorf("解析消息失败: %w", err)

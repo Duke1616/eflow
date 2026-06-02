@@ -125,10 +125,7 @@ func (n *Notification) asyncSendNotification(ctx context.Context, info strategy.
 						Props: src.Props,
 					}
 				}),
-				Values: []notification.Value{
-					{Key: "order_id", Value: info.Ticket.Id},
-					{Key: "task_id", Value: src.TaskID},
-				},
+				Values:   notification.GenerateCallbackValues(info.Ticket.Id, src.TaskID, info.Ticket.TenantID),
 				HideForm: false, // 只有审批卡片可以不隐藏，以便用户录入
 			},
 		}

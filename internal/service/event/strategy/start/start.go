@@ -56,13 +56,10 @@ func (s *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 		WorkFlowID: info.Workflow.Id,
 		Receiver:   data.StartUser.LarkUserId,
 		Template: notification.Template{
-			Name:   domain.NotifyTypeRevoke,
-			Title:  title,
-			Fields: strategy.ConvertRuleFields(fields),
-			Values: []notification.Value{
-				{Key: "order_id", Value: info.Ticket.Id},
-				{Key: "task_id", Value: "100001"},
-			},
+			Name:     domain.NotifyTypeRevoke,
+			Title:    title,
+			Fields:   strategy.ConvertRuleFields(fields),
+			Values:   notification.GenerateCallbackValues(info.Ticket.Id, "100001", info.Ticket.TenantID),
 			HideForm: false, // 设为 false 让撤销卡片的按钮正常显示
 		},
 	}

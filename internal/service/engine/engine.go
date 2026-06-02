@@ -40,8 +40,8 @@ type Service interface {
 	GetAutomationTask(ctx context.Context, currentNodeId string, processInstId int) (model.Task, error)
 	// GetTasksByInstUsers 获取属于指定流程实例中待指定用户列表审批的待办任务
 	GetTasksByInstUsers(ctx context.Context, processInstId int, userIds []string) ([]model.Task, error)
-	// GetOrderIdByVariable 从流程实例的绑定参数中检索关联的业务工单唯一 ID 标识
-	GetOrderIdByVariable(ctx context.Context, processInstId int) (string, error)
+	// GetTicketIdByVariable 从流程实例的绑定参数中检索关联的业务工单唯一 ID 标识
+	GetTicketIdByVariable(ctx context.Context, processInstId int) (string, error)
 	// Upstream 获取指定任务节点物理链路上的所有上游节点集合
 	Upstream(ctx context.Context, taskId int) ([]model.Node, error)
 	// TaskInfo 获取指定审批任务的完整技术详情
@@ -125,8 +125,8 @@ func (s *engineService) Upstream(ctx context.Context, taskId int) ([]model.Node,
 	return engine.TaskUpstreamNodeList(taskId)
 }
 
-func (s *engineService) GetOrderIdByVariable(ctx context.Context, processInstId int) (string, error) {
-	return s.repo.GetOrderIdByVariable(ctx, processInstId)
+func (s *engineService) GetTicketIdByVariable(ctx context.Context, processInstId int) (string, error) {
+	return s.repo.GetTicketIdByVariable(ctx, processInstId)
 }
 
 func (s *engineService) GetTasksByInstUsers(ctx context.Context, processInstId int, userIds []string) ([]model.Task, error) {

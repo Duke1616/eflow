@@ -1,6 +1,9 @@
 package notification
 
 import (
+	"fmt"
+	"strconv"
+
 	"github.com/Duke1616/eflow/internal/domain"
 )
 
@@ -138,4 +141,27 @@ type Field struct {
 type Value struct {
 	Key   string      `json:"key"`
 	Value interface{} `json:"value"`
+}
+
+// GenerateCallbackValues 统一构建飞书卡片用户交互回调（CardAction）所必须的标准回调 Value 参数。
+// 强制约束工单 ID 命名键为 "ticket_id"，任务 ID 为 "task_id"，多租户隔离标识为 "tenant_id"，
+// 杜绝跨包及策略节点手工装配时因拼写不当产生的字段漏传漏洞。
+func GenerateCallbackValues(ticketID int64, taskID interface{}, tenantID int64) []Value {
+	var taskIDStr string
+	switch t := taskID.(type) {
+	case string:
+		taskIDStr = t
+	case int:
+		taskIDStr = strconv.Itoa(t)
+	case int64:
+		taskIDStr = strconv.FormatInt(t, 10)
+	default:
+		taskIDStr = fmt.Sprintf("%v", t)
+	}
+
+	return []Value{
+		{Key: "ticket_id", Value: ticketID},
+		{Key: "task_id", Value: taskIDStr},
+		{Key: "tenant_id", Value: tenantID},
+	}
 }

@@ -8,10 +8,16 @@ import (
 
 	"github.com/Duke1616/eflow/internal/domain"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
+	"github.com/Duke1616/eflow/pkg/mqx"
 	"github.com/ecodeclub/mq-api"
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/xen0n/go-workwx"
 )
+
+// WechatTicketEventProducer 企业微信 OA 审批流审批单详情事件生产者接口定义
+type WechatTicketEventProducer interface {
+	Produce(ctx context.Context, evt *workwx.OAApprovalDetail) error
+}
 
 // WechatApprovalCallbackConsumer 企业微信 OA 审批状态回调事件异步消费者
 type WechatApprovalCallbackConsumer struct {
@@ -23,19 +29,14 @@ type WechatApprovalCallbackConsumer struct {
 }
 
 // NewWechatApprovalCallbackConsumer 构造企业微信 OA 审批回调消费者
-func NewWechatApprovalCallbackConsumer(svc templateSvc.Service, q mq.MQ, p WechatTicketEventProducer, workApp *workwx.WorkwxApp) (*WechatApprovalCallbackConsumer, error) {
-	groupID := "wechat_oa_callback"
-	consumer, err := q.Consumer(WechatCallbackEventName, groupID)
-	if err != nil {
-		return nil, err
-	}
+func NewWechatApprovalCallbackConsumer(svc templateSvc.Service, consumer mq.Consumer, p WechatTicketEventProducer, workApp *workwx.WorkwxApp) *WechatApprovalCallbackConsumer {
 	return &WechatApprovalCallbackConsumer{
 		svc:      svc,
 		consumer: consumer,
 		logger:   elog.DefaultLogger,
 		producer: p,
 		workApp:  workApp,
-	}, nil
+	}
 }
 
 // Start 启动消息队列消费监听协程
@@ -53,7 +54,7 @@ func (c *WechatApprovalCallbackConsumer) Start(ctx context.Context) {
 
 // Consume 监听获取企业微信 OA 审批流回调事件，完成模板自愈绑定并触发详情拉取
 func (c *WechatApprovalCallbackConsumer) Consume(ctx context.Context) error {
-	cm, err := c.consumer.Consume(ctx)
+	ctx, cm, err := mqx.ConsumeMessage(ctx, c.consumer)
 	if err != nil {
 		return fmt.Errorf("获取消息失败: %w", err)
 	}

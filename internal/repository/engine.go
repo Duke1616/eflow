@@ -41,8 +41,8 @@ type IEngineRepository interface {
 	GetAutomationTask(ctx context.Context, currentNodeId string, processInstId int) (model.Task, error)
 	// GetTasksByInstUsers 获取属于指定用户组且在该实例下待办的任务列表
 	GetTasksByInstUsers(ctx context.Context, processInstId int, userIds []string) ([]model.Task, error)
-	// GetOrderIdByVariable 获取与当前工作流关联的业务工单唯一标识 ID
-	GetOrderIdByVariable(ctx context.Context, processInstId int) (string, error)
+	// GetTicketIdByVariable 获取与当前工作流关联的业务工单唯一标识 ID
+	GetTicketIdByVariable(ctx context.Context, processInstId int) (string, error)
 	// GetProxyNodeID 根据前置节点检索已产生的自动流转代理节点任务
 	GetProxyNodeID(ctx context.Context, processInstId int, prevNodeID string) (model.Task, error)
 	// GetProxyNodeByProcessInstId 检索属于该实例唯一的自动代理节点任务记录
@@ -118,8 +118,8 @@ func (repo *engineRepository) GetTasksByCurrentNodeId(ctx context.Context, proce
 	return repo.engineDao.GetTasksByCurrentNodeId(ctx, processInstId, currentNodeId)
 }
 
-func (repo *engineRepository) GetOrderIdByVariable(ctx context.Context, processInstId int) (string, error) {
-	return repo.engineDao.GetOrderIdByVariable(ctx, processInstId)
+func (repo *engineRepository) GetTicketIdByVariable(ctx context.Context, processInstId int) (string, error) {
+	return repo.engineDao.GetTicketIdByVariable(ctx, processInstId)
 }
 
 func (repo *engineRepository) GetTasksByInstUsers(ctx context.Context, processInstId int, userIds []string) ([]model.Task, error) {

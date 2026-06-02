@@ -20,6 +20,7 @@ import (
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
+	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/Duke1616/enotify/notify/feishu"
 	"github.com/chromedp/chromedp"
 	"github.com/ecodeclub/ekit/slice"
@@ -139,6 +140,12 @@ func (h *larkCallbackHandler) OnCardAction(ctx context.Context, cte *larkcallbac
 
 // Handle 执行具体的流转处理逻辑
 func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) error {
+	// 注入多租户上下文：从飞书卡片传回的 Value 中提取租户 ID 并注入上下文，避免被 GORM 租户插件误杀
+	tenantID := evt.GetTenantId()
+	if tenantID > 0 {
+		ctx = ctxutil.WithTenantID(ctx, tenantID)
+	}
+
 	taskId, err := evt.GetTaskIdInt()
 	if err != nil {
 		return err
@@ -476,23 +483,14 @@ func (h *larkCallbackHandler) withdraw(ctx context.Context, callback LarkCallbac
 }
 
 func getCallbackValue(callback LarkCallback) []notification.Value {
-	fields := []struct {
-		Key   string
-		Value string
-	}{
-		{"order_id", callback.GetTicketId()},
-		{"task_id", callback.GetTaskId()},
-		{"user_id", callback.GetUserId()},
-		{"action", string(Progress)},
-	}
+	// 优雅利用统一装配生成器获取 ticket_id, task_id 和 tenant_id 标准三元组
+	ticketID, _ := callback.GetTicketIdInt()
+	values := notification.GenerateCallbackValues(ticketID, callback.GetTaskId(), callback.GetTenantId())
 
-	values := make([]notification.Value, 0, len(fields))
-	for _, field := range fields {
-		values = append(values, notification.Value{
-			Key:   field.Key,
-			Value: field.Value,
-		})
-	}
-
+	// 追加回执卡片交互专属的 user_id 与行为参数，避免数据泄露或防重复拦截
+	values = append(values,
+		notification.Value{Key: "user_id", Value: callback.GetUserId()},
+		notification.Value{Key: "action", Value: string(Progress)},
+	)
 	return values
 }

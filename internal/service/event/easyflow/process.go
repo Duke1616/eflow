@@ -11,12 +11,13 @@ import (
 	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
-	process "github.com/Duke1616/eflow/internal/event/process"
+	"github.com/Duke1616/eflow/internal/event"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
+	"github.com/Duke1616/eflow/pkg/mqx"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
 	"golang.org/x/sync/errgroup"
@@ -36,7 +37,7 @@ const (
 // ProcessEvent easy-workflow 流程引擎反射事件驱动核心处理服务
 type ProcessEvent struct {
 	strategy    strategy.SendStrategy
-	producer    process.OrderStatusModifyEventProducer
+	producer    mqx.Producer[event.TicketStatusModifyEvent]
 	taskSvc     taskSvc.Service
 	ticketSvc   ticketSvc.Service
 	engineSvc   engineSvc.Service
@@ -45,7 +46,7 @@ type ProcessEvent struct {
 }
 
 func NewProcessEvent(
-	producer process.OrderStatusModifyEventProducer,
+	producer mqx.Producer[event.TicketStatusModifyEvent],
 	engineSvc engineSvc.Service,
 	taskSvc taskSvc.Service,
 	ticketSvc ticketSvc.Service,
@@ -87,7 +88,7 @@ func (e *ProcessEvent) EventAutomation(instID int, node *model.Node, prevNode mo
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 
-	orderId, err := e.engineSvc.GetOrderIdByVariable(ctx, instID)
+	orderId, err := e.engineSvc.GetTicketIdByVariable(ctx, instID)
 	if err != nil {
 		return err
 	}
@@ -202,7 +203,7 @@ func (e *ProcessEvent) LoadContext(ctx context.Context, instID int, node *model.
 
 	// 并发获取基础信息
 	eg.Go(func() error {
-		orderIdStr, err := e.engineSvc.GetOrderIdByVariable(ctx, instID)
+		orderIdStr, err := e.engineSvc.GetTicketIdByVariable(ctx, instID)
 		if err != nil {
 			return err
 		}

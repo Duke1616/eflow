@@ -65,6 +65,21 @@ func ExtractContext(ctx context.Context, msg *mq.Message) context.Context {
 	return ctx
 }
 
+// ProduceMessage 注入上下文元数据后发送原始 MQ 消息。
+func ProduceMessage(ctx context.Context, producer mq.Producer, msg *mq.Message) (*mq.ProducerResult, error) {
+	InjectContext(ctx, msg)
+	return producer.Produce(ctx, msg)
+}
+
+// ConsumeMessage 消费原始 MQ 消息，并返回从消息头恢复后的业务上下文。
+func ConsumeMessage(ctx context.Context, consumer mq.Consumer) (context.Context, *mq.Message, error) {
+	msg, err := consumer.Consume(ctx)
+	if err != nil {
+		return ctx, nil, err
+	}
+	return ExtractContext(ctx, msg), msg, nil
+}
+
 // getHeaderID 从 Header 中安全提取并解析 int64 类型的正整数 ID
 func getHeaderID(header mq.Header, key string) int64 {
 	valStr, ok := header[key]

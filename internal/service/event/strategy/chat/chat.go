@@ -279,9 +279,7 @@ func (n *Notification) buildNotifications(info strategy.Info, data *chatContext,
 				Title:    title,
 				Fields:   fields,
 				HideForm: true,
-				Values: []notification.Value{
-					{Key: "order_id", Value: info.Ticket.Id},
-				},
+				Values:   notification.GenerateCallbackValues(info.Ticket.Id, "", info.Ticket.TenantID),
 			},
 		}, true
 	})

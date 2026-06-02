@@ -34,10 +34,8 @@ func (p *GeneralProducer[T]) Produce(ctx context.Context, evt T) error {
 	msg := &mq.Message{
 		Value: data,
 	}
-	// 自动将租户及业务上下文注入 Kafka 消息头部
-	InjectContext(ctx, msg)
 
-	_, err = p.producer.Produce(ctx, msg)
+	_, err = ProduceMessage(ctx, p.producer, msg)
 	if err != nil {
 		return fmt.Errorf("向topic=%s发送event=%#v失败: %w", p.topic, evt, err)
 	}
