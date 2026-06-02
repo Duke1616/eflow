@@ -65,9 +65,8 @@ func (j *taskExecutionSyncJob) run(ctx context.Context) error {
 			if task.ExternalId == "" {
 				continue
 			}
-
-			taskId, err := strconv.ParseInt(task.ExternalId, 10, 64)
-			if err != nil {
+			taskId, err1 := strconv.ParseInt(task.ExternalId, 10, 64)
+			if err1 != nil {
 				j.logger.Error("解析 external_id 失败", elog.FieldErr(err), elog.String("external_id", task.ExternalId))
 				continue
 			}

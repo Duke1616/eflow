@@ -219,7 +219,7 @@ func (g *gormTaskDAO) CountByStatusAndKind(ctx context.Context, status uint8, ki
 func (g *gormTaskDAO) ListSuccessTasksByUtime(ctx context.Context, offset, limit int64, utime int64) ([]Task, error) {
 	var res []Task
 	err := g.db.WithContext(ctx).
-		Where("status = ? AND utime <= ? AND auto_passed = ?", domain.SUCCESS.ToUint8(), utime, false).
+		Where("status = ? AND utime >= ? AND auto_passed = ?", domain.SUCCESS.ToUint8(), utime, false).
 		Order("utime asc").Offset(int(offset)).Limit(int(limit)).Find(&res).Error
 	return res, err
 }
@@ -227,7 +227,7 @@ func (g *gormTaskDAO) ListSuccessTasksByUtime(ctx context.Context, offset, limit
 func (g *gormTaskDAO) TotalByUtime(ctx context.Context, utime int64) (int64, error) {
 	var count int64
 	err := g.db.WithContext(ctx).Model(&Task{}).
-		Where("status = ? AND utime <= ? AND auto_passed = ?", domain.SUCCESS.ToUint8(), utime, false).
+		Where("status = ? AND utime >= ? AND auto_passed = ?", domain.SUCCESS.ToUint8(), utime, false).
 		Count(&count).Error
 	return count, err
 }

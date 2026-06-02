@@ -60,8 +60,8 @@ func (j *PassProcessTaskJob) run(ctx context.Context) error {
 
 		for _, task := range tasks {
 			j.logger.Info("任务开启自动通过逻辑", elog.Int64("id", task.Id))
-			mt, err := j.engineSvc.GetAutomationTask(ctx, task.CurrentNodeId, task.ProcessInstId)
-			if err != nil {
+			mt, err1 := j.engineSvc.GetAutomationTask(ctx, task.CurrentNodeId, task.ProcessInstId)
+			if err1 != nil {
 				continue
 			}
 

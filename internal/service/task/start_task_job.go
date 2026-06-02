@@ -44,7 +44,7 @@ func (j *StartTaskJob) run(ctx context.Context) error {
 	for _, task := range tasks {
 		task := task
 		go func() {
-			if err := j.svc.StartTask(context.Background(), task.Id); err != nil {
+			if err = j.svc.StartTask(context.Background(), task.Id); err != nil {
 				j.logger.Error("任务启动失败", elog.FieldErr(err), elog.Int64("taskId", task.Id))
 			}
 		}()
