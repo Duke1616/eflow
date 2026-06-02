@@ -1,0 +1,26 @@
+package ealert
+
+import (
+	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
+	teamv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/team"
+	"google.golang.org/grpc"
+)
+
+// EALERTConn EALERT 专属连接通路接口
+type EALERTConn interface {
+	grpc.ClientConnInterface
+}
+
+// EALERTClient EALERT 专属高内聚客户端网关
+type EALERTClient struct {
+	TeamClient         teamv1.TeamServiceClient
+	NotificationClient notificationv1.NotificationServiceClient
+}
+
+// NewEALERTClient 初始化网关，使用专属 EALERTConn 接口
+func NewEALERTClient(cc EALERTConn) *EALERTClient {
+	return &EALERTClient{
+		TeamClient:         teamv1.NewTeamServiceClient(cc),
+		NotificationClient: notificationv1.NewNotificationServiceClient(cc),
+	}
+}

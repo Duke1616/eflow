@@ -3,7 +3,7 @@ package ioc
 import (
 	"time"
 
-	executorv1 "github.com/Duke1616/ecmdb/api/proto/gen/etask/executor/v1"
+	executorv1 "github.com/Duke1616/eflow/api/proto/gen/etask/executor/v1"
 	processConsumer "github.com/Duke1616/eflow/internal/event/process"
 	taskConsumer "github.com/Duke1616/eflow/internal/event/task"
 	templateConsumer "github.com/Duke1616/eflow/internal/event/template"
@@ -22,7 +22,7 @@ func InitTasks(
 	q mq.MQ,
 	processConsumer *processConsumer.ProcessEventConsumer,
 	wechatConsumer *ticketConsumer.WechatTicketConsumer,
-	larkwsServer *ticketConsumer.LarkCallbackTicketServer,
+	larkWsServer *ticketConsumer.LarkCallbackTicketServer,
 	wechatCallbackConsumer *templateConsumer.WechatApprovalCallbackConsumer,
 ) []Task {
 	consumer, err := taskConsumer.NewExecuteResultConsumer(q, taskSvc)
@@ -38,7 +38,7 @@ func InitTasks(
 		serviceTask.NewTaskExecutionSyncJob(taskSvc, executorSvc, 100, 10*time.Second),
 		processConsumer,
 		wechatConsumer,
-		larkwsServer,
+		larkWsServer,
 		wechatCallbackConsumer,
 	}
 }

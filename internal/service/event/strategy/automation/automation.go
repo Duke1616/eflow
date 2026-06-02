@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/notification"
+	"github.com/Duke1616/eflow/internal/pkg/notification/sender"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
+	"github.com/Duke1616/eflow/internal/service/event/errs"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
+	"github.com/Duke1616/enotify/notify/feishu"
 	"github.com/ecodeclub/ekit/slice"
-	"github.com/gotomicro/ego/core/elog"
 )
 
 const (
@@ -18,59 +22,78 @@ const (
 	ProcessNowSend = 2
 )
 
-// Notification 自动化节点通知策略
 type Notification struct {
 	strategy.Service
+	sender sender.NotificationSender
 }
 
-func NewNotification(base strategy.Service) *Notification {
+func NewNotification(base strategy.Service, sender sender.NotificationSender) *Notification {
 	return &Notification{
 		Service: base,
+		sender:  sender,
 	}
 }
 
-func (n *Notification) Send(ctx context.Context, info strategy.Info) (strategy.NotificationResponse, error) {
+func (n *Notification) Send(ctx context.Context, info strategy.Info) (notification.Response, error) {
 	// 1. 获取当前节点信息
 	_, rawProps, err := n.GetNodeProperty(info, info.CurrentNode.NodeID)
 	if err != nil {
-		return strategy.NotificationResponse{Msg: err.Error()}, fmt.Errorf("节点属性未配置: %v", err)
+		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), err.Error()), fmt.Errorf("%w: %v", errs.ErrNodeNotConfigured, err)
 	}
 
 	property, err := easyflow.ToNodeProperty[easyflow.AutomationProperty](easyflow.Node{Properties: rawProps})
 	if err != nil {
-		return strategy.NotificationResponse{Msg: err.Error()}, err
+		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), err.Error()), err
 	}
 
 	// 2. 权限与触发校验
 	if !n.IsGlobalNotify(info.Workflow) {
-		return strategy.NotificationResponse{Msg: "全局通知已关闭"}, nil
+		return notification.NewSuccessResponse(0, "全局通知已关闭"), nil
 	}
 
 	if !property.IsNotify {
-		return strategy.NotificationResponse{Msg: "【自动化节点】未开启消息通知"}, nil
+		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), "【自动化节点】未开启消息通知"), fmt.Errorf("%w", errs.ErrNodeNotConfigured)
 	}
 
 	if !containsAutoNotifyMethod(property.NotifyMethod, ProcessNowSend) {
-		return strategy.NotificationResponse{Msg: "【自动化节点】节点未开启消息通知模式"}, nil
+		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), "【自动化节点】节点未开启消息通知模式"), fmt.Errorf("%w", errs.ErrNodeNotConfigured)
 	}
 
 	// 3. 获取元数据与自动化任务结果
 	nodes, _, _ := n.GetNodeProperty(info, info.CurrentNode.NodeID)
 	data, err := n.FetchRequiredData(ctx, info, nodes)
 	if err != nil {
-		return strategy.NotificationResponse{Msg: err.Error()}, err
+		return notification.NewErrorResponse(string(errs.ErrorCodeFetchDataFailed), err.Error()), fmt.Errorf("%w: %v", errs.ErrFetchData, err)
 	}
 
-	title := rule.GenerateAutoTitle("你提交", data.TName)
+	// 4. 发送消息
+	fields := strategy.BuildWantResultFields(data.WantResult)
 
-	// 4. 模拟发送消息
-	n.Logger().Info("[NOTIFICATION automation] 模拟发送自动化执行结果通知给发起人",
-		elog.Int("instance_id", info.InstID),
-		elog.String("title", title),
-		elog.String("receiver", data.StartUser.Username),
-		elog.Any("channel", info.Channel))
+	// 每两个字段插入一个空行（保持原有格式）
+	formattedFields := make([]notification.Field, 0, len(fields)*2)
+	for i, field := range fields {
+		formattedFields = append(formattedFields, field)
+		if (i+1)%2 == 0 && i < len(fields)-1 {
+			formattedFields = append(formattedFields, notification.Field{
+				IsShort: false,
+				Tag:     "lark_md",
+				Content: "",
+			})
+		}
+	}
 
-	return strategy.NotificationResponse{Msg: "success"}, nil
+	return n.sender.Send(ctx, notification.Notification{
+		Channel:      notification.Channel(info.Channel),
+		ReceiverType: feishu.ReceiveIDTypeUserID,
+		WorkFlowID:   info.Workflow.Id,
+		Receiver:     data.StartUser.LarkUserId,
+		Template: notification.Template{
+			Name:     domain.NotifyTypeApproval,
+			Title:    rule.GenerateAutoTitle("你提交", data.TName),
+			Fields:   formattedFields,
+			HideForm: true,
+		},
+	})
 }
 
 func containsAutoNotifyMethod(methods []int64, target int64) bool {

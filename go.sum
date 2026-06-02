@@ -7,8 +7,12 @@ github.com/BurntSushi/toml v1.1.0 h1:ksErzDEI1khOiGPgpwuI7x2ebx/uXQNw7xJpn9Eq1+I
 github.com/BurntSushi/toml v1.1.0/go.mod h1:CxXYINrC8qIiEnFrOxCa7Jy5BFHlXnUU2pbicEuybxQ=
 github.com/Duke1616/easy-workflow v1.0.5 h1:p2JXLUUSRhhOMvuJREMciJTjCqUzSCATjfdR9xFHzXU=
 github.com/Duke1616/easy-workflow v1.0.5/go.mod h1:hVMIuk8yoJXpIOu59HXBTKgfOHtpx8nBfzdvKk6c6Dw=
+github.com/Duke1616/ecmdb v1.11.0 h1:qHj4KGyRes2lAkrBqKiJoefU5w5dukRf/TDLgVeMHbc=
+github.com/Duke1616/ecmdb v1.11.0/go.mod h1:djR+myIzjmCWHLIMgTVauvjNmg0QfQ8rvqSUNB/fFYQ=
 github.com/Duke1616/eiam v0.0.7 h1:tfWvCOXwj9IFzKluIVp96f4fRAI8CAlvm4epB8OsRjA=
 github.com/Duke1616/eiam v0.0.7/go.mod h1:UUZPmVgUZB4LsjNg2ZWGXDdvGovYoXZKQj6tJmnpzp0=
+github.com/Duke1616/enotify v0.1.25-0.20260311115016-f762700e83e9 h1:qc0xHyvDM2+8hbXgB8fOLYqDVsNt2pf/8fIYbgibIq0=
+github.com/Duke1616/enotify v0.1.25-0.20260311115016-f762700e83e9/go.mod h1:zsmuFYtr0k+5szd5cjkkLcetveKbBOsSlmz0t1HmUcw=
 github.com/Duke1616/etask v0.0.6 h1:73I33D7AmfRqAhWyzD3IBQy6+zPhT/C7rKLTytJqdUQ=
 github.com/Duke1616/etask v0.0.6/go.mod h1:iBc4mSaRDNhu9Zyw8ZX0ZYGbnnNgHt9/ray0aP2WG30=
 github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible/go.mod h1:r7JcOSlj0wfOMncg0iLm8Leh48TZaKVeNIfJntJ2wa0=
@@ -271,6 +275,8 @@ github.com/jinzhu/inflection v1.0.0/go.mod h1:h+uFLlag+Qp1Va5pdKtLDYj+kHp5pxUVkr
 github.com/jinzhu/now v1.1.5 h1:/o9tlHleP7gOFmsnYNz3RGnqzefHA47wQpKrrdTIwXQ=
 github.com/jinzhu/now v1.1.5/go.mod h1:d3SSVoowX0Lcu0IBviAWJpolVfI5UJVZZ7cO71lE/z8=
 github.com/jmespath/go-jmespath v0.0.0-20180206201540-c2b33e8439af/go.mod h1:Nht3zPeWKUH0NzdCt2Blrr5ys8VGpn0CEB0cQHVjt7k=
+github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
+github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
 github.com/jonboulle/clockwork v0.1.0/go.mod h1:Ii8DK3G1RaLaWxj9trq07+26W01tbo22gdxWY5EU2bo=
 github.com/jpillora/backoff v1.0.0/go.mod h1:J/6gKK9jxlEcS3zixgDgUAsiuZ7yrSoa/FX5e0EB2j4=
 github.com/json-iterator/go v1.1.6/go.mod h1:+SdeFBvtyEkXs7REEP0seUULqWtbJapLOCVDaaPEHmU=
@@ -310,6 +316,8 @@ github.com/leodido/go-urn v1.4.0/go.mod h1:bvxc+MVxLKB4z00jd1z+Dvzr47oO32F/QSNjS
 github.com/lightstep/lightstep-tracer-common/golang/gogo v0.0.0-20190605223551-bc2310a04743/go.mod h1:qklhhLq1aX+mtWk9cPHPzaBjWImj5ULL6C7HFJtXQMM=
 github.com/lightstep/lightstep-tracer-go v0.18.1/go.mod h1:jlF1pusYV4pidLvZ+XD0UBX0ZE6WURAspgAczcDHrL4=
 github.com/lyft/protoc-gen-validate v0.0.13/go.mod h1:XbGvPuh87YZc5TdIa2/I4pLk0QoUACkjt2znoq26NVQ=
+github.com/magiconair/properties v1.8.7 h1:IeQXZAiQcpL9mgcAe1Nu6cX9LLw6ExEHKjN0VQdvPDY=
+github.com/magiconair/properties v1.8.7/go.mod h1:Dhd985XPs7jluiymwWYZ0G4Z61jb3vdS329zhj2hYo0=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
 github.com/mattn/go-isatty v0.0.3/go.mod h1:M+lRXTBqGeGNdLjl/ufCoiOlB5xdOkqRJdNxMWT7Zi4=
 github.com/mattn/go-isatty v0.0.4/go.mod h1:M+lRXTBqGeGNdLjl/ufCoiOlB5xdOkqRJdNxMWT7Zi4=

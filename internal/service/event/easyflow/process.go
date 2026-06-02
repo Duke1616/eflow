@@ -79,7 +79,7 @@ func (e *ProcessEvent) EventStart(instID int, node *model.Node, prevNode model.N
 	}
 
 	// 2. 绑定工单与流程实例
-	return e.ticketSvc.BindProcessInstanceID(ctx, fCtx.Order.Id, instID)
+	return e.ticketSvc.BindProcessInstanceID(ctx, fCtx.Ticket.Id, instID)
 }
 
 // EventAutomation 自动化网关节点处理：同步向任务表单写入自动化任务并异步调度
@@ -229,7 +229,7 @@ func (e *ProcessEvent) LoadContext(ctx context.Context, instID int, node *model.
 
 	return &strategy.FlowContext{
 		InstID:      instID,
-		Order:       orderInfo,
+		Ticket:      orderInfo,
 		Workflow:    wf,
 		Instance:    inst,
 		CurrentNode: node,

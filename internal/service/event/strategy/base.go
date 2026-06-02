@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime/debug"
+	"sort"
 	"time"
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/notification"
 	"github.com/Duke1616/eflow/internal/pkg/resolve"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
@@ -24,6 +26,9 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// Service 提供所有通知策略共用的基础服务和辅助方法
+//
+//go:generate mockgen -source=./base.go -package=strategymocks -destination=../mocks/strategy.mock.go -typed Service
 type Service interface {
 	// FetchRequiredData 并行获取流程运行的基础通知元数据
 	FetchRequiredData(ctx context.Context, info Info, nodes []easyflow.Node) (*NotificationData, error)
@@ -36,7 +41,7 @@ type Service interface {
 	// EnrichTargets 解析包装运行时审批人匹配的目标元数据
 	EnrichTargets(info Info, assignees []easyflow.Assignee) []resolve.Target
 	// PrepareCommonFields 解析工单数据构建通用属性公示字段
-	PrepareCommonFields(info Info, data *NotificationData) []rule.Field
+	PrepareCommonFields(info Info, data *NotificationData) []notification.Field
 	// ResolveAssignees 并发解析当前节点的审批人名单并自动同步注入
 	ResolveAssignees(ctx context.Context, info *Info, assignees []easyflow.Assignee) ([]domain.User, error)
 	// SafeGo 安全执行带 Panic 恢复机制的异步延时任务
@@ -146,13 +151,13 @@ func (s *service) FetchRequiredData(ctx context.Context, info Info, nodes []easy
 
 	errGroup.Go(func() error {
 		var err error
-		data.Rules, data.TName, err = s.getRules(ctx, info.Order)
+		data.Rules, data.TName, err = s.getRules(ctx, info.Ticket)
 		return err
 	})
 
 	errGroup.Go(func() error {
 		resp, err := s.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
-			Usernames: []string{info.Order.CreateBy},
+			Usernames: []string{info.Ticket.CreateBy},
 		})
 		if err != nil {
 			return err
@@ -210,26 +215,6 @@ func (s *service) FetchTasksWithRetry(ctx context.Context, info Info) ([]model.T
 			continue
 		}
 	}
-}
-
-func (s *service) PrepareCommonFields(info Info, data *NotificationData) []rule.Field {
-	ruleFields := rule.GetFields(data.Rules, info.Order.Provide.ToUint8(), info.Order.Data)
-	fields := slice.Map(ruleFields, func(idx int, src rule.Field) rule.Field {
-		return rule.Field{
-			IsShort: src.IsShort,
-			Tag:     src.Tag,
-			Content: src.Content,
-		}
-	})
-
-	for field, value := range data.WantResult {
-		fields = append(fields, rule.Field{
-			IsShort: true,
-			Tag:     "lark_md",
-			Content: fmt.Sprintf(`**%s:**\n%v`, field, value),
-		})
-	}
-	return fields
 }
 
 func (s *service) getRules(ctx context.Context, oInfo domain.Ticket) ([]rule.Rule, string, error) {
@@ -316,12 +301,12 @@ func (s *service) EnrichTargets(info Info, assignees []easyflow.Assignee) []reso
 		switch src.Rule {
 		case easyflow.LEADER, easyflow.MAIN_LEADER, easyflow.FOUNDER:
 			if len(values) == 0 {
-				values = []string{info.Order.CreateBy}
+				values = []string{info.Ticket.CreateBy}
 			}
 		case easyflow.TEMPLATE:
 			var usernames []string
 			for _, field := range values {
-				if val, ok := info.Order.Data[field]; ok {
+				if val, ok := info.Ticket.Data[field]; ok {
 					usernames = append(usernames, s.extractUsernamesFromField(field, val)...)
 				}
 			}
@@ -400,6 +385,69 @@ func (rm RecipientMap) GetID(username string) string {
 		return u.WechatUserId
 	default:
 		return u.LarkUserId
+	}
+}
+
+// ConvertRuleFields 将 rule.Field 转换为 notification.Field
+func ConvertRuleFields(fields []rule.Field) []notification.Field {
+	return slice.Map(fields, func(idx int, src rule.Field) notification.Field {
+		return notification.Field{
+			IsShort: src.IsShort,
+			Tag:     src.Tag,
+			Content: src.Content,
+		}
+	})
+}
+
+// BuildWantResultFields 构建自动化任务结果字段
+func BuildWantResultFields(wantResult map[string]interface{}) []notification.Field {
+	keys := make([]string, 0, len(wantResult))
+	for k := range wantResult {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var fields []notification.Field
+	for _, k := range keys {
+		fields = append(fields, notification.Field{
+			IsShort: true,
+			Tag:     "lark_md",
+			Content: fmt.Sprintf("**%s:**\n%v", k, wantResult[k]),
+		})
+	}
+	return notification.AddRowSpacers(fields)
+}
+
+// PrepareCommonFields 统一解析工单数据的公示字段
+func (s *service) PrepareCommonFields(info Info, data *NotificationData) []notification.Field {
+	ruleFields := rule.GetFields(data.Rules, info.Ticket.Provide.ToUint8(), info.Ticket.Data)
+	fields := slice.Map(ruleFields, func(idx int, src rule.Field) notification.Field {
+		return notification.Field{
+			IsShort: src.IsShort,
+			Tag:     src.Tag,
+			Content: src.Content,
+		}
+	})
+
+	for field, value := range data.WantResult {
+		fields = append(fields, notification.Field{
+			IsShort: true,
+			Tag:     "lark_md",
+			Content: fmt.Sprintf(`**%s:**\n%v`, field, value),
+		})
+	}
+	return fields
+}
+
+// GetChatChannel 映射字符串渠道为 notification.Channel 类型
+func GetChatChannel(channel string) notification.Channel {
+	switch channel {
+	case "FEISHU", "LARK_CARD":
+		return notification.ChannelLarkCard
+	case "WECHAT":
+		return notification.ChannelWechat
+	default:
+		return notification.ChannelLarkCard
 	}
 }
 

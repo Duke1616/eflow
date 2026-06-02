@@ -5,44 +5,51 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Bunny3th/easy-workflow/workflow/model"
+	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/notification"
+	"github.com/Duke1616/eflow/internal/pkg/notification/sender"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
+	"github.com/Duke1616/eflow/internal/service/event/errs"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
+	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
 )
 
-// Notification 抄送节点通知策略
 type Notification struct {
 	strategy.Service
+	sender sender.NotificationSender
 }
 
-func NewNotification(base strategy.Service) *Notification {
+func NewNotification(base strategy.Service, sender sender.NotificationSender) *Notification {
 	return &Notification{
 		Service: base,
+		sender:  sender,
 	}
 }
 
-func (n *Notification) Send(ctx context.Context, info strategy.Info) (strategy.NotificationResponse, error) {
+func (n *Notification) Send(ctx context.Context, info strategy.Info) (notification.Response, error) {
 	// 1. 获取节点属性
 	nodes, rawProps, err := n.GetNodeProperty(info, info.CurrentNode.NodeID)
 	if err != nil {
-		return strategy.NotificationResponse{Msg: err.Error()}, err
+		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), err.Error()), err
 	}
 	property, err := easyflow.ToNodeProperty[easyflow.UserProperty](easyflow.Node{Properties: rawProps})
 	if err != nil {
-		return strategy.NotificationResponse{Msg: fmt.Sprintf("节点属性解析失败: %v", err)}, err
+		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), fmt.Sprintf("节点属性解析失败: %v", err)), err
 	}
 
 	// 2. 加载基础数据
 	data, err := n.FetchRequiredData(ctx, info, nodes)
 	if err != nil {
-		return strategy.NotificationResponse{Msg: err.Error()}, err
+		return notification.NewErrorResponse(string(errs.ErrorCodeFetchDataFailed), err.Error()), err
 	}
 
 	// 3. 解析抄送人员并自动同步到节点
 	users, err := n.ResolveAssignees(ctx, &info, property.NormalizeAssignees())
 	if err != nil {
-		return strategy.NotificationResponse{Msg: err.Error()}, err
+		return notification.NewErrorResponse(string(errs.ErrorCodeResolveRuleFailed), err.Error()), err
 	}
 
 	// 4. 异步处理
@@ -50,7 +57,7 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (strategy.N
 		n.asyncHandleCarbonCopy(sendCtx, info, data, strategy.NewRecipientMap(users, info.Channel))
 	})
 
-	return strategy.NotificationResponse{Msg: "success"}, nil
+	return notification.NewSuccessResponse(0, "success"), nil
 }
 
 func (n *Notification) asyncHandleCarbonCopy(ctx context.Context, info strategy.Info, data *strategy.NotificationData, userMap strategy.RecipientMap) {
@@ -61,21 +68,35 @@ func (n *Notification) asyncHandleCarbonCopy(ctx context.Context, info strategy.
 		return
 	}
 
-	// 2. 模拟发送通知
+	// 2. 发送消息
 	if n.IsGlobalNotify(info.Workflow) {
 		title := rule.GenerateCCTitle(data.StartUser.DisplayName, data.TName)
+		fields := n.PrepareCommonFields(info, data)
 
-		for _, t := range tasks {
-			n.Logger().Info("[NOTIFICATION CC] 模拟发送抄送通知",
-				elog.Int("instance_id", info.InstID),
-				elog.Int("taskId", t.TaskID),
-				elog.String("title", title),
-				elog.String("receiver", t.UserID),
-				elog.Any("channel", info.Channel))
+		ns := slice.Map(tasks, func(idx int, src model.Task) notification.Notification {
+			receiver := userMap.GetID(src.UserID)
+			return notification.Notification{
+				Channel:    notification.Channel(info.Channel),
+				WorkFlowID: info.Workflow.Id,
+				Receiver:   receiver,
+				Template: notification.Template{
+					Name:     domain.NotifyTypeCC,
+					Title:    title,
+					Fields:   fields,
+					Values:   []notification.Value{{Key: "order_id", Value: info.Ticket.Id}},
+					HideForm: true,
+				},
+			}
+		})
+
+		for _, msg := range ns {
+			if _, err = n.sender.Send(ctx, msg); err != nil {
+				n.Logger().Error("Notification 消息发送失败", elog.FieldErr(err), elog.String("receiver", msg.Receiver))
+			}
 		}
 	}
 
-	// 3. 立即自动通过抄送任务，防止流程在此节点阻塞
+	// 3. 立即自动通过
 	for _, t := range tasks {
 		if err = n.PassTask(ctx, t.TaskID, "抄送节点自动通过"); err != nil {
 			n.Logger().Error("抄送节点自动通过失败", elog.FieldErr(err), elog.Any("taskId", t.TaskID))

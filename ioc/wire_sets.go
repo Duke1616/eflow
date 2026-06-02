@@ -5,6 +5,10 @@ import (
 	"sync"
 
 	easyEngine "github.com/Bunny3th/easy-workflow/workflow/engine"
+	"github.com/Duke1616/eflow/internal/client/ealert"
+	"github.com/Duke1616/eflow/internal/client/ecmdb"
+	"github.com/Duke1616/eflow/internal/client/eiam"
+	"github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/event/process"
 	templateEvent "github.com/Duke1616/eflow/internal/event/template"
 	ticketEvent "github.com/Duke1616/eflow/internal/event/ticket"
@@ -25,6 +29,8 @@ import (
 	userstrategy "github.com/Duke1616/eflow/internal/service/event/strategy/user"
 	runnerSvc "github.com/Duke1616/eflow/internal/service/runner"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
+	"github.com/Duke1616/eflow/internal/service/task/dispatch"
+	"github.com/Duke1616/eflow/internal/service/task/scheduler"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
@@ -34,8 +40,6 @@ import (
 	"github.com/Duke1616/eflow/internal/web/template"
 	"github.com/Duke1616/eflow/internal/web/ticket"
 	"github.com/Duke1616/eflow/internal/web/workflow"
-	"github.com/Duke1616/eflow/internal/client/ecmdb"
-	"github.com/Duke1616/eflow/internal/client/eiam"
 	"github.com/ecodeclub/mq-api"
 	"github.com/google/wire"
 	"gorm.io/gorm"
@@ -95,6 +99,9 @@ var (
 		repository.NewTaskRepository,
 		taskSvc.NewTaskService,
 		task.NewHandler,
+		scheduler.NewScheduler,
+		dispatch.NewTaskDispatcher,
+		InitCrypto,
 	)
 
 	// TicketSet 工单核心模块的 Provider 集合
@@ -136,31 +143,41 @@ var (
 		// 消息通知分发器
 		InitSendStrategy,
 
-		// 流程状态与核心反射事件处理器/Kafka 消费者/三方回调/审批模板自愈
+				// 流程状态与核心反射事件处理器/Kafka 消费者/三方回调/审批模板自愈
 		InitLarkClient,
 		ticketEvent.NewUserServiceAdapter,
 		ticketEvent.NewWechatTicketConsumer,
 		ticketEvent.NewLarkCallbackHandler,
-		ticketEvent.NewLarkCallbackTicketServer,
+		InitLarkDispatcher,
+		InitLarkServer,
 		templateEvent.NewWechatTicketEventProducer,
 		templateEvent.NewWechatApprovalCallbackConsumer,
 		InitOrderStatusModifyEventProducer,
 		InitWorkflowEngineOnce,
 		process.NewProcessEventConsumer,
+
+		// 初始化通知发送器
+		InitNotificationSender,
 	)
 
 	grpcSet = wire.NewSet(
 		InitRegistry,
 		InitEIAMGrpcClient,
 		InitECMDBGrpcClient,
+		InitEALERTGrpcClient,
+		InitETASKGrpcClient,
 
 		// 引入本地客户端网关
 		ecmdb.NewECMDBClient,
 		eiam.NewEIAMClient,
+		ealert.NewEALERTClient,
+		etask.NewETASKClient,
 
 		// 导出具体的 Client，直接满足底层 Service 的注入需求！
-		wire.FieldsOf(new(*ecmdb.ECMDBClient), "TaskClient", "ExecutorClient", "TeamClient", "RotaClient"),
+		wire.FieldsOf(new(*ecmdb.ECMDBClient), "RotaClient"),
 		wire.FieldsOf(new(*eiam.EIAMClient), "UserClient"),
+		wire.FieldsOf(new(*etask.ETASKClient), "TaskClient", "ExecutorClient"),
+		wire.FieldsOf(new(*ealert.EALERTClient), "TeamClient", "NotificationClient"),
 	)
 	// WebSet Web 服务 Provider 集合
 	WebSet = wire.NewSet(

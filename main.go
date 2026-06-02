@@ -17,15 +17,18 @@ var cfgFile string
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "eflow",
-		Short: "eflow 流程引擎统一入口",
+		Short: "eflow 工单系统统一入口",
 	}
 
+	// 1. 设置全局配置文件参数
 	dir, _ := os.Getwd()
 	defaultCfg := dir + "/config/prod.yaml"
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", defaultCfg, "配置文件路径")
 
+	// 2. 初始化配置中心
 	cobra.OnInitialize(initViper)
 
+	// 3. 注册启动服务的子命令
 	rootCmd.AddCommand(server.NewCommand())
 	rootCmd.AddCommand(migrate.NewCommand())
 

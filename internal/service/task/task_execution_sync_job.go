@@ -7,13 +7,13 @@ import (
 	"sync"
 	"time"
 
-	executorv1 "github.com/Duke1616/ecmdb/api/proto/gen/etask/executor/v1"
+	executorv1 "github.com/Duke1616/eflow/api/proto/gen/etask/executor/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/gotomicro/ego/core/elog"
 )
 
-// TaskExecutionSyncJob 远程分布式任务执行状态定时拉取与同步后台任务
-type TaskExecutionSyncJob struct {
+// taskExecutionSyncJob 远程分布式任务执行状态定时拉取与同步后台任务
+type taskExecutionSyncJob struct {
 	svc         Service
 	executorSvc executorv1.TaskExecutionServiceClient
 	limit       int64
@@ -22,8 +22,8 @@ type TaskExecutionSyncJob struct {
 }
 
 // NewTaskExecutionSyncJob 实例化远程分布式任务状态同步任务
-func NewTaskExecutionSyncJob(svc Service, executorSvc executorv1.TaskExecutionServiceClient, limit int64, interval time.Duration) *TaskExecutionSyncJob {
-	return &TaskExecutionSyncJob{
+func NewTaskExecutionSyncJob(svc Service, executorSvc executorv1.TaskExecutionServiceClient, limit int64, interval time.Duration) *taskExecutionSyncJob {
+	return &taskExecutionSyncJob{
 		svc:         svc,
 		executorSvc: executorSvc,
 		limit:       limit,
@@ -33,7 +33,7 @@ func NewTaskExecutionSyncJob(svc Service, executorSvc executorv1.TaskExecutionSe
 }
 
 // Start 启动分布式任务执行结果状态的定时拉取与校准同步协程
-func (j *TaskExecutionSyncJob) Start(ctx context.Context) {
+func (j *taskExecutionSyncJob) Start(ctx context.Context) {
 	ticker := time.NewTicker(j.interval)
 	defer ticker.Stop()
 	for {
@@ -48,7 +48,7 @@ func (j *TaskExecutionSyncJob) Start(ctx context.Context) {
 	}
 }
 
-func (j *TaskExecutionSyncJob) run(ctx context.Context) error {
+func (j *taskExecutionSyncJob) run(ctx context.Context) error {
 	offset := int64(0)
 	for {
 		tasks, total, err := j.svc.ListTaskByStatusAndKind(ctx, offset, j.limit,
@@ -91,7 +91,7 @@ func (j *TaskExecutionSyncJob) run(ctx context.Context) error {
 	return nil
 }
 
-func (j *TaskExecutionSyncJob) batchSyncTaskExecutions(ctx context.Context, taskIds []int64, syncTasks []domain.Task) {
+func (j *taskExecutionSyncJob) batchSyncTaskExecutions(ctx context.Context, taskIds []int64, syncTasks []domain.Task) {
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 

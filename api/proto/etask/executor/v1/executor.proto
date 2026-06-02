@@ -1,0 +1,180 @@
+syntax = "proto3";
+
+package etask.executor.v1;
+
+option go_package = "etask/executor/v1;executor";
+
+enum ExecutionStatus {
+  UNKNOWN = 0; // 未知状态
+  RUNNING = 1; // 正在执行
+  FAILED_RETRYABLE = 2; // 可重试失败
+  FAILED_RESCHEDULABLE = 3; // 可重调度失败
+  FAILED = 4; // 不可重试失败
+  SUCCESS = 5; // 执行成功
+}
+
+message ExecutionState {
+  int64 id = 1;
+  int64 task_id = 2;
+  string task_name = 3;
+  // 中断时刻执行节点的执行进度
+  ExecutionStatus status = 4; // RUNNING，FAILED_RETRYABLE，FAILED，SUCCESS
+  // 0-100 的数字。代表进度
+  // RUNNING 状态才有意义
+  int32 running_progress = 5;
+  // 执行节点请求调度节点执行重调度，
+  // 调度节点无需调interrupt，调度节点可以直接重调度，因为此时执行节点必然已经停止了
+  bool request_reschedule = 6;
+  // 重调度（执行节点主动提出）或者中断后的恢复参数（调度节点主动要求）
+  // 用于重调度或中断恢复重新调度的参数
+  // 比如：调用 A 节点上，中断任务
+  // A 节点返回 offset = 10000, limit = 100
+  // 你后续重调度到 B 节点上，
+  // 传递给 B 节点的 ExecuteRequest 的 params 里面就包含 offset, limit
+  map<string, string> rescheduled_params = 7;
+  // 执行节点的 nodeID，用于记录是哪个节点处理了任务
+  string executor_node_id = 8;
+  // 任务执行的结构化结果（JSON 格式字符串）
+  // 通过 FD3 或 want_result 函数返回的结构化数据
+  string task_result = 9;
+}
+
+// ExecutorService 执行节点需要实现的接口，以便调度节点可以通知执行节点执行任务、中断任务及查询任务执行状态。
+service ExecutorService {
+  // 执行一个任务
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+  // 中断一个正在执行的任务
+  rpc Interrupt(InterruptRequest) returns (InterruptResponse);
+  // 查询一个任务的状态（用于轮询模式）
+  rpc Query(QueryRequest) returns (QueryResponse);
+  // 查询业务方任务总数量
+  rpc Prepare(PrepareRequest) returns (PrepareResponse);
+}
+
+message ExecuteRequest {
+  int64 eid = 1; // execution id
+  int64 task_id = 2;
+  string task_name = 3;
+  string task_handler_name = 4;
+  // 这里有两部分
+  // 1 一部分是通过管理后台，业务方自己搞的参数
+  // 2. 另外一部分是我们调度用的，比如说 offset, limit
+  // 即包含了业务参数和调度参数 (e.g., offset, limit)
+  map<string, string> params = 5;
+}
+
+message ExecuteResponse {
+  ExecutionState execution_state = 1;
+}
+
+message InterruptRequest {
+  int64 eid = 1;
+}
+
+message InterruptResponse {
+  bool success = 1; // 是否成功中断
+  ExecutionState execution_state = 3;
+}
+
+message QueryRequest {
+  int64 eid = 1;
+}
+
+message QueryResponse {
+  ExecutionState execution_state = 1;
+}
+
+message PrepareRequest {
+  int64 eid = 1; // execution id
+  int64 task_id = 2;
+  string task_name = 3;
+  // 这里有两部分
+  // 1 一部分是通过管理后台，业务方自己搞的参数
+  // 2. 另外一部分是我们调度用的，比如说 offset, limit
+  // 即包含了业务参数和调度参数 (e.g., offset, limit)
+  map<string, string> params = 4;
+}
+
+message PrepareResponse {
+  map<string, string> params = 1;
+}
+
+// ==================== 拉取模式 (Pull) 新增 ====================
+
+// 执行节点长轮询发起请求获取活儿
+message PullTaskRequest {
+  string service_name = 1;     // 这个机器所属的分组 ServiceName (比如：ework-executor-node1)
+  repeated string handlers = 2; // 这台机器目前可支持的所有 Handler 名字 (如 shell, demo)
+  string node_id = 3;           // 具体这台机器的唯一实例 ID
+}
+
+message PullTaskResponse {
+  bool has_task = 1;         // 是否取到活儿了
+  // 如果取到了，直接复用刚才的 ExecuteRequest 下发给它！
+  ExecuteRequest task_req = 2;
+}
+
+// AgentService 专门供边缘执行节点回调和拉取的拉取接口（只应跑在调度中心）
+service AgentService {
+  rpc PullTask(PullTaskRequest) returns (PullTaskResponse);
+}
+
+// ==================== 任务执行管理 (Management) ====================
+
+service TaskExecutionService {
+  // 列出任务执行记录
+  rpc ListTaskExecutions(ListTaskExecutionsRequest) returns (ListTaskExecutionsResponse);
+  // 获取执行日志
+  rpc GetExecutionLogs(GetExecutionLogsRequest) returns (GetExecutionLogsResponse);
+  // 批量列出任务执行记录
+  rpc BatchListTaskExecutions(BatchListTaskExecutionsRequest) returns (BatchListTaskExecutionsResponse);
+}
+
+message ListTaskExecutionsRequest {
+  int64 task_id = 1;
+}
+
+message BatchListTaskExecutionsRequest {
+  repeated int64 task_ids = 1;
+}
+
+message TaskExecution {
+  int64 id = 1;
+  int64 task_id = 2;
+  string task_name = 3;
+  int64 start_time = 4;
+  int64 end_time = 5;
+  ExecutionStatus status = 6;
+  int32 running_progress = 7;
+  string executor_node_id = 8;
+  string task_result = 9;
+}
+
+message ListTaskExecutionsResponse {
+  repeated TaskExecution executions = 1;
+}
+
+message TaskExecutionList {
+  repeated TaskExecution executions = 1;
+}
+
+message BatchListTaskExecutionsResponse {
+  map<int64, TaskExecutionList> results = 1; // key is task_id
+}
+
+message GetExecutionLogsRequest {
+  int64 execution_id = 1;
+  int64 min_id = 2;
+  int32 limit = 3;
+}
+
+message ExecutionLog {
+  int64 id = 1;
+  int64 time = 2;
+  string content = 3;
+}
+
+message GetExecutionLogsResponse {
+  repeated ExecutionLog logs = 1;
+  int64 max_id = 2;
+}

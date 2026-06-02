@@ -2,21 +2,18 @@ package task
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"strconv"
-	"sync"
 	"time"
 
-	taskv1 "github.com/Duke1616/ecmdb/api/proto/gen/etask/task/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/service/codebook"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eflow/internal/service/runner"
+	"github.com/Duke1616/eflow/internal/service/task/dispatch"
+	"github.com/Duke1616/eflow/internal/service/task/scheduler"
 	"github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
@@ -75,21 +72,21 @@ type taskService struct {
 	workflowSvc workflow.Service
 	codebookSvc codebook.Service
 	runnerSvc   runner.Service
-	grpcClient  taskv1.TaskServiceClient
-	scheduler   *taskScheduler
+	scheduler   scheduler.Scheduler
+	dispatcher  dispatch.TaskDispatcher
 	logger      *elog.Component
 }
 
 func NewTaskService(repo repository.TaskRepository, workflowSvc workflow.Service, codebookSvc codebook.Service,
-	runnerSvc runner.Service, engineSvc engine.Service, grpcClient taskv1.TaskServiceClient) Service {
+	runnerSvc runner.Service, engineSvc engine.Service, scheduler scheduler.Scheduler, dispatcher dispatch.TaskDispatcher) Service {
 	return &taskService{
 		repo:        repo,
 		engineSvc:   engineSvc,
 		workflowSvc: workflowSvc,
 		codebookSvc: codebookSvc,
 		runnerSvc:   runnerSvc,
-		grpcClient:  grpcClient,
-		scheduler:   newTaskScheduler(),
+		scheduler:   scheduler,
+		dispatcher:  dispatcher,
 		logger:      elog.DefaultLogger.With(elog.FieldComponentName("taskService")),
 	}
 }
@@ -339,11 +336,9 @@ func (s *taskService) dispatchTask(ctx context.Context, task domain.Task) error 
 	if !s.scheduler.Add(task.Id) {
 		return nil
 	}
-	if task.Kind == domain.GRPC {
-		if err := s.dispatchGRPC(ctx, task); err != nil {
-			s.scheduler.Remove(task.Id)
-			return err
-		}
+	if err := s.dispatcher.Dispatch(ctx, task); err != nil {
+		s.scheduler.Remove(task.Id)
+		return err
 	}
 	if !task.IsTiming || task.Kind == domain.GRPC {
 		_, _ = s.UpdateTaskStatus(ctx, domain.TaskResult{
@@ -353,35 +348,6 @@ func (s *taskService) dispatchTask(ctx context.Context, task domain.Task) error 
 		})
 	}
 	return nil
-}
-
-func (s *taskService) dispatchGRPC(ctx context.Context, task domain.Task) error {
-	taskId := strconv.FormatInt(task.Id, 10)
-	args, _ := json.Marshal(task.Args)
-	vars, _ := json.Marshal(task.Variables)
-	hash := s.sumHash(taskId, task.Code, string(args), string(vars))
-	resp, err := s.grpcClient.CreateTask(ctx, &taskv1.CreateTaskRequest{
-		Name:     fmt.Sprintf("%s_%s", task.CodebookUid, hash),
-		Type:     taskv1.TaskType_ONE_TIME,
-		CronExpr: s.calculateCronExpr(task),
-		GrpcConfig: &taskv1.GrpcConfig{
-			ServiceName: task.Target,
-			HandlerName: task.Handler,
-			Params: map[string]string{
-				"task_id":   taskId,
-				"code":      task.Code,
-				"args":      string(args),
-				"variables": string(vars),
-			},
-		},
-	})
-	if err != nil {
-		return err
-	}
-	if resp.Code != taskv1.TaskErrorCode_SUCCESS {
-		return fmt.Errorf("任务平台业务错误: %s (code: %d)", resp.Message, resp.Code)
-	}
-	return s.repo.UpdateExternalID(ctx, task.Id, strconv.FormatInt(resp.Id, 10))
 }
 
 func (s *taskService) retry(ctx context.Context, task domain.Task, auto bool) error {
@@ -441,23 +407,6 @@ func (s *taskService) calculateDuration(unit Unit, quantity int64) time.Duration
 	}
 }
 
-func (s *taskService) calculateCronExpr(task domain.Task) string {
-	executeTime := time.Now().Add(2 * time.Second)
-	if task.IsTiming && task.ScheduledTime > time.Now().UnixMilli() {
-		executeTime = time.UnixMilli(task.ScheduledTime)
-	}
-	return executeTime.Format("05 04 15 02 01 ?")
-}
-
-func (s *taskService) sumHash(ss ...string) string {
-	h := md5.New()
-	for _, str := range ss {
-		_, _ = h.Write([]byte(str))
-		_, _ = h.Write([]byte("|"))
-	}
-	return hex.EncodeToString(h.Sum(nil))
-}
-
 func (s *taskService) toEasyWorkflow(wf domain.Workflow) easyflow.Workflow {
 	edges := make([]map[string]interface{}, len(wf.FlowData.Edges))
 	for i, e := range wf.FlowData.Edges {
@@ -471,29 +420,4 @@ func (s *taskService) toEasyWorkflow(wf domain.Workflow) easyflow.Workflow {
 		Id: wf.Id, Name: wf.Name, Owner: wf.Owner,
 		FlowData: easyflow.LogicFlow{Edges: edges, Nodes: nodes},
 	}
-}
-
-type taskScheduler struct {
-	mu  sync.Mutex
-	ids map[int64]struct{}
-}
-
-func newTaskScheduler() *taskScheduler {
-	return &taskScheduler{ids: map[int64]struct{}{}}
-}
-
-func (s *taskScheduler) Add(id int64) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.ids[id]; ok {
-		return false
-	}
-	s.ids[id] = struct{}{}
-	return true
-}
-
-func (s *taskScheduler) Remove(id int64) {
-	s.mu.Lock()
-	delete(s.ids, id)
-	s.mu.Unlock()
 }

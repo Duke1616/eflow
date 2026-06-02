@@ -3,6 +3,8 @@ package domain
 import (
 	"errors"
 	"fmt"
+
+	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
 )
 
 // Channel 消息通知媒介/渠道定义
@@ -150,4 +152,30 @@ type TaskForm struct {
 	Type     string      // 快照表单类型
 	Value    interface{} // 填写的表单具体值
 	Ctime    int64       // 快照创建时间
+}
+
+var protoToDomain = map[notificationv1.Channel]Channel{
+	notificationv1.Channel_LARK_CARD: ChannelLarkCard,
+	notificationv1.Channel_EMAIL:     ChannelEmail,
+	notificationv1.Channel_IN_APP:    ChannelInApp,
+}
+
+var domainToProto = map[Channel]notificationv1.Channel{
+	ChannelLarkCard: notificationv1.Channel_LARK_CARD,
+	ChannelEmail:    notificationv1.Channel_EMAIL,
+	ChannelInApp:    notificationv1.Channel_IN_APP,
+}
+
+func ChannelToDomainProto(ch Channel) notificationv1.Channel {
+	if v, ok := domainToProto[ch]; ok {
+		return v
+	}
+	return notificationv1.Channel_CHANNEL_UNSPECIFIED
+}
+
+func ChannelToProtoDomain(ch notificationv1.Channel) Channel {
+	if v, ok := protoToDomain[ch]; ok {
+		return v
+	}
+	return ""
 }

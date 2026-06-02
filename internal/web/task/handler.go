@@ -94,7 +94,7 @@ func (h *Handler) UpdateStatusToSuccess(ctx *ginx.Context, req UpdateStatusToSuc
 }
 
 func (h *Handler) Logs(ctx *ginx.Context) (ginx.Result, error) {
-	id, err := ctx.Param("task_id").Int64()
+	id, err := ctx.Param("task_id").AsInt64()
 	if err != nil {
 		return systemErrorResult, err
 	}

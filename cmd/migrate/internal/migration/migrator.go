@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"reflect"
+	"strconv"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -12,6 +14,9 @@ import (
 )
 
 // MigrationEnv 保存单次迁移执行期间共享的数据源连接。
+// DefaultTenantID 是迁移时统一覆写的默认租户 ID。
+const DefaultTenantID int64 = 2
+
 type MigrationEnv struct {
 	MongoDB   *mongo.Database
 	MySQLSrc  *gorm.DB
@@ -169,6 +174,10 @@ func writeBatch[D any](ctx context.Context, env MigrationEnv, records []D) (int6
 	if env.DryRun {
 		return 0, nil
 	}
+	// 统一覆写租户 ID
+	for i := range records {
+		applyDefaultTenant(&records[i], DefaultTenantID)
+	}
 	err := env.MySQLDst.WithContext(ctx).
 		Clauses(clause.OnConflict{UpdateAll: true}).
 		CreateInBatches(records, env.BatchSize).Error
@@ -176,6 +185,24 @@ func writeBatch[D any](ctx context.Context, env MigrationEnv, records []D) (int6
 		return 0, err
 	}
 	return int64(len(records)), nil
+}
+
+// applyDefaultTenant 利用反射将目标结构体的 TenantID 字段统一设置为默认租户 ID。
+func applyDefaultTenant(dst any, tenantID int64) {
+	v := reflect.ValueOf(dst)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	field := v.FieldByName("TenantID")
+	if field.IsValid() && field.CanSet() {
+		switch field.Kind() {
+		case reflect.String:
+			field.SetString(strconv.FormatInt(tenantID, 10))
+		case reflect.Int, reflect.Int64:
+			field.SetInt(tenantID)
+		default:
+		}
+	}
 }
 
 func tableName(db *gorm.DB, model any) (string, error) {

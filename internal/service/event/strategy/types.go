@@ -6,6 +6,7 @@ import (
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/notification"
 )
 
 type NodeName string
@@ -18,7 +19,6 @@ const (
 	ChatGroup  NodeName = "CHAT_GROUP"  // 群通知节点
 )
 
-// 通知渠道定义
 type Channel string
 
 const (
@@ -28,14 +28,9 @@ const (
 	ChannelInApp    Channel = "IN_APP"
 )
 
-// NotificationResponse 模拟通知发送结果
-type NotificationResponse struct {
-	Msg string
-}
-
 type FlowContext struct {
 	InstID      int             // 流程实例 ID
-	Order       domain.Ticket   // 工单实体
+	Ticket      domain.Ticket   // 工单实体
 	Workflow    domain.Workflow // 流程定义快照
 	Instance    domain.Instance // 引擎实例状态
 	CurrentNode *model.Node     // 当前触发事件的节点
@@ -50,7 +45,7 @@ type Info struct {
 
 // SendStrategy 针对不同节点的策略接口
 type SendStrategy interface {
-	Send(ctx context.Context, info Info) (NotificationResponse, error)
+	Send(ctx context.Context, info Info) (notification.Response, error)
 }
 
 type Dispatcher struct {
@@ -74,7 +69,7 @@ func NewDispatcher(user SendStrategy, auto SendStrategy,
 	}
 }
 
-func (d *Dispatcher) Send(ctx context.Context, info Info) (NotificationResponse, error) {
+func (d *Dispatcher) Send(ctx context.Context, info Info) (notification.Response, error) {
 	strategy := d.selectStrategy(info)
 
 	// 1. 预解析流程节点，避免策略内重复解析

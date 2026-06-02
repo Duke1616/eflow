@@ -22,6 +22,7 @@ import (
 	"github.com/gotomicro/ego/core/elog"
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
+	larkcallback "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	"github.com/spf13/viper"
 )
@@ -43,6 +44,8 @@ func getLarkCallbackConfig() callback {
 type ILarkCallbackHandler interface {
 	// Handle 本地驱动并处理飞书卡片上的用户动作（Pass/Reject/Progress/Revoke），支持卡片状态变更、无头浏览器进度截图
 	Handle(ctx context.Context, evt LarkCallback) error
+	// OnCardAction 接收飞书卡片上的用户交互点击回调
+	OnCardAction(ctx context.Context, cte *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)
 }
 
 type larkCallbackHandler struct {
@@ -75,6 +78,55 @@ func NewLarkCallbackHandler(
 		workflowSvc: workflowSvc,
 		lark:        lark,
 	}
+}
+
+// OnCardAction 接收飞书卡片上的用户交互点击回调
+func (h *larkCallbackHandler) OnCardAction(ctx context.Context, cte *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error) {
+	h.logger.Info("捕捉到飞书互动卡片交互点击回调")
+
+	if cte.Event.Action == nil || cte.Event.Action.Value == nil {
+		h.logger.Warn("忽略非法的空动作飞书交互事件")
+		return &larkcallback.CardActionTriggerResponse{}, nil
+	}
+
+	actionValue := cte.Event.Action.Value
+	formValue := cte.Event.Action.FormValue
+
+	userID := ""
+	if cte.Event.Operator != nil && cte.Event.Operator.UserID != nil {
+		userID = *cte.Event.Operator.UserID
+	}
+
+	openID := ""
+	if cte.Event.Operator != nil {
+		openID = cte.Event.Operator.OpenID
+	}
+
+	msgID := ""
+	if cte.Event.Context != nil {
+		msgID = cte.Event.Context.OpenMessageID
+	}
+
+	evt := LarkCallback{
+		UserId:    userID,
+		OpenId:    openID,
+		MessageId: msgID,
+		Value:     actionValue,
+		FormValue: formValue,
+	}
+
+	// 异步调用业务处理器的 Handle 方法，面向接口，零耦合瞬间流转工单！
+	go func() {
+		localCtx := context.Background()
+		h.logger.Info("已触发本地异步驱动工单实例流转流程", elog.Any("evt", evt))
+		if err := h.Handle(localCtx, evt); err != nil {
+			h.logger.Error("本地异步驱动飞书卡片事件流转失败", elog.FieldErr(err))
+		} else {
+			h.logger.Info("本地异步驱动飞书卡片事件流转成功")
+		}
+	}()
+
+	return &larkcallback.CardActionTriggerResponse{}, nil
 }
 
 // Handle 执行具体的流转处理逻辑
