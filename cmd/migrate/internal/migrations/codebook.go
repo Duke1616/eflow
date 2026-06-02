@@ -8,7 +8,6 @@ import (
 // mongoCodebook MongoDB 中的脚本库源数据实体
 type mongoCodebook struct {
 	ID         int64  `bson:"id"`
-	TenantID   string `bson:"tenant_id"`
 	Name       string `bson:"name"`
 	Owner      string `bson:"owner"`
 	Identifier string `bson:"identifier"`
@@ -37,7 +36,7 @@ func (codebookMigrator) CollectionName() string {
 func (codebookMigrator) Convert(src mongoCodebook) dao.Codebook {
 	return dao.Codebook{
 		Id:         src.ID,
-		TenantID:   src.TenantID,
+		TenantID:   DefaultTenantID,
 		Name:       src.Name,
 		Owner:      src.Owner,
 		Identifier: src.Identifier,

@@ -43,6 +43,7 @@ func (templateMigrator) CollectionName() string {
 func (templateMigrator) Convert(src mongoTemplate) dao.Template {
 	return dao.Template{
 		Id:                 src.Id,
+		TenantID:           DefaultTenantID,
 		Name:               src.Name,
 		WorkflowId:         src.WorkflowId,
 		GroupId:            src.GroupId,

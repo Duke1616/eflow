@@ -39,7 +39,7 @@ func NewCodebookDAO(db *gorm.DB) CodebookDAO {
 // Codebook 脚本库实体定义
 type Codebook struct {
 	Id         int64  `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'脚本模板自增ID'"`
-	TenantID   string `gorm:"column:tenant_id;type:varchar(64);not null;index;comment:'多租户隔离标识'"`
+	TenantID   int64  `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
 	Name       string `gorm:"column:name;type:varchar(128);not null;comment:'脚本模板名称'"`
 	Owner      string `gorm:"column:owner;type:varchar(128);not null;comment:'模板所有者'"`
 	Identifier string `gorm:"column:identifier;type:varchar(64);not null;uniqueIndex;comment:'脚本唯一标识码'"`

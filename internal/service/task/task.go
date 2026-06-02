@@ -14,7 +14,9 @@ import (
 	"github.com/Duke1616/eflow/internal/service/runner"
 	"github.com/Duke1616/eflow/internal/service/task/dispatch"
 	"github.com/Duke1616/eflow/internal/service/task/scheduler"
+	"github.com/Duke1616/eflow/internal/service/ticket"
 	"github.com/Duke1616/eflow/internal/service/workflow"
+	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
 	"golang.org/x/sync/errgroup"
@@ -72,19 +74,21 @@ type taskService struct {
 	workflowSvc workflow.Service
 	codebookSvc codebook.Service
 	runnerSvc   runner.Service
+	ticketSvc   ticket.Service
 	scheduler   scheduler.Scheduler
 	dispatcher  dispatch.TaskDispatcher
 	logger      *elog.Component
 }
 
 func NewTaskService(repo repository.TaskRepository, workflowSvc workflow.Service, codebookSvc codebook.Service,
-	runnerSvc runner.Service, engineSvc engine.Service, scheduler scheduler.Scheduler, dispatcher dispatch.TaskDispatcher) Service {
+	runnerSvc runner.Service, engineSvc engine.Service, ticketSvc ticket.Service, scheduler scheduler.Scheduler, dispatcher dispatch.TaskDispatcher) Service {
 	return &taskService{
 		repo:        repo,
 		engineSvc:   engineSvc,
 		workflowSvc: workflowSvc,
 		codebookSvc: codebookSvc,
 		runnerSvc:   runnerSvc,
+		ticketSvc:   ticketSvc,
 		scheduler:   scheduler,
 		dispatcher:  dispatcher,
 		logger:      elog.DefaultLogger.With(elog.FieldComponentName("taskService")),
@@ -92,6 +96,14 @@ func NewTaskService(repo repository.TaskRepository, workflowSvc workflow.Service
 }
 
 func (s *taskService) CreateTask(ctx context.Context, ticketID int64, processInstID int, nodeID string) (domain.Task, error) {
+	// 补全租户信息
+	resp, err := s.ticketSvc.GetByID(ctx, ticketID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	ctx = ctxutil.WithTenantID(ctx, resp.TenantID)
+
+	// 创建或更新
 	task, err := s.repo.FindOrCreate(ctx, domain.Task{
 		ProcessInstId:   processInstID,
 		TriggerPosition: domain.TriggerPositionTaskWaiting.ToString(),

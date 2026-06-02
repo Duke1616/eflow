@@ -16,7 +16,6 @@ type mongoLogicFlow struct {
 // mongoWorkflow MongoDB 中的工作流定义源数据实体
 type mongoWorkflow struct {
 	ID           int64          `bson:"id"`
-	TenantID     string         `bson:"tenant_id"`
 	TemplateID   int64          `bson:"template_id"`
 	Name         string         `bson:"name"`
 	Icon         string         `bson:"icon"`
@@ -48,7 +47,7 @@ func (workflowMigrator) CollectionName() string {
 func (workflowMigrator) Convert(src mongoWorkflow) dao.Workflow {
 	return dao.Workflow{
 		Id:         src.ID,
-		TenantID:   src.TenantID,
+		TenantID:   DefaultTenantID,
 		TemplateId: src.TemplateID,
 		Name:       src.Name,
 		Icon:       src.Icon,

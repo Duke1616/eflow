@@ -55,7 +55,7 @@ func NewRunnerDAO(db *gorm.DB) IRunnerDAO {
 // Runner 执行器运行节点物理数据表映射实体
 type Runner struct {
 	Id             int64                       `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'执行单元自增ID'"`
-	TenantID       string                      `gorm:"column:tenant_id;type:varchar(64);not null;index;comment:'多租户隔离标识'"`
+	TenantID       int64                       `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
 	Name           string                      `gorm:"column:name;type:varchar(128);not null;comment:'执行单元名称'"`
 	CodebookUid    string                      `gorm:"column:codebook_uid;type:varchar(64);index;comment:'关联脚本库模板UID'"`
 	CodebookSecret string                      `gorm:"column:codebook_secret;type:varchar(128);comment:'脚本模板认证密钥'"`

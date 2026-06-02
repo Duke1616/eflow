@@ -36,6 +36,7 @@ func (taskFormMigrator) CollectionName() string {
 func (taskFormMigrator) Convert(src mongoTaskForm) dao.TaskForm {
 	return dao.TaskForm{
 		Id:       src.Id,
+		TenantID: DefaultTenantID,
 		TicketId: src.OrderId,
 		TaskId:   src.TaskId,
 		Name:     src.Name,

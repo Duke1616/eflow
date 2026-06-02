@@ -484,6 +484,11 @@ func (h *Handler) toVoEngineTicket(ctx context.Context, instances []domain.Insta
 			ctime = time.Unix(val.Ctime/1000, 0).Format("2006-01-02 15:04:05")
 		}
 
+		var createTimeStr string
+		if src.CreateTime != nil {
+			createTimeStr = src.CreateTime.Format("2006-01-02 15:04:05")
+		}
+
 		return Ticket{
 			Id:                 val.Id,
 			TaskId:             src.TaskID,
@@ -491,7 +496,7 @@ func (h *Handler) toVoEngineTicket(ctx context.Context, instances []domain.Insta
 			Starter:            starter,
 			CurrentStep:        src.CurrentNodeName,
 			ApprovedBy:         approved,
-			ProcInstCreateTime: src.CreateTime,
+			ProcInstCreateTime: createTimeStr,
 			Provide:            val.Provide.ToUint8(),
 			Status:             val.Status.ToUint8(),
 			TemplateId:         val.TemplateId,

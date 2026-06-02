@@ -20,7 +20,7 @@ type TemplateOptions map[string]interface{}
 // TemplateFavorite 模版收藏实体定义
 type TemplateFavorite struct {
 	Id         int64  `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'收藏关系主键ID'"`
-	TenantID   string `gorm:"column:tenant_id;type:varchar(64);not null;index;comment:'多租户隔离标识'"`
+	TenantID   int64  `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
 	UserId     int64  `gorm:"column:user_id;type:bigint;not null;index;comment:'收藏的用户ID'"`
 	TemplateId int64  `gorm:"column:template_id;type:bigint;not null;index;comment:'被收藏的工单模版ID'"`
 	Ctime      int64  `gorm:"column:ctime;type:bigint;comment:'收藏时间(毫秒戳)'"`
@@ -35,7 +35,7 @@ func (TemplateFavorite) TableName() string {
 // TemplateGroup 模版分组实体定义
 type TemplateGroup struct {
 	Id       int64  `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'分组自增主键ID'"`
-	TenantID string `gorm:"column:tenant_id;type:varchar(64);not null;index;comment:'多租户隔离标识'"`
+	TenantID int64  `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
 	Name     string `gorm:"column:name;type:varchar(128);not null;comment:'分组名称展示'"`
 	Icon     string `gorm:"column:icon;type:varchar(256);comment:'分组关联图标'"`
 	Ctime    int64  `gorm:"column:ctime;type:bigint;comment:'创建时间(毫秒)'"`
@@ -50,7 +50,7 @@ func (TemplateGroup) TableName() string {
 // Template 工单模版实体定义
 type Template struct {
 	Id                 int64                                     `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'工单模版自增ID'"`
-	TenantID           string                                    `gorm:"column:tenant_id;type:varchar(64);not null;index;comment:'多租户隔离标识'"`
+	TenantID           int64                                     `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
 	Name               string                                    `gorm:"column:name;type:varchar(128);not null;comment:'工单模板展示名称'"`
 	WorkflowId         int64                                     `gorm:"column:workflow_id;type:bigint;not null;index;comment:'绑定的工作流流程ID'"`
 	GroupId            int64                                     `gorm:"column:group_id;type:bigint;not null;index;comment:'归属的模板分组ID'"`

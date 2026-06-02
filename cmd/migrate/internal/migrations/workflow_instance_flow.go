@@ -35,6 +35,7 @@ func (workflowInstanceFlowMigrator) CollectionName() string {
 func (workflowInstanceFlowMigrator) Convert(src mongoWorkflowSnapshot) dao.Snapshot {
 	return dao.Snapshot{
 		Id:             src.Id,
+		TenantID:       DefaultTenantID,
 		WorkflowId:     int64(src.WorkflowId),
 		ProcessId:      src.ProcessId,
 		ProcessVersion: src.ProcessVersion,

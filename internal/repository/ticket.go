@@ -108,6 +108,7 @@ func (repo *ticketRepository) MergeTicketData(ctx context.Context, id int64, dat
 
 func (repo *ticketRepository) toEntity(req domain.Ticket) dao.Ticket {
 	return dao.Ticket{
+		TenantID:   req.TenantID,
 		BizID:      req.BizID,
 		Key:        req.Key,
 		TemplateId: req.TemplateId,
@@ -130,6 +131,7 @@ func (repo *ticketRepository) toEntity(req domain.Ticket) dao.Ticket {
 func (repo *ticketRepository) toDomain(req dao.Ticket) domain.Ticket {
 	return domain.Ticket{
 		Id:         req.Id,
+		TenantID:   req.TenantID,
 		BizID:      req.BizID,
 		Key:        req.Key,
 		TemplateId: req.TemplateId,

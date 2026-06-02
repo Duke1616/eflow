@@ -34,6 +34,7 @@ func (workflowNotificationMigrator) CollectionName() string {
 func (workflowNotificationMigrator) Convert(src mongoNotifyBinding) dao.NotifyBinding {
 	return dao.NotifyBinding{
 		Id:         src.Id,
+		TenantID:   DefaultTenantID,
 		WorkflowId: src.WorkflowId,
 		NotifyType: src.NotifyType,
 		Channel:    src.Channel,

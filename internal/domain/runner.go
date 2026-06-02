@@ -25,7 +25,7 @@ const (
 // 纯净领域对象。其中 Variables 直接复用 task.go 中定义好的通用结构体，不重复声明。
 type Runner struct {
 	Id             int64
-	TenantID       string // 租户隔离标识
+	TenantID       int64 // 租户隔离标识
 	Name           string
 	CodebookUid    string
 	CodebookSecret string

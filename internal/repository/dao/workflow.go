@@ -13,7 +13,7 @@ import (
 // Workflow 工作流流程定义实体
 type Workflow struct {
 	Id           int64                     `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'流程设计定义唯一自增ID'"`
-	TenantID     string                    `gorm:"column:tenant_id;type:varchar(64);not null;index;comment:'多租户隔离标识'"`
+	TenantID     int64                     `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
 	TemplateId   int64                     `gorm:"column:template_id;type:bigint;not null;index;comment:'绑定挂载的工单模板ID'"`
 	Name         string                    `gorm:"column:name;type:varchar(128);not null;comment:'流程设计器展示名称'"`
 	Icon         string                    `gorm:"column:icon;type:varchar(256);comment:'流程设计器图标'"`
@@ -41,7 +41,7 @@ type LogicFlow struct {
 // NotifyBinding 工作流通知渠道绑定实体
 type NotifyBinding struct {
 	Id         int64  `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'通知绑定关系自增ID'"`
-	TenantID   string `gorm:"column:tenant_id;type:varchar(64);not null;index;comment:'多租户隔离标识'"`
+	TenantID   int64  `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
 	WorkflowId int64  `gorm:"column:workflow_id;type:bigint;not null;index;comment:'绑定的流程定义ID'"`
 	NotifyType string `gorm:"column:notify_type;type:varchar(64);not null;comment:'触发通知的具体事件动作环节(如开始、驳回)'"`
 	Channel    string `gorm:"column:channel;type:varchar(64);not null;comment:'通知投递的特定媒介通道类型'"`
@@ -58,7 +58,7 @@ func (NotifyBinding) TableName() string {
 // Snapshot 流程定义发布版本画布快照物理实体
 type Snapshot struct {
 	Id             int64                     `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'快照唯一自增ID'"`
-	TenantID       string                    `gorm:"column:tenant_id;type:varchar(64);not null;index;comment:'多租户隔离标识'"`
+	TenantID       int64                     `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
 	WorkflowId     int64                     `gorm:"column:workflow_id;type:bigint;not null;index;comment:'绑定的工作流定义ID'"`
 	ProcessId      int                       `gorm:"column:process_id;type:int;not null;index;comment:'关联引擎部署的流程模型ID'"`
 	ProcessVersion int                       `gorm:"column:process_version;type:int;not null;comment:'对应流程发布版本号'"`

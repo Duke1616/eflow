@@ -31,8 +31,9 @@ func (templateGroupMigrator) CollectionName() string {
 
 func (templateGroupMigrator) Convert(src mongoTemplateGroup) dao.TemplateGroup {
 	return dao.TemplateGroup{
-		Id:    src.Id,
-		Name:  src.Name,
+		Id:       src.Id,
+		TenantID: DefaultTenantID,
+		Name:     src.Name,
 		Icon:  src.Icon,
 		Ctime: src.Ctime,
 		Utime: src.Utime,

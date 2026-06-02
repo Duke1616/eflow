@@ -13,7 +13,7 @@ import (
 // Ticket 工单记录实体
 type Ticket struct {
 	Id                int64                             `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'工单自增ID'"`
-	TenantID          string                            `gorm:"column:tenant_id;type:varchar(64);not null;index;comment:'多租户隔离标识'"`
+	TenantID          int64                             `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
 	BizID             int64                             `gorm:"column:biz_id;type:bigint;index;comment:'关联业务场景ID'"`
 	Key               string                            `gorm:"column:key;type:varchar(64);index;comment:'工单业务唯一单据号Key'"`
 	TemplateId        int64                             `gorm:"column:template_id;type:bigint;not null;index;comment:'绑定工单模板ID'"`

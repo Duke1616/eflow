@@ -16,7 +16,6 @@ type mongoVariables struct {
 // mongoRunner MongoDB 中的执行器源数据实体
 type mongoRunner struct {
 	ID             int64            `bson:"id"`
-	TenantID       string           `bson:"tenant_id"`
 	Name           string           `bson:"name"`
 	CodebookUid    string           `bson:"codebook_uid"`
 	CodebookSecret string           `bson:"codebook_secret"`
@@ -58,7 +57,7 @@ func (runnerMigrator) Convert(src mongoRunner) dao.Runner {
 
 	return dao.Runner{
 		Id:             src.ID,
-		TenantID:       src.TenantID,
+		TenantID:       DefaultTenantID,
 		Name:           src.Name,
 		CodebookUid:    src.CodebookUid,
 		CodebookSecret: src.CodebookSecret,

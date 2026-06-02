@@ -81,6 +81,7 @@ type TicketData map[string]interface{}
 // Ticket 具体的工单流转实例领域模型（核心业务对象，对应原 ecmdb 中的 Order 概念）
 type Ticket struct {
 	Id               int64            // 工单实例 ID
+	TenantID         int64            // 多租户隔离标识
 	BizID            int64            // 外部关联的业务实体 ID
 	Key              string           // 工单的唯一业务 Key (用以幂等校验等)
 	TemplateId       int64            // 所关联的页面渲染模板 ID

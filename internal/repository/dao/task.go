@@ -64,7 +64,7 @@ func NewTaskDAO(db *gorm.DB) TaskDAO {
 // Task 自动化作业执行与调度任务物理表实体
 type Task struct {
 	Id              int64                              `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'任务自增主键'"`
-	TenantID        string                             `gorm:"column:tenant_id;type:varchar(64);not null;index;comment:'多租户隔离标识'"`
+	TenantID        int64                              `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
 	TicketID        int64                              `gorm:"column:ticket_id;type:bigint;not null;index;comment:'关联工单单据ID'"`
 	ProcessInstId   int                                `gorm:"column:process_inst_id;type:int;index;comment:'关联流程实例ID'"`
 	CurrentNodeId   string                             `gorm:"column:current_node_id;type:varchar(128);index;comment:'当前自动化节点ID'"`

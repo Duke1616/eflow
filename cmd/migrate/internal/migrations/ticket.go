@@ -49,6 +49,7 @@ func (ticketMigrator) CollectionName() string {
 func (ticketMigrator) Convert(src mongoTicket) dao.Ticket {
 	return dao.Ticket{
 		Id:                src.Id,
+		TenantID:          DefaultTenantID,
 		BizID:             src.BizID,
 		Key:               src.Key,
 		TemplateId:        src.TemplateId,

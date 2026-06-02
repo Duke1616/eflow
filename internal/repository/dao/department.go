@@ -10,7 +10,7 @@ import (
 // Department 部门 GORM 物理表实体结构
 type Department struct {
 	Id         int64                    `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'部门自增ID'"`
-	TenantID   string                   `gorm:"column:tenant_id;type:varchar(64);not null;index;comment:'多租户隔离标识'"`
+	TenantID   int64                    `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
 	Pid        int64                    `gorm:"column:pid;type:bigint;not null;comment:'父级部门ID'"`
 	Name       string                   `gorm:"column:name;type:varchar(128);not null;comment:'部门名称'"`
 	Sort       int64                    `gorm:"column:sort;type:bigint;comment:'排序值'"`

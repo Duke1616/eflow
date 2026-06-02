@@ -10,7 +10,7 @@ import (
 // 代表本流程引擎所使用的一个独立脚本单元，比如用于自动步骤节点执行 of 业务脚本。
 type Codebook struct {
 	Id         int64  // 唯一主键 ID
-	TenantID   string // 租户隔离标识
+	TenantID   int64 // 租户隔离标识
 	Name       string // 脚本名称
 	Owner      string // 脚本负责人名称或邮箱
 	Code       string // 脚本内容（如 Shell、Python 或 Go 代码段）

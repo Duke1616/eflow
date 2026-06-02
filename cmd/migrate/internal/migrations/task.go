@@ -65,6 +65,7 @@ func (taskMigrator) Convert(src mongoTask) dao.Task {
 
 	return dao.Task{
 		Id:              src.ID,
+		TenantID:        DefaultTenantID,
 		TicketID:        src.OrderID,
 		ProcessInstId:   src.ProcessInstID,
 		CurrentNodeId:   src.CurrentNodeID,
