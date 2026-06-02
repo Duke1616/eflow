@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Bunny3th/easy-workflow/workflow/engine"
@@ -12,11 +13,14 @@ import (
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/notification"
+	"github.com/Duke1616/eflow/internal/pkg/notification/sender"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
+	"github.com/Duke1616/enotify/notify/feishu"
 	"github.com/chromedp/chromedp"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
@@ -56,6 +60,7 @@ type larkCallbackHandler struct {
 	templateSvc templateSvc.Service
 	userSvc     UserService
 	workflowSvc workflowSvc.Service
+	sender      sender.NotificationSender
 	lark        *lark.Client
 }
 
@@ -66,6 +71,7 @@ func NewLarkCallbackHandler(
 	templateSvc templateSvc.Service,
 	userSvc UserService,
 	workflowSvc workflowSvc.Service,
+	sender sender.NotificationSender,
 	lark *lark.Client,
 ) ILarkCallbackHandler {
 	return &larkCallbackHandler{
@@ -76,6 +82,7 @@ func NewLarkCallbackHandler(
 		templateSvc: templateSvc,
 		userSvc:     userSvc,
 		workflowSvc: workflowSvc,
+		sender:      sender,
 		lark:        lark,
 	}
 }
@@ -108,6 +115,7 @@ func (h *larkCallbackHandler) OnCardAction(ctx context.Context, cte *larkcallbac
 	}
 
 	evt := LarkCallback{
+		Action:    Action(cte.Event.Action.Name),
 		UserId:    userID,
 		OpenId:    openID,
 		MessageId: msgID,
@@ -269,14 +277,34 @@ func (h *larkCallbackHandler) progress(ticketId int64, userId string) error {
 		return err
 	}
 
+	// 进行截图
 	err = chromedp.Run(taskCtx,
 		chromedp.EmulateViewport(1920, 1080, chromedp.EmulateScale(1)),
 		chromedp.Navigate(h.cfg.FrontendUrl),
 		chromedp.WaitReady("body"),
+		// 等待数据加载
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			log.Println("Page loaded, waiting for LF-preview...")
+			return nil
+		}),
+		// 注入数据
 		chromedp.Evaluate(injectData, nil),
+
+		// 等待 LogicFlow 容器可见
 		chromedp.WaitVisible("#LF-preview", chromedp.ByID),
+
+		// 等待前端设置的 data-rendered 标志
 		chromedp.WaitVisible(`#LF-preview[data-rendered="true"]`, chromedp.ByQuery),
+
+		// 再等 300ms，防止动画残影
 		chromedp.Sleep(300*time.Millisecond),
+
+		// 准备开始截图
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			log.Println("LF-preview is visible, capturing screenshot...")
+			return nil
+		}),
+		// 截取容器截图（比全屏更精准）
 		chromedp.Screenshot("#LF-preview", &buf, chromedp.NodeVisible, chromedp.ByID),
 	)
 	if err != nil {
@@ -319,11 +347,48 @@ func (h *larkCallbackHandler) parserEdges(ctx context.Context, o domain.Ticket,
 }
 
 func (h *larkCallbackHandler) sendImage(ctx context.Context, imageKey *string, approvalUsers []string, userId string) error {
-	h.logger.Info("【模拟发送进度图卡片】成功",
-		elog.String("UserId", userId),
-		elog.Any("approvalUsers", approvalUsers),
-		elog.String("imageKey", *imageKey),
-	)
+	var fields []notification.Field
+	us, err := h.userSvc.FindByUsernames(ctx, approvalUsers)
+	if err != nil {
+		return err
+	}
+
+	approval := `**审批人：Null**`
+	status := `**状态：<font color='green'> 已结束 </font>**`
+	var atTags []string
+	if len(us) > 0 {
+		for _, u := range us {
+			atTags = append(atTags, fmt.Sprintf("<at id=%s></at>", u.LarkUserId))
+		}
+
+		approval = fmt.Sprintf("**审批人：** %s", strings.Join(atTags, " "))
+		status = `**状态：<font color='green'> 审批中 </font>**`
+	}
+
+	fields = append(fields, notification.Field{
+		Tag:     "markdown",
+		Content: approval,
+	})
+
+	fields = append(fields, notification.Field{
+		Tag:     "markdown",
+		Content: status,
+	})
+
+	if _, err = h.sender.Send(ctx, notification.Notification{
+		Receiver:     userId,
+		ReceiverType: feishu.ReceiveIDTypeUserID,
+		Channel:      notification.ChannelLarkCard,
+		Template: notification.Template{
+			Name:     domain.NotifyTypeProgressImageResult,
+			Title:    "工单流程进度查看",
+			Fields:   fields,
+			ImageKey: *imageKey,
+		},
+	}); err != nil {
+		return fmt.Errorf("发送流程进度失败: %w", err)
+	}
+
 	return nil
 }
 

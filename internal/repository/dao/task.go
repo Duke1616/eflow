@@ -240,8 +240,10 @@ func (g *gormTaskDAO) ListReadyTasks(ctx context.Context, limit int64) ([]Task, 
 	var res []Task
 	now := time.Now().UnixMilli()
 	err := g.db.WithContext(ctx).
-		Where("status = ? AND (is_timing = ? OR scheduled_time <= ?)", domain.WAITING.ToUint8(), false, now).
-		Order("scheduled_time asc, ctime asc").Limit(int(limit)).Find(&res).Error
+		Where("status = ? AND is_timing = ? AND scheduled_time <= ?", domain.WAITING.ToUint8(), true, now).
+		Order("scheduled_time asc, ctime asc").
+		Limit(int(limit)).
+		Find(&res).Error
 	return res, err
 }
 

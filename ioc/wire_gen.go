@@ -144,7 +144,7 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	iLarkCallbackHandler := ticket3.NewLarkCallbackHandler(engineService, ticketService, service, userService, workflowService, larkClient)
+	iLarkCallbackHandler := ticket3.NewLarkCallbackHandler(engineService, ticketService, service, userService, workflowService, notificationSender, larkClient)
 	eventDispatcher := InitLarkDispatcher(iLarkCallbackHandler)
 	larkCallbackTicketServer := InitLarkServer(eventDispatcher)
 	wechatTicketEventProducer, err := template3.NewWechatTicketEventProducer(mq)

@@ -5,6 +5,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/pkg/sqlx"
+	"github.com/samber/lo"
 )
 
 // mongoTask MongoDB 中的自动化作业执行任务源数据实体
@@ -32,6 +33,7 @@ type mongoTask struct {
 	ScheduledTime   int64            `bson:"scheduled_time"`
 	Kind            string           `bson:"kind"`
 	Target          string           `bson:"target"`
+	Topic           string           `bson:"topic"`
 	Handler         string           `bson:"handler"`
 	MarkPassed      bool             `bson:"mark_passed"`
 	Ctime           int64            `bson:"ctime"`
@@ -63,6 +65,7 @@ func (taskMigrator) Convert(src mongoTask) dao.Task {
 		})
 	}
 
+	// 处理 Kind、Target、Handler 数据对齐， AutoPassed 统一为 true
 	return dao.Task{
 		Id:              src.ID,
 		TenantID:        DefaultTenantID,
@@ -85,10 +88,10 @@ func (taskMigrator) Convert(src mongoTask) dao.Task {
 		RetryCount:      src.RetryCount,
 		IsTiming:        src.IsTiming,
 		ScheduledTime:   src.ScheduledTime,
-		Kind:            src.Kind,
-		Target:          src.Target,
-		Handler:         src.Handler,
-		AutoPassed:      src.MarkPassed,
+		Kind:            lo.Ternary(src.Kind != "", src.Kind, "KAFKA"),
+		Target:          lo.Ternary(src.Target != "", src.Target, src.Topic),
+		Handler:         lo.Ternary(src.Handler != "", src.Handler, src.Language),
+		AutoPassed:      true,
 		Ctime:           src.Ctime,
 		Utime:           src.Utime,
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/Duke1616/ecmdb/pkg/cryptox"
@@ -14,6 +15,16 @@ import (
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/robfig/cron/v3"
 )
+
+var topicRegexp = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+// isValidKafkaTopic 验证给定的字符串是否符合 Kafka 合法的 Topic 命名规范
+func isValidKafkaTopic(topic string) bool {
+	if len(topic) == 0 || len(topic) > 249 {
+		return false
+	}
+	return topicRegexp.MatchString(topic)
+}
 
 // AgentExecuteEvent 任务在 Kafka 下发时传递给 Agent 的事件消息
 type AgentExecuteEvent struct {
@@ -58,6 +69,10 @@ func (e *kafkaService) Dispatch(ctx context.Context, task domain.Task) error {
 }
 
 func (e *kafkaService) immediateDispatch(ctx context.Context, task domain.Task) error {
+	if !isValidKafkaTopic(task.Target) {
+		return fmt.Errorf("任务下发的目标 (Target = %q) 并非合法的 Kafka Topic。合法的 Kafka Topic 长度必须在 1-249 之间，且只能由字母、数字、点(.)、下划线(_)和中划线(-)组成", task.Target)
+	}
+
 	// 确保基础 Topic 生产者缓存就绪
 	if err := e.mq.CreateTopic(ctx, task.Target, 1); err != nil {
 		e.logger.Debug("自动确保 Topic 状态", elog.FieldErr(err), elog.String("topic", task.Target))
