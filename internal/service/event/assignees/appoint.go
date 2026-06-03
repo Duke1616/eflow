@@ -2,6 +2,7 @@ package assignees
 
 import (
 	"context"
+	"fmt"
 
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
@@ -28,6 +29,7 @@ func (r *AppointResolver) Resolve(ctx context.Context, target resolve.Target) ([
 		return nil, nil
 	}
 
+	fmt.Println("指定用户解析", target.Values)
 	resp, err := r.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
 		Usernames: target.Values,
 	})

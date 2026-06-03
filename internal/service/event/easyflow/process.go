@@ -18,6 +18,7 @@ import (
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eflow/pkg/mqx"
+	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
 	"golang.org/x/sync/errgroup"
@@ -69,7 +70,7 @@ func (e *ProcessEvent) EventStart(instID int, node *model.Node, prevNode model.N
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
-	fCtx, err := e.LoadContext(ctx, instID, node)
+	ctx, fCtx, err := e.LoadContext(ctx, instID, node)
 	if err != nil {
 		return err
 	}
@@ -107,7 +108,7 @@ func (e *ProcessEvent) EventChatGroup(instID int, node *model.Node, prevNode mod
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
-	fCtx, err := e.LoadContext(ctx, instID, node)
+	ctx, fCtx, err := e.LoadContext(ctx, instID, node)
 	if err != nil {
 		return err
 	}
@@ -124,7 +125,7 @@ func (e *ProcessEvent) EventCarbonCopy(instID int, node *model.Node, prevNode mo
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
-	fCtx, err := e.LoadContext(ctx, instID, node)
+	ctx, fCtx, err := e.LoadContext(ctx, instID, node)
 	if err != nil {
 		return err
 	}
@@ -167,7 +168,7 @@ func (e *ProcessEvent) EventNotify(instID int, node *model.Node, prevNode model.
 	}
 
 	// 3. 处理通知派发与审批人动态解析
-	fCtx, err := e.LoadContext(ctx, instID, node)
+	ctx, fCtx, err := e.LoadContext(ctx, instID, node)
 	if err != nil {
 		return err
 	}
@@ -194,7 +195,7 @@ func (e *ProcessEvent) dispatchNotify(ctx context.Context, fCtx *strategy.FlowCo
 }
 
 // LoadContext 并发加载流程运行所需的元数据上下文
-func (e *ProcessEvent) LoadContext(ctx context.Context, instID int, node *model.Node) (*strategy.FlowContext, error) {
+func (e *ProcessEvent) LoadContext(ctx context.Context, instID int, node *model.Node) (context.Context, *strategy.FlowContext, error) {
 	var (
 		eg        errgroup.Group
 		orderInfo domain.Ticket
@@ -219,16 +220,19 @@ func (e *ProcessEvent) LoadContext(ctx context.Context, instID int, node *model.
 	})
 
 	if err := eg.Wait(); err != nil {
-		return nil, err
+		return ctx, nil, err
 	}
+
+	// 重新注入租户ID，锁定当前租户，保障后续查询与通知派发具备相同的安全租户边界
+	ctx = ctxutil.WithTenantID(ctx, orderInfo.TenantID)
 
 	// 二次加载获取流程定义快照
 	wf, err := e.workflowSvc.FindInstanceFlow(ctx, orderInfo.WorkflowId, inst.ProcID, inst.ProcVersion)
 	if err != nil {
-		return nil, err
+		return ctx, nil, err
 	}
 
-	return &strategy.FlowContext{
+	return ctx, &strategy.FlowContext{
 		InstID:      instID,
 		Ticket:      orderInfo,
 		Workflow:    wf,

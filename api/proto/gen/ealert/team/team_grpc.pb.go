@@ -33,7 +33,6 @@ const (
 	TeamService_GetChatGroupByIds_FullMethodName    = "/ealert.team.v1.TeamService/GetChatGroupByIds"
 )
 
-//go:generate mockgen -source=./team_grpc.pb.go -package=teammocks -destination=../mocks/team.mock.go -typed TeamServiceClient
 // TeamServiceClient is the client API for TeamService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.

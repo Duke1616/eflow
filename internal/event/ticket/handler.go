@@ -3,6 +3,7 @@ package ticket
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -171,6 +172,26 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) erro
 	case Pass:
 		remark = fmt.Sprintf("你已同意该申请, 批注：%s", comment)
 		if err = h.svc.Pass(ctx, taskId, comment, evt.GetFormValue()); err != nil {
+			if errors.Is(err, ticketSvc.ErrTaskAlreadyFinished) {
+				remark = "你的节点任务已经结束，无法进行审批，详情登录 ECMDB 平台查看"
+				h.logger.Error("飞书回调消息，同意工单失败", elog.FieldErr(err))
+			}
+
+			if errors.Is(err, ticketSvc.ValidationError) {
+				if _, err = h.sender.Send(ctx, notification.Notification{
+					Receiver:     evt.UserId,
+					ReceiverType: feishu.ReceiveIDTypeUserID,
+					Channel:      notification.ChannelLarkText,
+					Template: notification.Template{
+						Text: err.Error(),
+					},
+				}); err != nil {
+					return fmt.Errorf("触发发送信息失败: %w, 任务ID: %d, 工单ID: %d", err, taskId, ticketId)
+				}
+
+				return err
+			}
+
 			h.logger.Error("飞书回调消息，同意工单失败", elog.FieldErr(err),
 				elog.Int("任务ID", taskId),
 				elog.Int64("工单ID", ticketId),
@@ -181,6 +202,11 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) erro
 		remark = fmt.Sprintf("你已驳回该申请, 批注：%s", comment)
 		err = h.svc.Reject(ctx, taskId, comment)
 		if err != nil {
+			if errors.Is(err, ticketSvc.ErrTaskAlreadyFinished) {
+				remark = "你的节点任务已经结束，无法进行审批，详情登录 ECMDB 平台查看"
+				h.logger.Error("飞书回调消息，同意工单失败", elog.FieldErr(err))
+			}
+
 			h.logger.Error("飞书回调消息，驳回工单失败", elog.FieldErr(err),
 				elog.String("任务ID", evt.GetTaskId()),
 				elog.String("工单ID", evt.GetTicketId()),

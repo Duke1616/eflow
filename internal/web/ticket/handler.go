@@ -553,22 +553,28 @@ func (h *Handler) verifyUser(ctx *ginx.Context, taskId int) error {
 		return fmt.Errorf("获取 UserID 失败: %d", uid)
 	}
 
-	resp, err := h.userSvc.QueryByIds(ctx.Context, &userv1.QueryByIdsReq{
-		Ids: []int64{uid},
+	// 1. 获取操作用户信息
+	resp, err := h.userSvc.QueryById(ctx.Context, &userv1.QueryByIdReq{
+		Id: uid,
 	})
-	if err != nil || len(resp.Users) == 0 {
-		return fmt.Errorf("获取用户信息失败")
+	if err != nil {
+		return fmt.Errorf("获取用户信息失败: %w", err)
 	}
 
-	username := resp.Users[0].Username
-
+	// 2. 检索流程任务详情
 	tInfo, err := h.engineSvc.TaskInfo(ctx.Context, taskId)
 	if err != nil {
 		return err
 	}
 
-	if tInfo.UserID != username {
+	// 3. 权限判定：如果不是管理员用户，则必须校验当前任务指派处理人与当前操作用户一致
+	if !resp.User.IsAdmin && tInfo.UserID != resp.User.Username {
 		return fmt.Errorf("无法操作，当前审批任务指派处理人与您账号不一致")
+	}
+
+	// 记录 admin 操作别人任务的日志
+	if resp.User.IsAdmin && tInfo.UserID != resp.User.Username {
+		fmt.Printf("Admin %s 操作了非自己提交的任务 taskId=%d, 原指派人=%s\n", resp.User.Username, taskId, tInfo.UserID)
 	}
 
 	return nil
