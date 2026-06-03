@@ -9,7 +9,7 @@ import (
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
-	easyflow2 "github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
@@ -103,7 +103,7 @@ func (h *Handler) GetTaskFormConfig(ctx *ginx.Context, req TaskFormConfigReq) (g
 		return systemErrorResult, err
 	}
 
-	nodes, err := easyflow2.ParseNodes(wf.FlowData.Nodes)
+	nodes, err := easyflow.ParseNodes(wf.FlowData.Nodes)
 	if err != nil {
 		return systemErrorResult, err
 	}
@@ -113,7 +113,7 @@ func (h *Handler) GetTaskFormConfig(ctx *ginx.Context, req TaskFormConfigReq) (g
 			continue
 		}
 
-		property, err1 := easyflow2.ToNodeProperty[easyflow2.UserProperty](node)
+		property, err1 := easyflow.ToNodeProperty[easyflow.UserProperty](node)
 		if err1 != nil {
 			return systemErrorResult, err1
 		}
@@ -125,7 +125,7 @@ func (h *Handler) GetTaskFormConfig(ctx *ginx.Context, req TaskFormConfigReq) (g
 	}
 
 	return ginx.Result{
-		Data: []easyflow2.Field{},
+		Data: []easyflow.Field{},
 		Msg:  "未找到对应任务配置",
 	}, nil
 }

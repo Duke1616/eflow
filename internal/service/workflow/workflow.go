@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/Duke1616/eflow/internal/domain"
-	easyflow2 "github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"golang.org/x/sync/errgroup"
@@ -28,7 +28,7 @@ type IWorkflowCoreService interface {
 	// FindByKeyword 按照关键字(模糊匹配流程名或描述)进行分页列表搜索
 	FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Workflow, int64, error)
 	// GetAutomationProperty 获取已发布画布中特定自动任务节点的脚本或事件自动化扩展属性
-	GetAutomationProperty(workflow easyflow2.Workflow, nodeId string) (easyflow2.AutomationProperty, error)
+	GetAutomationProperty(workflow easyflow.Workflow, nodeId string) (easyflow.AutomationProperty, error)
 	// GetWorkflowSnapshot 依据引擎流程 ID 和发布版本号获取精确锁定的快照图结构详情
 	GetWorkflowSnapshot(ctx context.Context, processID, version int) (domain.Workflow, error)
 	// FindInstanceFlow 获取流程实例运行时所绑定版本的流程定义，提供特定历史快照回溯与降级解析
@@ -59,11 +59,11 @@ type Service interface {
 type workflowService struct {
 	repo         repository.IWorkflowRepository
 	engineSvc    engine.Service
-	engineCovert easyflow2.Converter
+	engineCovert easyflow.Converter
 }
 
 // NewWorkflowService 初始化工作流业务服务层实例
-func NewWorkflowService(repo repository.IWorkflowRepository, engineSvc engine.Service, engineCovert easyflow2.Converter) Service {
+func NewWorkflowService(repo repository.IWorkflowRepository, engineSvc engine.Service, engineCovert easyflow.Converter) Service {
 	return &workflowService{
 		repo:         repo,
 		engineSvc:    engineSvc,
@@ -167,19 +167,19 @@ func (s *workflowService) FindByKeyword(ctx context.Context, keyword string, off
 	return ws, total, nil
 }
 
-func (s *workflowService) GetAutomationProperty(workflow easyflow2.Workflow, nodeId string) (easyflow2.AutomationProperty, error) {
-	nodes, err := easyflow2.ParseNodes(workflow.FlowData.Nodes)
+func (s *workflowService) GetAutomationProperty(workflow easyflow.Workflow, nodeId string) (easyflow.AutomationProperty, error) {
+	nodes, err := easyflow.ParseNodes(workflow.FlowData.Nodes)
 	if err != nil {
-		return easyflow2.AutomationProperty{}, err
+		return easyflow.AutomationProperty{}, err
 	}
 
 	for _, node := range nodes {
 		if node.ID == nodeId {
-			return easyflow2.ToNodeProperty[easyflow2.AutomationProperty](node)
+			return easyflow.ToNodeProperty[easyflow.AutomationProperty](node)
 		}
 	}
 
-	return easyflow2.AutomationProperty{}, errors.New("node not found")
+	return easyflow.AutomationProperty{}, errors.New("node not found")
 }
 
 func (s *workflowService) GetWorkflowSnapshot(ctx context.Context, processID, version int) (domain.Workflow, error) {
@@ -208,21 +208,21 @@ func (s *workflowService) FindInstanceFlow(ctx context.Context, workflowID int64
 	return latest, nil
 }
 
-func (s *workflowService) toEasyWorkflow(wf domain.Workflow) easyflow2.Workflow {
+func (s *workflowService) toEasyWorkflow(wf domain.Workflow) easyflow.Workflow {
 	edges := make([]map[string]interface{}, len(wf.FlowData.Edges))
 	for i, e := range wf.FlowData.Edges {
-		edges[i] = map[string]interface{}(e)
+		edges[i] = e
 	}
 	nodes := make([]map[string]interface{}, len(wf.FlowData.Nodes))
 	for i, n := range wf.FlowData.Nodes {
-		nodes[i] = map[string]interface{}(n)
+		nodes[i] = n
 	}
 
-	return easyflow2.Workflow{
+	return easyflow.Workflow{
 		Id:    wf.Id,
 		Name:  wf.Name,
 		Owner: wf.Owner,
-		FlowData: easyflow2.LogicFlow{
+		FlowData: easyflow.LogicFlow{
 			Edges: edges,
 			Nodes: nodes,
 		},

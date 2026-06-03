@@ -64,11 +64,6 @@ type Service interface {
 	Reject(ctx context.Context, taskId int, comment string) error
 }
 
-// TicketEventProducer 工单创建流程事件发送器接口本地定义 (用以与 Kafka 回调大包完全斩断循环依赖)
-type TicketEventProducer interface {
-	Produce(ctx context.Context, evt event.TicketEvent) error
-}
-
 type ticketService struct {
 	repo        repository.TicketRepository
 	templateSvc templateSvc.Service

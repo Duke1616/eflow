@@ -3,13 +3,13 @@ package ioc
 import (
 	"github.com/Duke1616/eflow/internal/event"
 	templateEvent "github.com/Duke1616/eflow/internal/event/template"
-	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
+	"github.com/Duke1616/eflow/internal/service/ticket"
 	"github.com/Duke1616/eflow/pkg/mqx"
 	"github.com/ecodeclub/mq-api"
 	"github.com/xen0n/go-workwx"
 )
 
-func InitTicketEventProducer(q mq.MQ) (ticketSvc.TicketEventProducer, error) {
+func InitTicketEventProducer(q mq.MQ) (ticket.TicketEventProducer, error) {
 	return mqx.NewGeneralProducer[event.TicketEvent](q, event.CreateProcessEventName)
 }
 
