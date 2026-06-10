@@ -68,15 +68,19 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.B[RecordTaskReq](h.TaskRecord)),
 	)
 	g.POST("/todo", list("所有待办工单", "todo").
+		Needs("ticket:template:view_by_ids").
 		Handle(ginx.B[Todo](h.TodoAll)),
 	)
 	g.POST("/todo/user", list("我的待办工单", "my_todo").
+		Needs("ticket:template:view_by_ids").
 		Handle(ginx.B[Todo](h.TodoByUser)),
 	)
 	g.POST("/history", list("历史工单", "history").
+		Needs("ticket:template:view_by_ids").
 		Handle(ginx.B[HistoryReq](h.History)),
 	)
 	g.POST("/start/user", list("我发起的工单", "my_start").
+		Needs("ticket:template:view_by_ids").
 		Handle(ginx.B[StartUserReq](h.StartUser)),
 	)
 	g.POST("/pass", op("同意审批", "pass").

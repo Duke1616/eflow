@@ -36,10 +36,11 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.W(h.DetailTemplate)),
 	)
 	g.POST("/list", h.Capability("工单模板列表", "view").
+		Needs("ticket:template:view_group_by_ids").
 		Handle(ginx.B[ListTemplateReq](h.ListTemplate)),
 	)
 
-	g.POST("/list/pipeline", h.Capability("工单中心", "view").
+	g.POST("/list/pipeline", h.Capability("工单中心", "pipeline").
 		Module("center").
 		Group("工单中心").
 		Needs("ticket:template:toggle_favorite", "ticket:template:view_favorite").
@@ -63,9 +64,11 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	)
 
 	g.POST("/create", h.Capability("创建工单模板", "add").
+		Needs("ticket:template:view_group", "ticket:workflow:view").
 		Handle(ginx.B[CreateTemplateReq](h.CreateTemplate)),
 	)
 	g.POST("/update", h.Capability("修改工单模板", "edit").
+		Needs("ticket:template:view_group", "ticket:workflow:view").
 		Handle(ginx.B[UpdateTemplateReq](h.UpdateTemplate)),
 	)
 	g.DELETE("/delete/:id", h.Capability("删除工单模板", "delete").
@@ -85,10 +88,10 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	// --- TemplateGroup 工单分类分组路由 ---
 	gg := server.Group("/api/template/group")
 	gg.POST("/list", h.Capability("查询模板分组列表", "view_group").
+		NoSync().
 		Handle(ginx.B[Page](h.ListTemplateGroup)),
 	)
 	gg.POST("/by_ids", h.Capability("批量查询模板组", "view_group_by_ids").
-		NoSync().
 		Handle(ginx.B[FindTemplateGroupsByIdsReq](h.FindTemplateGroupByIds)),
 	)
 	gg.POST("/create", h.Capability("创建模板分类", "add_group").

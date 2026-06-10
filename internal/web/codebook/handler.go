@@ -30,10 +30,10 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g.POST("/create", h.Capability("创建脚本模板", "add").
 		Handle(ginx.B[CreateReq](h.Create)),
 	)
-	g.POST("/list", h.Capability("查询脚本模板列表", "view").
+	g.POST("/list", h.Capability("脚本模板列表", "view").
 		Handle(ginx.B[ListReq](h.List)),
 	)
-	g.GET("/detail/:id", h.Capability("查询脚本模板详情", "get").
+	g.GET("/detail/:id", h.Capability("脚本模板详情", "get").
 		Handle(ginx.W(h.Detail)),
 	)
 	g.POST("/update", h.Capability("更新脚本模板", "edit").
