@@ -71,7 +71,7 @@ func InitApp() (*App, error) {
 	iRunnerDAO := dao.NewRunnerDAO(db)
 	iRunnerRepository := repository.NewRunnerRepository(iRunnerDAO)
 	runnerService := runner.NewRunnerService(iRunnerRepository)
-	runnerHandler := runner2.NewHandler(runnerService)
+	runnerHandler := runner2.NewHandler(runnerService, workflowService)
 	taskDAO := dao.NewTaskDAO(db)
 	taskRepository := repository.NewTaskRepository(taskDAO)
 	ticketDAO := dao.NewTicketDAO(db)

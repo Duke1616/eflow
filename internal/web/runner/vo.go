@@ -49,6 +49,10 @@ type ListRunnerByIds struct {
 	Ids []int64 `json:"ids"`
 }
 
+type ListByWorkflowIdReq struct {
+	WorkflowId int64 `json:"workflow_id"`
+}
+
 type Variables struct {
 	Key    string `json:"key"`
 	Value  string `json:"value"`

@@ -1,11 +1,14 @@
 package runner
 
 import (
+	"encoding/json"
 	"errors"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/errs"
+	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	runnerSvc "github.com/Duke1616/eflow/internal/service/runner"
+	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/ginx"
@@ -14,13 +17,15 @@ import (
 
 type Handler struct {
 	capability.IRegistry
-	svc runnerSvc.Service
+	svc         runnerSvc.Service
+	workflowSvc workflowSvc.Service
 }
 
-func NewHandler(svc runnerSvc.Service) *Handler {
+func NewHandler(svc runnerSvc.Service, workflowSvc workflowSvc.Service) *Handler {
 	return &Handler{
-		svc:       svc,
-		IRegistry: capability.NewRegistry("ticket", "runner", "脚本引擎/执行单元"),
+		svc:         svc,
+		workflowSvc: workflowSvc,
+		IRegistry:   capability.NewRegistry("ticket", "runner", "脚本引擎/执行单元"),
 	}
 }
 
@@ -49,6 +54,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		NoSync().
 		Handle(ginx.B[ListRunnerByIds](h.ListByIds)),
 	)
+
 	g.POST("/list/by_codebook_uid", h.Capability("当前绑定执行单元", "view_runners").
 		Module("codebook").
 		Group("脚本引擎").
@@ -58,6 +64,10 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g.POST("/list/exclude_codebook_uid", h.Capability("复用执行单元", "view_exclude_codebook_uid").
 		NoSync().
 		Handle(ginx.B[ListByCodebookIdReq](h.ListExcludeCodebookUid)),
+	)
+	g.POST("/list/by_workflow_id", h.Capability("查询工作流关联执行单元", "view_by_workflow_id").
+		NoSync().
+		Handle(ginx.B[ListByWorkflowIdReq](h.ListByWorkflowId)),
 	)
 }
 
@@ -99,6 +109,55 @@ func (h *Handler) ListExcludeCodebookUid(ctx *ginx.Context, req ListByCodebookId
 		Msg: "查询 runner 列表成功",
 		Data: RetrieveWorkers{
 			Total: total,
+			Runners: slice.Map(rs, func(idx int, src domain.Runner) RunnerVO {
+				return h.toRunnerVo(src)
+			}),
+		},
+	}, nil
+}
+
+// ListByWorkflowId 根据工作流 ID 获取所关联的自动化任务执行器列表
+func (h *Handler) ListByWorkflowId(ctx *ginx.Context, req ListByWorkflowIdReq) (ginx.Result, error) {
+	// 获取最新版的工作流定义，用于配置/管理场景
+	wf, err := h.workflowSvc.Find(ctx.Context, req.WorkflowId)
+	if err != nil {
+		return h.translateError(err), err
+	}
+
+	nodesJSON, err := json.Marshal(wf.FlowData.Nodes)
+	if err != nil {
+		return SystemErrorResult, err
+	}
+	var nodes []easyflow.Node
+	err = json.Unmarshal(nodesJSON, &nodes)
+	if err != nil {
+		return SystemErrorResult, err
+	}
+
+	codebookUids := make([]string, 0)
+	for _, node := range nodes {
+		if node.Type == "automation" {
+			property, _ := easyflow.ToNodeProperty[easyflow.AutomationProperty](node)
+			codebookUids = append(codebookUids, property.CodebookUid)
+		}
+	}
+
+	if len(codebookUids) == 0 {
+		return ErrWorkflowNotBindCodebook, nil
+	}
+
+	rs, err := h.svc.ListByCodebookUids(ctx.Context, codebookUids)
+	if err != nil {
+		return h.translateError(err), err
+	}
+	if len(rs) == 0 {
+		return ErrWorkflowNotBindRunner, nil
+	}
+
+	return ginx.Result{
+		Msg: "查询 runner 列表成功",
+		Data: RetrieveWorkers{
+			Total: int64(len(rs)),
 			Runners: slice.Map(rs, func(idx int, src domain.Runner) RunnerVO {
 				return h.toRunnerVo(src)
 			}),

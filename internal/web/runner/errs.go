@@ -5,8 +5,10 @@ import (
 )
 
 var (
-	SystemErrorResult  = ginx.Result{Code: 500001, Msg: "系统错误"}
-	ErrRunnerInvalidId = ginx.Result{Code: 4010606, Msg: "执行器 ID 非法"}
+	SystemErrorResult          = ginx.Result{Code: 500001, Msg: "系统错误"}
+	ErrRunnerInvalidId         = ginx.Result{Code: 4010606, Msg: "执行器 ID 非法"}
+	ErrWorkflowNotBindCodebook = ginx.Result{Code: 500102, Msg: "此模版暂未绑定 【任务模版】"}
+	ErrWorkflowNotBindRunner   = ginx.Result{Code: 500103, Msg: "此模版暂未绑定 【执行器】"}
 )
 
 // ErrInvalidParameter 动态产生参数校验失败的 ginx.Result 响应结果

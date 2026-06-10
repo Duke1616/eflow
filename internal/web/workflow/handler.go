@@ -36,9 +36,11 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 
 	// 流程主实体写动作防护
 	g.POST("/create", h.Capability("创建流程", "add").
+		Needs("iam:user:view").
 		Handle(ginx.B[CreateReq](h.Create)),
 	)
 	g.POST("/update", h.Capability("修改流程", "edit").
+		Needs("ticket:workflow:get", "iam:user:view").
 		Handle(ginx.B[UpdateReq](h.Update)),
 	)
 	g.DELETE("/delete/:id", h.Capability("删除流程", "delete").
@@ -50,6 +52,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 
 	// 流程主实体读动作及模糊搜索
 	g.POST("/list", h.Capability("流程列表", "view").
+		Needs("iam:user:view").
 		Handle(ginx.B[ListReq](h.List)),
 	)
 	g.POST("/list/by_keyword", h.Capability("模糊检索流程模板", "view_by_keyword").
