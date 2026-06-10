@@ -17,6 +17,7 @@ func All() []migration.Migrator {
 		NewTicketMigrator(),
 		NewTaskMigrator(),
 		NewTaskFormMigrator(),
+		NewDispatchMigrator(),
 	}
 	migrators = append(migrators, NewEasyflowMigrators()...)
 	return migrators

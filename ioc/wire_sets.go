@@ -17,6 +17,7 @@ import (
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	codebookSvc "github.com/Duke1616/eflow/internal/service/codebook"
 	departmentSvc "github.com/Duke1616/eflow/internal/service/department"
+	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eflow/internal/service/event/assignees"
 	"github.com/Duke1616/eflow/internal/service/event/easyflow"
@@ -34,6 +35,7 @@ import (
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eflow/internal/web/codebook"
+	dispatchHdl "github.com/Duke1616/eflow/internal/web/dispatch"
 	"github.com/Duke1616/eflow/internal/web/runner"
 	"github.com/Duke1616/eflow/internal/web/task"
 	"github.com/Duke1616/eflow/internal/web/template"
@@ -110,6 +112,14 @@ var (
 		repository.NewTicketRepository,
 		ticketSvc.NewService,
 		ticket.NewHandler,
+	)
+
+	// DispatchSet 自动派发模块的 Provider 集合
+	DispatchSet = wire.NewSet(
+		dao.NewDispatchDAO,
+		repository.NewDispatchRepository,
+		dispatchSvc.NewService,
+		dispatchHdl.NewHandler,
 	)
 
 	// EventSet 流程事件模块的 Provider 集合
@@ -200,6 +210,7 @@ var (
 		TaskSet,
 		TicketSet,
 		EventSet,
+		DispatchSet,
 	)
 )
 

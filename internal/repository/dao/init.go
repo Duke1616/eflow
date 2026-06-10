@@ -18,5 +18,6 @@ func InitTables(db *gorm.DB) error {
 		&Runner{},
 		&Task{},
 		&Department{},
+		&Dispatch{},
 	)
 }
