@@ -92,6 +92,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.B[Page](h.ListTemplateGroup)),
 	)
 	gg.POST("/by_ids", h.Capability("批量查询模板组", "view_group_by_ids").
+		NoSync().
 		Handle(ginx.B[FindTemplateGroupsByIdsReq](h.FindTemplateGroupByIds)),
 	)
 	gg.POST("/create", h.Capability("创建模板分类", "add_group").
