@@ -20,16 +20,18 @@ type Handler struct {
 func NewHandler(svc taskSvc.Service) *Handler {
 	return &Handler{
 		svc:       svc,
-		IRegistry: capability.NewRegistry("ticket", "task", "自动化任务管理"),
+		IRegistry: capability.NewRegistry("ticket", "task", "工单中心/任务记录"),
 	}
 }
 
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/task")
-	g.POST("/list", h.Capability("查询任务列表", "view").
+	g.POST("/list", h.Capability("任务列表", "view").
 		Handle(ginx.B[ListTaskReq](h.ListTask)),
 	)
-	g.POST("/list/by_instance_id", h.Capability("按流程实例查询任务", "view_by_instance_id").
+	g.POST("/list/by_instance_id", h.Capability("关联自动化任务", "view_tasks").
+		Module("center").
+		Group("工单中心/工单详情").
 		Handle(ginx.B[ListTaskByInstanceIDReq](h.ListTaskByInstanceID)),
 	)
 	g.POST("/update/args", h.Capability("修改任务参数", "update_args").
@@ -41,10 +43,10 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g.POST("/retry", h.Capability("重试任务", "retry").
 		Handle(ginx.B[RetryReq](h.Retry)),
 	)
-	g.POST("/success", h.Capability("手动置为成功", "success").
-		Handle(ginx.B[UpdateStatusToSuccessReq](h.UpdateStatusToSuccess)),
-	)
-	g.GET("/logs/:task_id", h.Capability("查询任务日志", "logs").
+	//g.POST("/success", h.Capability("手动置为成功", "success").
+	//	Handle(ginx.B[UpdateStatusToSuccessReq](h.UpdateStatusToSuccess)),
+	//)
+	g.GET("/logs/:task_id", h.Capability("任务日志", "logs").
 		Handle(ginx.W(h.Logs)),
 	)
 }

@@ -6,6 +6,16 @@ import "ealert/notification/v1/notification.proto";
 
 option go_package = "ealert.template/v1;template";
 
+// 模板可见范围
+enum Scope {
+  // 未指定可见范围
+  SCOPE_UNSPECIFIED = 0;
+  // 租户专属
+  TENANT = 1;
+  // 全局共享
+  GLOBAL = 2;
+}
+
 // Template definitions
 message ChannelTemplate {
   int64 id = 1;
@@ -17,6 +27,7 @@ message ChannelTemplate {
   int64 ctime = 7;
   int64 utime = 8;
   repeated ChannelTemplateVersion versions = 9;
+  Scope scope = 10;
 }
 
 message ChannelTemplateVersion {

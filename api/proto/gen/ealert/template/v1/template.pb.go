@@ -22,6 +22,59 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// 模板可见范围
+type Scope int32
+
+const (
+	// 未指定可见范围
+	Scope_SCOPE_UNSPECIFIED Scope = 0
+	// 租户专属
+	Scope_TENANT Scope = 1
+	// 全局共享
+	Scope_GLOBAL Scope = 2
+)
+
+// Enum value maps for Scope.
+var (
+	Scope_name = map[int32]string{
+		0: "SCOPE_UNSPECIFIED",
+		1: "TENANT",
+		2: "GLOBAL",
+	}
+	Scope_value = map[string]int32{
+		"SCOPE_UNSPECIFIED": 0,
+		"TENANT":            1,
+		"GLOBAL":            2,
+	}
+)
+
+func (x Scope) Enum() *Scope {
+	p := new(Scope)
+	*p = x
+	return p
+}
+
+func (x Scope) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Scope) Descriptor() protoreflect.EnumDescriptor {
+	return file_ealert_template_v1_template_proto_enumTypes[0].Descriptor()
+}
+
+func (Scope) Type() protoreflect.EnumType {
+	return &file_ealert_template_v1_template_proto_enumTypes[0]
+}
+
+func (x Scope) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Scope.Descriptor instead.
+func (Scope) EnumDescriptor() ([]byte, []int) {
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{0}
+}
+
 // Template definitions
 type ChannelTemplate struct {
 	state           protoimpl.MessageState    `protogen:"open.v1"`
@@ -34,6 +87,7 @@ type ChannelTemplate struct {
 	Ctime           int64                     `protobuf:"varint,7,opt,name=ctime,proto3" json:"ctime,omitempty"`
 	Utime           int64                     `protobuf:"varint,8,opt,name=utime,proto3" json:"utime,omitempty"`
 	Versions        []*ChannelTemplateVersion `protobuf:"bytes,9,rep,name=versions,proto3" json:"versions,omitempty"`
+	Scope           Scope                     `protobuf:"varint,10,opt,name=scope,proto3,enum=ealert.template.v1.Scope" json:"scope,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -129,6 +183,13 @@ func (x *ChannelTemplate) GetVersions() []*ChannelTemplateVersion {
 		return x.Versions
 	}
 	return nil
+}
+
+func (x *ChannelTemplate) GetScope() Scope {
+	if x != nil {
+		return x.Scope
+	}
+	return Scope_SCOPE_UNSPECIFIED
 }
 
 type ChannelTemplateVersion struct {
@@ -815,7 +876,7 @@ var File_ealert_template_v1_template_proto protoreflect.FileDescriptor
 
 const file_ealert_template_v1_template_proto_rawDesc = "" +
 	"\n" +
-	"!ealert/template/v1/template.proto\x12\x12ealert.template.v1\x1a)ealert/notification/v1/notification.proto\"\xcd\x02\n" +
+	"!ealert/template/v1/template.proto\x12\x12ealert.template.v1\x1a)ealert/notification/v1/notification.proto\"\xfe\x02\n" +
 	"\x0fChannelTemplate\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x19\n" +
 	"\bowner_id\x18\x02 \x01(\x03R\aownerId\x12\x12\n" +
@@ -825,7 +886,9 @@ const file_ealert_template_v1_template_proto_rawDesc = "" +
 	"\x11active_version_id\x18\x06 \x01(\x03R\x0factiveVersionId\x12\x14\n" +
 	"\x05ctime\x18\a \x01(\x03R\x05ctime\x12\x14\n" +
 	"\x05utime\x18\b \x01(\x03R\x05utime\x12F\n" +
-	"\bversions\x18\t \x03(\v2*.ealert.template.v1.ChannelTemplateVersionR\bversions\"\xe4\x01\n" +
+	"\bversions\x18\t \x03(\v2*.ealert.template.v1.ChannelTemplateVersionR\bversions\x12/\n" +
+	"\x05scope\x18\n" +
+	" \x01(\x0e2\x19.ealert.template.v1.ScopeR\x05scope\"\xe4\x01\n" +
 	"\x16ChannelTemplateVersion\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12.\n" +
 	"\x13channel_template_id\x18\x02 \x01(\x03R\x11channelTemplateId\x12\x12\n" +
@@ -866,7 +929,13 @@ const file_ealert_template_v1_template_proto_rawDesc = "" +
 	"\acontent\x18\x04 \x01(\tR\acontent\x12\x12\n" +
 	"\x04desc\x18\x05 \x01(\tR\x04desc\"e\n" +
 	"\x1dCreateTemplateVersionResponse\x12D\n" +
-	"\aversion\x18\x01 \x01(\v2*.ealert.template.v1.ChannelTemplateVersionR\aversion2\x9f\x05\n" +
+	"\aversion\x18\x01 \x01(\v2*.ealert.template.v1.ChannelTemplateVersionR\aversion*6\n" +
+	"\x05Scope\x12\x15\n" +
+	"\x11SCOPE_UNSPECIFIED\x10\x00\x12\n" +
+	"\n" +
+	"\x06TENANT\x10\x01\x12\n" +
+	"\n" +
+	"\x06GLOBAL\x10\x022\x9f\x05\n" +
 	"\x0fTemplateService\x12j\n" +
 	"\x0fGetTemplateByID\x12*.ealert.template.v1.GetTemplateByIDRequest\x1a+.ealert.template.v1.GetTemplateByIDResponse\x12g\n" +
 	"\x0eCreateTemplate\x12).ealert.template.v1.CreateTemplateRequest\x1a*.ealert.template.v1.CreateTemplateResponse\x12g\n" +
@@ -888,50 +957,53 @@ func file_ealert_template_v1_template_proto_rawDescGZIP() []byte {
 	return file_ealert_template_v1_template_proto_rawDescData
 }
 
+var file_ealert_template_v1_template_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_ealert_template_v1_template_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_ealert_template_v1_template_proto_goTypes = []any{
-	(*ChannelTemplate)(nil),               // 0: ealert.template.v1.ChannelTemplate
-	(*ChannelTemplateVersion)(nil),        // 1: ealert.template.v1.ChannelTemplateVersion
-	(*GetTemplateByIDRequest)(nil),        // 2: ealert.template.v1.GetTemplateByIDRequest
-	(*GetTemplateByIDResponse)(nil),       // 3: ealert.template.v1.GetTemplateByIDResponse
-	(*CreateTemplateRequest)(nil),         // 4: ealert.template.v1.CreateTemplateRequest
-	(*CreateTemplateResponse)(nil),        // 5: ealert.template.v1.CreateTemplateResponse
-	(*UpdateTemplateRequest)(nil),         // 6: ealert.template.v1.UpdateTemplateRequest
-	(*UpdateTemplateResponse)(nil),        // 7: ealert.template.v1.UpdateTemplateResponse
-	(*PublishTemplateRequest)(nil),        // 8: ealert.template.v1.PublishTemplateRequest
-	(*PublishTemplateResponse)(nil),       // 9: ealert.template.v1.PublishTemplateResponse
-	(*ListTemplatesRequest)(nil),          // 10: ealert.template.v1.ListTemplatesRequest
-	(*ListTemplatesResponse)(nil),         // 11: ealert.template.v1.ListTemplatesResponse
-	(*CreateTemplateVersionRequest)(nil),  // 12: ealert.template.v1.CreateTemplateVersionRequest
-	(*CreateTemplateVersionResponse)(nil), // 13: ealert.template.v1.CreateTemplateVersionResponse
-	(v1.Channel)(0),                       // 14: ealert.notification.v1.Channel
+	(Scope)(0),                            // 0: ealert.template.v1.Scope
+	(*ChannelTemplate)(nil),               // 1: ealert.template.v1.ChannelTemplate
+	(*ChannelTemplateVersion)(nil),        // 2: ealert.template.v1.ChannelTemplateVersion
+	(*GetTemplateByIDRequest)(nil),        // 3: ealert.template.v1.GetTemplateByIDRequest
+	(*GetTemplateByIDResponse)(nil),       // 4: ealert.template.v1.GetTemplateByIDResponse
+	(*CreateTemplateRequest)(nil),         // 5: ealert.template.v1.CreateTemplateRequest
+	(*CreateTemplateResponse)(nil),        // 6: ealert.template.v1.CreateTemplateResponse
+	(*UpdateTemplateRequest)(nil),         // 7: ealert.template.v1.UpdateTemplateRequest
+	(*UpdateTemplateResponse)(nil),        // 8: ealert.template.v1.UpdateTemplateResponse
+	(*PublishTemplateRequest)(nil),        // 9: ealert.template.v1.PublishTemplateRequest
+	(*PublishTemplateResponse)(nil),       // 10: ealert.template.v1.PublishTemplateResponse
+	(*ListTemplatesRequest)(nil),          // 11: ealert.template.v1.ListTemplatesRequest
+	(*ListTemplatesResponse)(nil),         // 12: ealert.template.v1.ListTemplatesResponse
+	(*CreateTemplateVersionRequest)(nil),  // 13: ealert.template.v1.CreateTemplateVersionRequest
+	(*CreateTemplateVersionResponse)(nil), // 14: ealert.template.v1.CreateTemplateVersionResponse
+	(v1.Channel)(0),                       // 15: ealert.notification.v1.Channel
 }
 var file_ealert_template_v1_template_proto_depIdxs = []int32{
-	14, // 0: ealert.template.v1.ChannelTemplate.channel:type_name -> ealert.notification.v1.Channel
-	1,  // 1: ealert.template.v1.ChannelTemplate.versions:type_name -> ealert.template.v1.ChannelTemplateVersion
-	0,  // 2: ealert.template.v1.GetTemplateByIDResponse.template:type_name -> ealert.template.v1.ChannelTemplate
-	0,  // 3: ealert.template.v1.CreateTemplateRequest.template:type_name -> ealert.template.v1.ChannelTemplate
-	0,  // 4: ealert.template.v1.CreateTemplateResponse.template:type_name -> ealert.template.v1.ChannelTemplate
-	0,  // 5: ealert.template.v1.UpdateTemplateRequest.template:type_name -> ealert.template.v1.ChannelTemplate
-	0,  // 6: ealert.template.v1.ListTemplatesResponse.templates:type_name -> ealert.template.v1.ChannelTemplate
-	1,  // 7: ealert.template.v1.CreateTemplateVersionResponse.version:type_name -> ealert.template.v1.ChannelTemplateVersion
-	2,  // 8: ealert.template.v1.TemplateService.GetTemplateByID:input_type -> ealert.template.v1.GetTemplateByIDRequest
-	4,  // 9: ealert.template.v1.TemplateService.CreateTemplate:input_type -> ealert.template.v1.CreateTemplateRequest
-	6,  // 10: ealert.template.v1.TemplateService.UpdateTemplate:input_type -> ealert.template.v1.UpdateTemplateRequest
-	8,  // 11: ealert.template.v1.TemplateService.PublishTemplate:input_type -> ealert.template.v1.PublishTemplateRequest
-	10, // 12: ealert.template.v1.TemplateService.ListTemplates:input_type -> ealert.template.v1.ListTemplatesRequest
-	12, // 13: ealert.template.v1.TemplateService.CreateTemplateVersion:input_type -> ealert.template.v1.CreateTemplateVersionRequest
-	3,  // 14: ealert.template.v1.TemplateService.GetTemplateByID:output_type -> ealert.template.v1.GetTemplateByIDResponse
-	5,  // 15: ealert.template.v1.TemplateService.CreateTemplate:output_type -> ealert.template.v1.CreateTemplateResponse
-	7,  // 16: ealert.template.v1.TemplateService.UpdateTemplate:output_type -> ealert.template.v1.UpdateTemplateResponse
-	9,  // 17: ealert.template.v1.TemplateService.PublishTemplate:output_type -> ealert.template.v1.PublishTemplateResponse
-	11, // 18: ealert.template.v1.TemplateService.ListTemplates:output_type -> ealert.template.v1.ListTemplatesResponse
-	13, // 19: ealert.template.v1.TemplateService.CreateTemplateVersion:output_type -> ealert.template.v1.CreateTemplateVersionResponse
-	14, // [14:20] is the sub-list for method output_type
-	8,  // [8:14] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	15, // 0: ealert.template.v1.ChannelTemplate.channel:type_name -> ealert.notification.v1.Channel
+	2,  // 1: ealert.template.v1.ChannelTemplate.versions:type_name -> ealert.template.v1.ChannelTemplateVersion
+	0,  // 2: ealert.template.v1.ChannelTemplate.scope:type_name -> ealert.template.v1.Scope
+	1,  // 3: ealert.template.v1.GetTemplateByIDResponse.template:type_name -> ealert.template.v1.ChannelTemplate
+	1,  // 4: ealert.template.v1.CreateTemplateRequest.template:type_name -> ealert.template.v1.ChannelTemplate
+	1,  // 5: ealert.template.v1.CreateTemplateResponse.template:type_name -> ealert.template.v1.ChannelTemplate
+	1,  // 6: ealert.template.v1.UpdateTemplateRequest.template:type_name -> ealert.template.v1.ChannelTemplate
+	1,  // 7: ealert.template.v1.ListTemplatesResponse.templates:type_name -> ealert.template.v1.ChannelTemplate
+	2,  // 8: ealert.template.v1.CreateTemplateVersionResponse.version:type_name -> ealert.template.v1.ChannelTemplateVersion
+	3,  // 9: ealert.template.v1.TemplateService.GetTemplateByID:input_type -> ealert.template.v1.GetTemplateByIDRequest
+	5,  // 10: ealert.template.v1.TemplateService.CreateTemplate:input_type -> ealert.template.v1.CreateTemplateRequest
+	7,  // 11: ealert.template.v1.TemplateService.UpdateTemplate:input_type -> ealert.template.v1.UpdateTemplateRequest
+	9,  // 12: ealert.template.v1.TemplateService.PublishTemplate:input_type -> ealert.template.v1.PublishTemplateRequest
+	11, // 13: ealert.template.v1.TemplateService.ListTemplates:input_type -> ealert.template.v1.ListTemplatesRequest
+	13, // 14: ealert.template.v1.TemplateService.CreateTemplateVersion:input_type -> ealert.template.v1.CreateTemplateVersionRequest
+	4,  // 15: ealert.template.v1.TemplateService.GetTemplateByID:output_type -> ealert.template.v1.GetTemplateByIDResponse
+	6,  // 16: ealert.template.v1.TemplateService.CreateTemplate:output_type -> ealert.template.v1.CreateTemplateResponse
+	8,  // 17: ealert.template.v1.TemplateService.UpdateTemplate:output_type -> ealert.template.v1.UpdateTemplateResponse
+	10, // 18: ealert.template.v1.TemplateService.PublishTemplate:output_type -> ealert.template.v1.PublishTemplateResponse
+	12, // 19: ealert.template.v1.TemplateService.ListTemplates:output_type -> ealert.template.v1.ListTemplatesResponse
+	14, // 20: ealert.template.v1.TemplateService.CreateTemplateVersion:output_type -> ealert.template.v1.CreateTemplateVersionResponse
+	15, // [15:21] is the sub-list for method output_type
+	9,  // [9:15] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_ealert_template_v1_template_proto_init() }
@@ -944,13 +1016,14 @@ func file_ealert_template_v1_template_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ealert_template_v1_template_proto_rawDesc), len(file_ealert_template_v1_template_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_ealert_template_v1_template_proto_goTypes,
 		DependencyIndexes: file_ealert_template_v1_template_proto_depIdxs,
+		EnumInfos:         file_ealert_template_v1_template_proto_enumTypes,
 		MessageInfos:      file_ealert_template_v1_template_proto_msgTypes,
 	}.Build()
 	File_ealert_template_v1_template_proto = out.File

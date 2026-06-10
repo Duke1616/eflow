@@ -3,6 +3,7 @@ package ioc
 import (
 	"time"
 
+	templatev1 "github.com/Duke1616/eflow/api/proto/gen/ealert/template/v1"
 	executorv1 "github.com/Duke1616/eflow/api/proto/gen/etask/executor/v1"
 	processConsumer "github.com/Duke1616/eflow/internal/event/process"
 	taskConsumer "github.com/Duke1616/eflow/internal/event/task"
@@ -10,6 +11,7 @@ import (
 	ticketConsumer "github.com/Duke1616/eflow/internal/event/ticket"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	serviceTask "github.com/Duke1616/eflow/internal/service/task"
+	workflow "github.com/Duke1616/eflow/internal/service/workflow"
 )
 
 // InitTasks 初始化所有后台任务
@@ -23,6 +25,8 @@ func InitTasks(
 	wechatConsumer *ticketConsumer.WechatTicketConsumer,
 	larkWsServer *ticketConsumer.LarkCallbackTicketServer,
 	wechatCallbackConsumer *templateConsumer.WechatApprovalCallbackConsumer,
+	workflowSvc workflow.Service,
+	templateClient templatev1.TemplateServiceClient,
 ) []Task {
 	return []Task{
 		executeResultConsumer,
@@ -34,5 +38,6 @@ func InitTasks(
 		wechatConsumer,
 		larkWsServer,
 		wechatCallbackConsumer,
+		workflow.NewTemplateBootstrapTask(workflowSvc, templateClient),
 	}
 }

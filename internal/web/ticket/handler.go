@@ -36,7 +36,7 @@ func NewHandler(svc ticketSvc.Service, engineSvc engineSvc.Service, userSvc user
 		userSvc:     userSvc,
 		engineSvc:   engineSvc,
 		workflowSvc: workflowSvc,
-		IRegistry:   capability.NewRegistry("ticket", "ticket", "工单业务管理"),
+		IRegistry:   capability.NewRegistry("ticket", "center", "工单中心"),
 	}
 }
 
@@ -46,45 +46,59 @@ func (h *Handler) PublicRoutes(server *gin.Engine) {
 
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/ticket")
-	g.POST("/create", h.Capability("创建工单", "add").
+
+	op := func(name, code string) *capability.Builder {
+		return h.Capability(name, code).Group("工单中心/工单操作")
+	}
+	detail := func(name, code string) *capability.Builder {
+		return h.Capability(name, code).Group("工单中心/工单详情")
+	}
+	list := func(name, code string) *capability.Builder {
+		return h.Capability(name, code).Group("工单中心/工单列表")
+	}
+
+	g.POST("/create", op("创建工单", "create").
+		Needs("ticket:template:get").
 		Handle(ginx.B[CreateTicketReq](h.CreateTicket)),
 	)
-	g.POST("/detail/process_inst_id", h.Capability("查询工单详情", "detail").
+	g.POST("/detail/process_inst_id", detail("工单详情", "get").
 		Handle(ginx.B[DetailProcessInstIdReq](h.Detail)),
 	)
-	g.POST("/task/record", h.Capability("查询流转记录", "record").
+	g.POST("/task/record", detail("流转记录", "record").
 		Handle(ginx.B[RecordTaskReq](h.TaskRecord)),
 	)
-	g.POST("/todo", h.Capability("查询所有待办工单", "todo").
+	g.POST("/todo", list("所有待办工单", "todo").
 		Handle(ginx.B[Todo](h.TodoAll)),
 	)
-	g.POST("/todo/user", h.Capability("查询我的待办工单", "my_todo").
+	g.POST("/todo/user", list("我的待办工单", "my_todo").
 		Handle(ginx.B[Todo](h.TodoByUser)),
 	)
-	g.POST("/history", h.Capability("查询历史工单", "history").
+	g.POST("/history", list("历史工单", "history").
 		Handle(ginx.B[HistoryReq](h.History)),
 	)
-	g.POST("/start/user", h.Capability("查询我发起的工单", "my_start").
+	g.POST("/start/user", list("我发起的工单", "my_start").
 		Handle(ginx.B[StartUserReq](h.StartUser)),
 	)
-	g.POST("/pass", h.Capability("同意工单审批", "pass").
+	g.POST("/pass", op("同意审批", "pass").
 		Handle(ginx.B[PassOrderReq](h.Pass)),
 	)
-	g.POST("/reject", h.Capability("驳回工单审批", "reject").
+	g.POST("/reject", op("驳回审批", "reject").
 		Handle(ginx.B[RejectOrderReq](h.Reject)),
 	)
-	g.POST("/transfer", h.Capability("转交审批人", "transfer").
+	g.POST("/transfer", op("转交审批人", "transfer").
+		Needs("iam:user:view").
 		Handle(ginx.B[TransferReq](h.Transfer)),
 	)
-	g.POST("/revoke", h.Capability("撤销工单", "revoke").
+	g.POST("/revoke", op("撤销工单", "revoke").
 		Handle(ginx.B[RevokeOrderReq](h.Revoke)),
 	)
-	g.POST("/task/form_config", h.Capability("获取任务节点表单配置", "form_config").
+	g.POST("/task/form_config", detail("任务节点表单配置", "form_config").
+		Needs("ticket:template:get", "ticket:ticket:get").
 		Handle(ginx.B[TaskFormConfigReq](h.GetTaskFormConfig)),
 	)
-	g.POST("/upstream/:task_id", h.Capability("查询上游处理节点", "upstream").
-		Handle(ginx.W(h.Upstream)),
-	)
+	//g.POST("/upstream/:task_id", detail("查询上游处理节点", "upstream").
+	//	Handle(ginx.W(h.Upstream)),
+	//)
 }
 
 func (h *Handler) GetTaskFormConfig(ctx *ginx.Context, req TaskFormConfigReq) (ginx.Result, error) {

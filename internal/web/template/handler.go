@@ -24,7 +24,7 @@ type Handler struct {
 func NewHandler(svc templateSvc.Service) *Handler {
 	return &Handler{
 		svc:       svc,
-		IRegistry: capability.NewRegistry("ticket", "template", "工单模板管理"),
+		IRegistry: capability.NewRegistry("ticket", "template", "工单模板"),
 	}
 }
 
@@ -32,33 +32,36 @@ func NewHandler(svc templateSvc.Service) *Handler {
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	// --- Template 工单模板业务路由 ---
 	g := server.Group("/api/template")
-	g.GET("/detail/:id", h.Capability("查询工单模板详情", "get").
+	g.GET("/detail/:id", h.Capability("工单模板详情", "get").
 		Handle(ginx.W(h.DetailTemplate)),
 	)
-	g.POST("/list", h.Capability("查询工单模板列表", "view").
+	g.POST("/list", h.Capability("工单模板列表", "view").
 		Handle(ginx.B[ListTemplateReq](h.ListTemplate)),
 	)
-	g.POST("/list/pipeline", h.Capability("分类聚合工单模板", "pipeline").
+
+	g.POST("/list/pipeline", h.Capability("工单中心", "view").
+		Module("center").
+		Group("工单中心").
+		Needs("ticket:template:toggle_favorite", "ticket:template:view_favorite").
 		Handle(ginx.W(h.Pipeline)),
 	)
 	g.POST("/by_ids", h.Capability("批量获取模板详情", "view_by_ids").
+		NoSync().
 		Handle(ginx.B[FindByTemplateIds](h.FindByTemplateIds)),
 	)
-	g.POST("/get_by_workflow_id", h.Capability("按流程ID获取模板", "view_by_workflow_id").
+	g.POST("/get_by_workflow_id", h.Capability("根据流程获取模板", "view_by_workflow_id").
+		NoSync().
 		Handle(ginx.B[GetTemplatesByWorkFlowIdReq](h.GetTemplatesByWorkflowId)),
 	)
 	g.POST("/rules/by_workflow_id", h.Capability("获取流程绑定模板校验链", "rules_by_workflow_id").
+		NoSync().
 		Handle(ginx.B[GetRulesByWorkFlowIdReq](h.GetRulesByWorkFlowId)),
 	)
 	g.POST("/list/by_keyword", h.Capability("模糊搜索模板", "view_by_keyword").
+		NoSync().
 		Handle(ginx.B[ByKeywordReq](h.ByKeyword)),
 	)
-	g.POST("/favorite/toggle", h.Capability("收藏或取消工单模板", "toggle_favorite").
-		Handle(ginx.B[ToggleFavoriteReq](h.ToggleFavorite)),
-	)
-	g.POST("/favorite/list", h.Capability("查询模板收藏夹", "view_favorite").
-		Handle(ginx.W(h.ListFavoriteTemplates)),
-	)
+
 	g.POST("/create", h.Capability("创建工单模板", "add").
 		Handle(ginx.B[CreateTemplateReq](h.CreateTemplate)),
 	)
@@ -69,12 +72,23 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.W(h.DeleteTemplate)),
 	)
 
+	// 收藏功能
+	g.POST("/favorite/toggle", h.Capability("收藏状态变更", "toggle_favorite").
+		NoSync().
+		Handle(ginx.B[ToggleFavoriteReq](h.ToggleFavorite)),
+	)
+	g.POST("/favorite/list", h.Capability("模板收藏夹", "view_favorite").
+		NoSync().
+		Handle(ginx.W(h.ListFavoriteTemplates)),
+	)
+
 	// --- TemplateGroup 工单分类分组路由 ---
 	gg := server.Group("/api/template/group")
 	gg.POST("/list", h.Capability("查询模板分组列表", "view_group").
 		Handle(ginx.B[Page](h.ListTemplateGroup)),
 	)
 	gg.POST("/by_ids", h.Capability("批量查询模板组", "view_group_by_ids").
+		NoSync().
 		Handle(ginx.B[FindTemplateGroupsByIdsReq](h.FindTemplateGroupByIds)),
 	)
 	gg.POST("/create", h.Capability("创建模板分类", "add_group").

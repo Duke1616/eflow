@@ -177,7 +177,7 @@ var (
 		wire.FieldsOf(new(*ecmdb.ECMDBClient), "RotaClient"),
 		wire.FieldsOf(new(*eiam.EIAMClient), "UserClient"),
 		wire.FieldsOf(new(*etask.ETASKClient), "TaskClient", "ExecutorClient"),
-		wire.FieldsOf(new(*ealert.EALERTClient), "TeamClient", "NotificationClient"),
+		wire.FieldsOf(new(*ealert.EALERTClient), "TeamClient", "NotificationClient", "TemplateClient"),
 	)
 	// WebSet Web 服务 Provider 集合
 	WebSet = wire.NewSet(

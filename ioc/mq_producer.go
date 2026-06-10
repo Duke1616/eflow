@@ -13,10 +13,10 @@ func InitTicketEventProducer(q mq.MQ) (ticket.TicketEventProducer, error) {
 	return mqx.NewGeneralProducer[event.TicketEvent](q, event.CreateProcessEventName)
 }
 
-func InitTicketStatusModifyEventProducer(q mq.MQ) (mqx.Producer[event.TicketStatusModifyEvent], error) {
-	return mqx.NewGeneralProducer[event.TicketStatusModifyEvent](q, event.OrderStatusModifyEventName)
-}
-
 func InitWechatTicketEventProducer(q mq.MQ) (templateEvent.WechatTicketEventProducer, error) {
 	return mqx.NewGeneralProducer[*workwx.OAApprovalDetail](q, templateEvent.WechatTicketEventName)
+}
+
+func InitTicketStatusModifyEventProducer(q mq.MQ) (mqx.Producer[event.TicketStatusModifyEvent], error) {
+	return mqx.NewGeneralProducer[event.TicketStatusModifyEvent](q, event.OrderStatusModifyEventName)
 }

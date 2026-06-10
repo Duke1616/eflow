@@ -20,38 +20,43 @@ type Handler struct {
 func NewHandler(svc runnerSvc.Service) *Handler {
 	return &Handler{
 		svc:       svc,
-		IRegistry: capability.NewRegistry("ticket", "runner", "执行器管理"),
+		IRegistry: capability.NewRegistry("ticket", "runner", "脚本引擎/执行单元"),
 	}
 }
 
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/runner")
 
-	g.POST("/register", h.Capability("注册执行器", "add").
+	g.POST("/register", h.Capability("注册执行单元", "add").
 		Handle(ginx.B[RegisterRunnerReq](h.Register)),
 	)
-	g.POST("/list", h.Capability("查询执行器列表", "view").
+	g.POST("/list", h.Capability("执行单元列表", "view").
 		Handle(ginx.B[ListRunnerReq](h.ListRunner)),
 	)
-	g.POST("/list/tags", h.Capability("查询执行器标签", "tags").
+	g.POST("/list/tags", h.Capability("执行单元标签", "tags").
 		Handle(ginx.W(h.ListTags)),
 	)
-	g.GET("/detail/:id", h.Capability("查询执行器详情", "get").
+	g.GET("/detail/:id", h.Capability("执行单元详情", "get").
 		Handle(ginx.W(h.Detail)),
 	)
-	g.POST("/update", h.Capability("更新执行器", "edit").
+	g.POST("/update", h.Capability("更新执行单元", "edit").
 		Handle(ginx.B[UpdateRunnerReq](h.UpdateRunner)),
 	)
-	g.DELETE("/delete/:id", h.Capability("删除执行器", "delete").
+	g.DELETE("/delete/:id", h.Capability("删除执行单元", "delete").
 		Handle(ginx.W(h.DeleteRunner)),
 	)
-	g.POST("/list/by_ids", h.Capability("根据ID批量查询执行器", "view_by_ids").
+	g.POST("/list/by_ids", h.Capability("批量查询执行单元", "view_by_ids").
+		NoSync().
 		Handle(ginx.B[ListRunnerByIds](h.ListByIds)),
 	)
-	g.POST("/list/by_codebook_uid", h.Capability("根据脚本查询关联执行器", "view_by_codebook_uid").
+	g.POST("/list/by_codebook_uid", h.Capability("当前绑定执行单元", "view_runners").
+		Module("codebook").
+		Group("脚本引擎").
+		Needs("ticket:runner:view_exclude_codebook_uid").
 		Handle(ginx.B[ListByCodebookIdReq](h.ListByCodebookId)),
 	)
-	g.POST("/list/exclude_codebook_uid", h.Capability("查询未关联脚本执行器", "view_exclude_codebook_uid").
+	g.POST("/list/exclude_codebook_uid", h.Capability("复用执行单元", "view_exclude_codebook_uid").
+		NoSync().
 		Handle(ginx.B[ListByCodebookIdReq](h.ListExcludeCodebookUid)),
 	)
 }

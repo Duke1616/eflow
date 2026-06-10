@@ -26,7 +26,7 @@ func NewHandler(svc workflowSvc.Service, engineSvc engineSvc.Service) *Handler {
 	return &Handler{
 		svc:       svc,
 		engineSvc: engineSvc,
-		IRegistry: capability.NewRegistry("ticket", "workflow", "工作流管理"),
+		IRegistry: capability.NewRegistry("ticket", "workflow", "流程管理"),
 	}
 }
 
@@ -35,31 +35,34 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/workflow")
 
 	// 流程主实体写动作防护
-	g.POST("/create", h.Capability("创建流程定义", "add").
+	g.POST("/create", h.Capability("创建流程", "add").
 		Handle(ginx.B[CreateReq](h.Create)),
 	)
-	g.POST("/update", h.Capability("修改流程定义", "edit").
+	g.POST("/update", h.Capability("修改流程", "edit").
 		Handle(ginx.B[UpdateReq](h.Update)),
 	)
-	g.DELETE("/delete/:id", h.Capability("删除流程定义", "delete").
+	g.DELETE("/delete/:id", h.Capability("删除流程", "delete").
 		Handle(ginx.W(h.Delete)),
 	)
-	g.POST("/deploy", h.Capability("发布部署流程", "deploy").
+	g.POST("/deploy", h.Capability("流程发布", "deploy").
 		Handle(ginx.B[DeployReq](h.Deploy)),
 	)
 
 	// 流程主实体读动作及模糊搜索
-	g.POST("/list", h.Capability("查询流程模板列表", "view").
+	g.POST("/list", h.Capability("流程列表", "view").
 		Handle(ginx.B[ListReq](h.List)),
 	)
 	g.POST("/list/by_keyword", h.Capability("模糊检索流程模板", "view_by_keyword").
+		NoSync().
 		Handle(ginx.B[ByKeywordReq](h.ByKeyword)),
 	)
-	g.GET("/detail/:id", h.Capability("查看工作流详情", "get").
+	g.GET("/detail/:id", h.Capability("流程详情", "get").
 		Handle(ginx.W(h.Detail)),
 	)
 	// 工单审批流转状态轨迹轨迹地图
-	g.POST("/graph", h.Capability("查询工单流转地图", "graph").
+	g.POST("/graph", h.Capability("流程轨迹图", "graph").
+		Module("center").
+		Group("工单中心/工单详情").
 		Handle(ginx.B[OrderGraphReq](h.FindOrderGraph)),
 	)
 }

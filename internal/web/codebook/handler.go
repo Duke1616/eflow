@@ -20,7 +20,7 @@ type Handler struct {
 func NewHandler(svc codebookSvc.Service) *Handler {
 	return &Handler{
 		svc:       svc,
-		IRegistry: capability.NewRegistry("ticket", "codebook", "模板管理"),
+		IRegistry: capability.NewRegistry("ticket", "codebook", "脚本引擎"),
 	}
 }
 
