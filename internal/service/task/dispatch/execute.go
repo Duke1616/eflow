@@ -82,6 +82,13 @@ func (e *executeService) Dispatch(ctx context.Context, task domain.Task) error {
 			e.logger.Error("任务已存在且尝试重试获取 ID 失败:", elog.FieldErr(retryErr), elog.Int64("任务ID", task.Id))
 			return fmt.Errorf("任务已存在且尝试重试获取 ID 失败: %w", retryErr)
 		}
+		if retryResp.Code != taskv1.TaskErrorCode_SUCCESS {
+			e.logger.Error("任务已存在且尝试重试获取 ID 返回业务错误:",
+				elog.Int32("code", int32(retryResp.Code)),
+				elog.String("msg", retryResp.Message),
+				elog.Int64("任务ID", task.Id))
+			return fmt.Errorf("任务已存在且尝试重试获取 ID 业务错误: %s (code: %d)", retryResp.Message, retryResp.Code)
+		}
 		externalId = retryResp.Id
 	default:
 		e.logger.Error("任务平台返回业务错误:", elog.Int32("code", int32(taskResult.Code)),

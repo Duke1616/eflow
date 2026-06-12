@@ -7,10 +7,10 @@ import (
 	"os"
 
 	easyEngine "github.com/Bunny3th/easy-workflow/workflow/engine"
-	"github.com/Duke1616/eiam/pkg/migration"
 	"github.com/Duke1616/eflow/cmd/migrate/internal/config"
 	"github.com/Duke1616/eflow/cmd/migrate/internal/migrations"
 	"github.com/Duke1616/eflow/internal/repository/dao"
+	"github.com/Duke1616/eiam/pkg/migration"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 )
