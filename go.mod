@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/Bunny3th/easy-workflow v1.0.0
 	github.com/Duke1616/ecmdb v1.11.0
-	github.com/Duke1616/eiam v0.0.12
+	github.com/Duke1616/eiam v0.0.13
 	github.com/Duke1616/enotify v0.1.25-0.20260311115016-f762700e83e9
 	github.com/Duke1616/etask v0.0.7
 	github.com/chromedp/chromedp v0.15.1
@@ -28,7 +28,6 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/xen0n/go-workwx v1.7.0
 	go.etcd.io/etcd/client/v3 v3.6.11
-	go.mongodb.org/mongo-driver/v2 v2.5.0
 	go.uber.org/mock v0.6.0
 	golang.org/x/sync v0.20.0
 	google.golang.org/grpc v1.79.3
@@ -131,6 +130,7 @@ require (
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	go.etcd.io/etcd/api/v3 v3.6.11 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.6.11 // indirect
+	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.43.0 // indirect
 	go.opentelemetry.io/otel/exporters/jaeger v1.17.0 // indirect

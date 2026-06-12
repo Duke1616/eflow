@@ -1,7 +1,7 @@
 package migrations
 
 import (
-	"github.com/Duke1616/eflow/cmd/migrate/internal/migration"
+	"github.com/Duke1616/eiam/pkg/migration"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 )
 

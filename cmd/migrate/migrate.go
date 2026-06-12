@@ -5,10 +5,13 @@ import (
 	"log"
 	"os"
 
+	easyEngine "github.com/Bunny3th/easy-workflow/workflow/engine"
+	"github.com/Duke1616/eiam/pkg/migration"
 	"github.com/Duke1616/eflow/cmd/migrate/internal/config"
-	"github.com/Duke1616/eflow/cmd/migrate/internal/migration"
 	"github.com/Duke1616/eflow/cmd/migrate/internal/migrations"
+	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/spf13/cobra"
+	"gorm.io/gorm"
 )
 
 // NewCommand 返回 migrate 子命令。
@@ -39,7 +42,32 @@ func runMigrate() {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 	defer cancel()
 
-	runner := migration.NewRunner(cfg, migrations.All())
+	// NOTE: 转换为 eiam 共享迁移包的配置结构体
+	mCfg := migration.Config{
+		MongoDSN:           cfg.MongoDSN,
+		MongoDBName:        cfg.MongoDBName,
+		MySQLSrcDSN:        cfg.MySQLSrcDSN,
+		MySQLDstDSN:        cfg.MySQLDstDSN,
+		BatchSize:          cfg.BatchSize,
+		Timeout:            cfg.Timeout,
+		AutoMigrate:        cfg.AutoMigrate,
+		ResetAutoIncrement: cfg.ResetAutoIncrement,
+		Truncate:           cfg.Truncate,
+		DryRun:             cfg.DryRun,
+	}
+
+	// NOTE: 构造 eiam 统一包的迁移器，并注入本地 eflow 特定的自动建表逻辑与默认租户覆盖选项
+	runner := migration.NewRunner(mCfg, migrations.All(),
+		migration.WithDefaultTenantID(migrations.DefaultTenantID),
+		migration.WithAutoMigrateFunc(func(db *gorm.DB) error {
+			if err = dao.InitTables(db); err != nil {
+				return err
+			}
+			easyEngine.DB = db
+			return easyEngine.DatabaseInitialize()
+		}),
+	)
+
 	if err = runner.Run(ctx); err != nil {
 		log.Fatal(err)
 	}

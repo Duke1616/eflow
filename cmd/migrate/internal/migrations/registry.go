@@ -1,6 +1,6 @@
 package migrations
 
-import "github.com/Duke1616/eflow/cmd/migrate/internal/migration"
+import "github.com/Duke1616/eiam/pkg/migration"
 
 const DefaultTenantID int64 = 2
 

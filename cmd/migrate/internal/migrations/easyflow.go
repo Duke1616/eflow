@@ -2,7 +2,7 @@ package migrations
 
 import (
 	"github.com/Bunny3th/easy-workflow/workflow/database"
-	"github.com/Duke1616/eflow/cmd/migrate/internal/migration"
+	"github.com/Duke1616/eiam/pkg/migration"
 )
 
 type easyflowTableMigrator[T any] struct {
