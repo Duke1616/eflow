@@ -12,4 +12,4 @@ ENV PATH /headless-shell:$PATH
 WORKDIR /app
 COPY --from=build /app/dist/eflow .
 EXPOSE 8000
-ENTRYPOINT ["./eflow", "start"]
+ENTRYPOINT ["./eflow", "server"]
