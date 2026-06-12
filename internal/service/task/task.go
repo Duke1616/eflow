@@ -298,10 +298,10 @@ func (s *taskService) ListReadyTasks(ctx context.Context, limit int64) ([]domain
 	return s.repo.ListReadyTasks(ctx, limit)
 }
 
-func (s *taskService) prepareTask(ctx context.Context, task domain.Task) (domain.Task, error) {
+func (s *taskService) getAutomationProperty(ctx context.Context, task domain.Task) (int64, easyflow.AutomationProperty, error) {
 	inst, err := s.engineSvc.GetInstanceByID(ctx, task.ProcessInstId)
 	if err != nil {
-		return domain.Task{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorGetProcessInst.ToString(), domain.FAILED, err)
+		return 0, easyflow.AutomationProperty{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorGetProcessInst.ToString(), domain.FAILED, err)
 	}
 	workflowID := task.WorkflowId
 	if workflowID == 0 {
@@ -309,22 +309,58 @@ func (s *taskService) prepareTask(ctx context.Context, task domain.Task) (domain
 	}
 	flow, err := s.workflowSvc.FindInstanceFlow(ctx, workflowID, inst.ProcID, inst.ProcVersion)
 	if err != nil {
-		return domain.Task{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorGetProcessInfo.ToString(), domain.FAILED, err)
+		return 0, easyflow.AutomationProperty{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorGetProcessInfo.ToString(), domain.FAILED, err)
 	}
 	automation, err := s.workflowSvc.GetAutomationProperty(s.toEasyWorkflow(flow), task.CurrentNodeId)
 	if err != nil {
-		return domain.Task{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorExtractAutomationInfo.ToString(), domain.FAILED, err)
+		return 0, easyflow.AutomationProperty{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorExtractAutomationInfo.ToString(), domain.FAILED, err)
 	}
+	return flow.Id, automation, nil
+}
+
+func (s *taskService) getRunnerAndCodebook(ctx context.Context, task domain.Task, automation easyflow.AutomationProperty) (domain.Runner, domain.Codebook, error) {
+	s.logger.Info("准备匹配 Runner 执行器",
+		elog.Int64("taskId", task.Id),
+		elog.String("codebookUid", automation.CodebookUid),
+		elog.String("tag", automation.Tag),
+	)
 	runner, err := s.runnerSvc.FindByCodebookUidAndTag(ctx, automation.CodebookUid, automation.Tag)
 	if err != nil {
-		return domain.Task{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorGetDispatcherNode.ToString(), domain.BLOCKED, err)
+		s.logger.Error("获取执行器 Runner 失败",
+			elog.Int64("taskId", task.Id),
+			elog.String("codebookUid", automation.CodebookUid),
+			elog.String("tag", automation.Tag),
+			elog.FieldErr(err),
+		)
+		return domain.Runner{}, domain.Codebook{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorGetDispatcherNode.ToString(), domain.BLOCKED, err)
 	}
+	s.logger.Info("成功匹配 Runner 执行器",
+		elog.Int64("taskId", task.Id),
+		elog.Int64("runnerId", runner.Id),
+		elog.String("runnerName", runner.Name),
+		elog.String("runnerKind", runner.Kind.ToString()),
+		elog.String("runnerTarget", runner.Target),
+		elog.String("runnerHandler", runner.Handler),
+	)
 	codebook, err := s.codebookSvc.GetByIdentifier(ctx, runner.CodebookUid)
 	if err != nil {
-		return domain.Task{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorGetTaskTemplate.ToString(), domain.FAILED, err)
+		return domain.Runner{}, domain.Codebook{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorGetTaskTemplate.ToString(), domain.FAILED, err)
+	}
+	return runner, codebook, nil
+}
+
+func (s *taskService) prepareTask(ctx context.Context, task domain.Task) (domain.Task, error) {
+	flowID, automation, err := s.getAutomationProperty(ctx, task)
+	if err != nil {
+		return domain.Task{}, err
 	}
 
-	task.WorkflowId = flow.Id
+	runner, codebook, err := s.getRunnerAndCodebook(ctx, task, automation)
+	if err != nil {
+		return domain.Task{}, err
+	}
+
+	task.WorkflowId = flowID
 	task.CodebookUid = codebook.Identifier
 	task.Code = codebook.Code
 	task.Language = codebook.Language
