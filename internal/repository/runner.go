@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 
+	"github.com/Duke1616/ecmdb/pkg/cryptox"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/pkg/sqlx"
@@ -46,13 +47,15 @@ type IRunnerRepository interface {
 }
 
 type runnerRepository struct {
-	dao dao.IRunnerDAO
+	dao    dao.IRunnerDAO
+	crypto cryptox.Crypto
 }
 
 // NewRunnerRepository 初始化执行器仓储层实体
-func NewRunnerRepository(dao dao.IRunnerDAO) IRunnerRepository {
+func NewRunnerRepository(dao dao.IRunnerDAO, crypto cryptox.Crypto) IRunnerRepository {
 	return &runnerRepository{
-		dao: dao,
+		dao:    dao,
+		crypto: crypto,
 	}
 }
 
@@ -191,13 +194,7 @@ func (repo *runnerRepository) toEntity(req domain.Runner) dao.Runner {
 		Name:           req.Name,
 		Tags:           sqlx.JsonField[[]string]{Val: req.Tags, Valid: true},
 		Variables: sqlx.JsonField[[]dao.Variables]{
-			Val: slice.Map(req.Variables, func(idx int, src domain.Variables) dao.Variables {
-				return dao.Variables{
-					Key:    src.Key,
-					Value:  src.Value,
-					Secret: src.Secret,
-				}
-			}),
+			Val:   toDAOVariables(repo.crypto, req.Variables),
 			Valid: true,
 		},
 		Desc:    req.Desc,
@@ -218,13 +215,7 @@ func (repo *runnerRepository) toDomain(req dao.Runner) domain.Runner {
 		CodebookUid:    req.CodebookUid,
 		Kind:           domain.Kind(req.Kind),
 		Tags:           req.Tags.Val,
-		Variables: slice.Map(req.Variables.Val, func(idx int, src dao.Variables) domain.Variables {
-			return domain.Variables{
-				Key:    src.Key,
-				Value:  src.Value,
-				Secret: src.Secret,
-			}
-		}),
+		Variables: toDomainVariables(repo.crypto, req.Variables.Val),
 		Desc:    req.Desc,
 		Action:  domain.Action(req.Action),
 		Target:  req.Target,
