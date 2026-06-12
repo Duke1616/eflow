@@ -22,7 +22,7 @@ func main() {
 
 	// 1. 设置全局配置文件参数
 	dir, _ := os.Getwd()
-	defaultCfg := dir + "/config/prod.yaml"
+	defaultCfg := dir + "/config/config.yaml"
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", defaultCfg, "配置文件路径")
 
 	// 2. 初始化配置中心
