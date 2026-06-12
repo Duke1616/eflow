@@ -157,5 +157,3 @@ require (
 )
 
 replace github.com/Bunny3th/easy-workflow v1.0.0 => github.com/Duke1616/easy-workflow v1.0.5
-
-replace github.com/Duke1616/eiam => ../eiam
