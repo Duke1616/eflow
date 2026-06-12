@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
@@ -20,19 +21,22 @@ func NewCommand() *cobra.Command {
 		Use:   "migrate",
 		Short: "执行数据迁移",
 		Run: func(cmd *cobra.Command, args []string) {
-			runMigrate()
+			runMigrate(force)
 		},
 	}
 
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "强制重新执行迁移（清除历史迁移记录）")
 	return cmd
 }
+
+var force bool
 
 func init() {
 	log.SetOutput(os.Stdout)
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 }
 
-func runMigrate() {
+func runMigrate(force bool) {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal(err)
@@ -65,6 +69,18 @@ func runMigrate() {
 			}
 			easyEngine.DB = db
 			return easyEngine.DatabaseInitialize()
+		}),
+		migration.WithPreHooks(func(ctx context.Context, env migration.MigrationEnv) error {
+			if force {
+				log.Println("检测到 --force 参数，正在清理迁移历史记录以强制重新迁移...")
+				// 清除已执行成功的历史记录
+				err := env.MySQLDst.WithContext(ctx).Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&migration.MigrationRecord{}).Error
+				if err != nil {
+					return fmt.Errorf("清空历史迁移记录失败: %w", err)
+				}
+				log.Println("历史迁移记录清除成功")
+			}
+			return nil
 		}),
 	)
 
