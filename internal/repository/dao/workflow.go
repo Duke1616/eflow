@@ -59,9 +59,9 @@ func (NotifyBinding) TableName() string {
 type Snapshot struct {
 	Id             int64                     `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'快照唯一自增ID'"`
 	TenantID       int64                     `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
-	WorkflowId     int64                     `gorm:"column:workflow_id;type:bigint;not null;index;comment:'绑定的工作流定义ID'"`
-	ProcessId      int                       `gorm:"column:process_id;type:int;not null;index;comment:'关联引擎部署的流程模型ID'"`
-	ProcessVersion int                       `gorm:"column:process_version;type:int;not null;comment:'对应流程发布版本号'"`
+	WorkflowId     int64                     `gorm:"column:workflow_id;type:bigint;not null;uniqueIndex:uix_wf_process_version;comment:'绑定的工作流定义ID'"`
+	ProcessId      int                       `gorm:"column:process_id;type:int;not null;uniqueIndex:uix_wf_process_version;comment:'关联引擎部署的流程模型ID'"`
+	ProcessVersion int                       `gorm:"column:process_version;type:int;not null;uniqueIndex:uix_wf_process_version;comment:'对应流程发布版本号'"`
 	Name           string                    `gorm:"column:name;type:varchar(128);not null;comment:'快照名字'"`
 	FlowData       sqlx.JsonField[LogicFlow] `gorm:"column:flow_data;type:json;comment:'发布快照时对应的画布拓扑结构数据json'"`
 	Ctime          int64                     `gorm:"column:ctime;type:bigint;comment:'创建时间(毫秒)'"`

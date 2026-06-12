@@ -2,7 +2,6 @@ package migrate
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 
@@ -48,16 +47,16 @@ func runMigrate(force bool) {
 
 	// NOTE: 转换为 eiam 共享迁移包的配置结构体
 	mCfg := migration.Config{
-		MongoDSN:           cfg.MongoDSN,
-		MongoDBName:        cfg.MongoDBName,
-		MySQLSrcDSN:        cfg.MySQLSrcDSN,
-		MySQLDstDSN:        cfg.MySQLDstDSN,
-		BatchSize:          cfg.BatchSize,
-		Timeout:            cfg.Timeout,
-		AutoMigrate:        cfg.AutoMigrate,
-		ResetAutoIncrement: cfg.ResetAutoIncrement,
-		Truncate:           cfg.Truncate,
-		DryRun:             cfg.DryRun,
+		MongoDSN:    cfg.MongoDSN,
+		MongoDBName: cfg.MongoDBName,
+		MySQLSrcDSN: cfg.MySQLSrcDSN,
+		MySQLDstDSN: cfg.MySQLDstDSN,
+		BatchSize:   cfg.BatchSize,
+		Timeout:     cfg.Timeout,
+		AutoMigrate: cfg.AutoMigrate,
+		Truncate:    cfg.Truncate,
+		DryRun:      cfg.DryRun,
+		Force:       force,
 	}
 
 	// NOTE: 构造 eiam 统一包的迁移器，并注入本地 eflow 特定的自动建表逻辑与默认租户覆盖选项
@@ -69,18 +68,6 @@ func runMigrate(force bool) {
 			}
 			easyEngine.DB = db
 			return easyEngine.DatabaseInitialize()
-		}),
-		migration.WithPreHooks(func(ctx context.Context, env migration.MigrationEnv) error {
-			if force {
-				log.Println("检测到 --force 参数，正在清理迁移历史记录以强制重新迁移...")
-				// 清除已执行成功的历史记录
-				err := env.MySQLDst.WithContext(ctx).Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&migration.MigrationRecord{}).Error
-				if err != nil {
-					return fmt.Errorf("清空历史迁移记录失败: %w", err)
-				}
-				log.Println("历史迁移记录清除成功")
-			}
-			return nil
 		}),
 	)
 
