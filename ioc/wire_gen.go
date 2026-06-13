@@ -91,11 +91,11 @@ func InitApp() (*App, error) {
 	etaskClient := etask.NewETASKClient(etaskConn)
 	taskServiceClient := etaskClient.TaskClient
 	taskDispatcher := dispatch.NewTaskDispatcher(mq, taskServiceClient, taskRepository, crypto)
-	taskService := task.NewTaskService(taskRepository, workflowService, codebookService, runnerService, engineService, ticketService, schedulerScheduler, taskDispatcher)
-	taskHandler := task2.NewHandler(taskService)
 	eiamConn := InitEIAMGrpcClient(registry)
 	eiamClient := eiam.NewEIAMClient(eiamConn)
 	userServiceClient := eiamClient.UserClient
+	taskService := task.NewTaskService(taskRepository, workflowService, codebookService, runnerService, engineService, ticketService, schedulerScheduler, taskDispatcher, userServiceClient)
+	taskHandler := task2.NewHandler(taskService)
 	ticketHandler := ticket2.NewHandler(ticketService, engineService, userServiceClient, workflowService)
 	dispatchDAO := dao.NewDispatchDAO(db)
 	dispatchRepository := repository.NewDispatchRepository(dispatchDAO)

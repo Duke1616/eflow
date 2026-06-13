@@ -2,10 +2,12 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
 
+	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
@@ -28,6 +30,9 @@ const (
 	MINUTE Unit = 1
 	HOUR   Unit = 2
 	DAY    Unit = 3
+
+	// ResetRetryCountFlag 特殊约定：-1 表示重置重试计数器为 0
+	ResetRetryCountFlag = -1
 )
 
 // Service 自动化任务管理服务接口
@@ -77,11 +82,13 @@ type taskService struct {
 	ticketSvc   ticket.Service
 	scheduler   scheduler.Scheduler
 	dispatcher  dispatch.TaskDispatcher
+	userClient  userv1.UserServiceClient
 	logger      *elog.Component
 }
 
 func NewTaskService(repo repository.TaskRepository, workflowSvc workflow.Service, codebookSvc codebook.Service,
-	runnerSvc runner.Service, engineSvc engine.Service, ticketSvc ticket.Service, scheduler scheduler.Scheduler, dispatcher dispatch.TaskDispatcher) Service {
+	runnerSvc runner.Service, engineSvc engine.Service, ticketSvc ticket.Service, scheduler scheduler.Scheduler, dispatcher dispatch.TaskDispatcher,
+	userClient userv1.UserServiceClient) Service {
 	return &taskService{
 		repo:        repo,
 		engineSvc:   engineSvc,
@@ -91,6 +98,7 @@ func NewTaskService(repo repository.TaskRepository, workflowSvc workflow.Service
 		ticketSvc:   ticketSvc,
 		scheduler:   scheduler,
 		dispatcher:  dispatcher,
+		userClient:  userClient,
 		logger:      elog.DefaultLogger.With(elog.FieldComponentName("taskService")),
 	}
 }
@@ -115,7 +123,7 @@ func (s *taskService) CreateTask(ctx context.Context, ticketID int64, processIns
 		return domain.Task{}, err
 	}
 
-	task, err = s.prepareTask(ctx, task)
+	task, err = s.prepareTask(ctx, task, resp)
 	if err != nil {
 		return task, err
 	}
@@ -139,7 +147,7 @@ func (s *taskService) RetryTask(ctx context.Context, id int64) error {
 	_, _ = s.UpdateTaskStatus(ctx, domain.TaskResult{
 		Id:              id,
 		TriggerPosition: domain.TriggerPositionManualRetry.ToString(),
-		RetryCount:      -1,
+		RetryCount:      ResetRetryCountFlag,
 	})
 	task, err := s.repo.FindByID(ctx, id)
 	if err != nil {
@@ -298,27 +306,62 @@ func (s *taskService) ListReadyTasks(ctx context.Context, limit int64) ([]domain
 	return s.repo.ListReadyTasks(ctx, limit)
 }
 
-func (s *taskService) getAutomationProperty(ctx context.Context, task domain.Task) (int64, easyflow.AutomationProperty, error) {
+// taskPrepareError 封装了任务准备阶段前置上下文拉取发生异常时的只读错误元数据
+type taskPrepareError struct {
+	triggerPosition string
+	status          domain.TaskStatus
+	err             error
+}
+
+func (e *taskPrepareError) Error() string {
+	return e.err.Error()
+}
+
+// taskProcessContext 封装了流转任务执行时所需的完整依赖链路元数据
+type taskProcessContext struct {
+	workflowID int64
+	automation easyflow.AutomationProperty
+	runner     domain.Runner
+	codebook   domain.Codebook
+}
+
+func (s *taskService) buildTaskProcessContext(ctx context.Context, task domain.Task) (*taskProcessContext, error) {
+	// 1. 获取流程实例详情，拿到对应的业务流程定义 ID 和版本
 	inst, err := s.engineSvc.GetInstanceByID(ctx, task.ProcessInstId)
 	if err != nil {
-		return 0, easyflow.AutomationProperty{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorGetProcessInst.ToString(), domain.FAILED, err)
+		return nil, &taskPrepareError{
+			triggerPosition: domain.TriggerPositionErrorGetProcessInst.ToString(),
+			status:          domain.FAILED,
+			err:             err,
+		}
 	}
+
 	workflowID := task.WorkflowId
 	if workflowID == 0 {
 		workflowID, _ = strconv.ParseInt(inst.BusinessID, 10, 64)
 	}
+
+	// 2. 尝试获取流程定义快照
 	flow, err := s.workflowSvc.FindInstanceFlow(ctx, workflowID, inst.ProcID, inst.ProcVersion)
 	if err != nil {
-		return 0, easyflow.AutomationProperty{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorGetProcessInfo.ToString(), domain.FAILED, err)
+		return nil, &taskPrepareError{
+			triggerPosition: domain.TriggerPositionErrorGetProcessInfo.ToString(),
+			status:          domain.FAILED,
+			err:             err,
+		}
 	}
+
+	// 3. 解析该节点的自动化执行配置
 	automation, err := s.workflowSvc.GetAutomationProperty(s.toEasyWorkflow(flow), task.CurrentNodeId)
 	if err != nil {
-		return 0, easyflow.AutomationProperty{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorExtractAutomationInfo.ToString(), domain.FAILED, err)
+		return nil, &taskPrepareError{
+			triggerPosition: domain.TriggerPositionErrorExtractAutomationInfo.ToString(),
+			status:          domain.FAILED,
+			err:             err,
+		}
 	}
-	return flow.Id, automation, nil
-}
 
-func (s *taskService) getRunnerAndCodebook(ctx context.Context, task domain.Task, automation easyflow.AutomationProperty) (domain.Runner, domain.Codebook, error) {
+	// 4. 动态匹配或静态查找执行节点 Runner 实体
 	s.logger.Info("准备匹配 Runner 执行器",
 		elog.Int64("taskId", task.Id),
 		elog.String("codebookUid", automation.CodebookUid),
@@ -332,8 +375,13 @@ func (s *taskService) getRunnerAndCodebook(ctx context.Context, task domain.Task
 			elog.String("tag", automation.Tag),
 			elog.FieldErr(err),
 		)
-		return domain.Runner{}, domain.Codebook{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorGetDispatcherNode.ToString(), domain.BLOCKED, err)
+		return nil, &taskPrepareError{
+			triggerPosition: domain.TriggerPositionErrorGetDispatcherNode.ToString(),
+			status:          domain.BLOCKED,
+			err:             err,
+		}
 	}
+
 	s.logger.Info("成功匹配 Runner 执行器",
 		elog.Int64("taskId", task.Id),
 		elog.Int64("runnerId", runner.Id),
@@ -342,36 +390,59 @@ func (s *taskService) getRunnerAndCodebook(ctx context.Context, task domain.Task
 		elog.String("runnerTarget", runner.Target),
 		elog.String("runnerHandler", runner.Handler),
 	)
+
+	// 5. 获取代码模板 Codebook
 	codebook, err := s.codebookSvc.GetByIdentifier(ctx, runner.CodebookUid)
 	if err != nil {
-		return domain.Runner{}, domain.Codebook{}, s.handleTaskError(ctx, task.Id, domain.TriggerPositionErrorGetTaskTemplate.ToString(), domain.FAILED, err)
+		return nil, &taskPrepareError{
+			triggerPosition: domain.TriggerPositionErrorGetTaskTemplate.ToString(),
+			status:          domain.FAILED,
+			err:             err,
+		}
 	}
-	return runner, codebook, nil
+
+	return &taskProcessContext{
+		workflowID: flow.Id,
+		automation: automation,
+		runner:     runner,
+		codebook:   codebook,
+	}, nil
 }
 
-func (s *taskService) prepareTask(ctx context.Context, task domain.Task) (domain.Task, error) {
-	flowID, automation, err := s.getAutomationProperty(ctx, task)
+func (s *taskService) prepareTask(ctx context.Context, task domain.Task, ticket domain.Ticket) (domain.Task, error) {
+	// 1. 获取并聚合所有前置运行依赖的上下文（流程定义、步骤参数、调度节点与脚本模版）
+	pCtx, err := s.buildTaskProcessContext(ctx, task)
+	if err != nil {
+		// 统一在此处处理前置数据拉取的异常状态记录
+		if prepErr, ok := err.(*taskPrepareError); ok {
+			_ = s.handleTaskError(ctx, task.Id, prepErr.triggerPosition, prepErr.status, prepErr.err)
+		}
+		return domain.Task{}, err
+	}
+
+	// 2. 合成包含用户凭单上下文等在运行时的最终参数
+	args, err := s.assembleRuntimeArgs(ctx, ticket)
 	if err != nil {
 		return domain.Task{}, err
 	}
 
-	runner, codebook, err := s.getRunnerAndCodebook(ctx, task, automation)
-	if err != nil {
-		return domain.Task{}, err
-	}
+	task.WorkflowId = pCtx.workflowID
+	task.CodebookUid = pCtx.codebook.Identifier
+	task.Code = pCtx.codebook.Code
+	task.Language = pCtx.codebook.Language
+	task.Kind = pCtx.runner.Kind
+	task.Target = pCtx.runner.Target
+	task.Handler = pCtx.runner.Handler
+	task.Variables = pCtx.runner.Variables
 
-	task.WorkflowId = flowID
-	task.CodebookUid = codebook.Identifier
-	task.Code = codebook.Code
-	task.Language = codebook.Language
-	task.Kind = runner.Kind
-	task.Target = runner.Target
-	task.Handler = runner.Handler
-	task.Variables = runner.Variables
-	task.Args = domain.TaskArgs{"ticket_id": task.TicketID, "process_inst_id": task.ProcessInstId}
+	// 合并必要的 ID 标识
+	args["ticket_id"] = task.TicketID
+	args["process_inst_id"] = task.ProcessInstId
+	task.Args = args
+
 	task.Status = domain.WAITING
-	task.IsTiming = automation.IsTiming
-	task.ScheduledTime = s.calculateScheduledTime(automation, task.Args)
+	task.IsTiming = pCtx.automation.IsTiming
+	task.ScheduledTime = s.calculateScheduledTime(pCtx.automation, task.Args)
 	task.TriggerPosition = domain.TriggerPositionReadyToStartNode.ToString()
 	if task.IsTiming {
 		task.TriggerPosition = fmt.Sprintf("预计 %s 触发", time.UnixMilli(task.ScheduledTime).Format("2006-01-02 15:04:05"))
@@ -379,6 +450,7 @@ func (s *taskService) prepareTask(ctx context.Context, task domain.Task) (domain
 	_, err = s.repo.UpdateTask(ctx, task)
 	return task, err
 }
+
 
 func (s *taskService) dispatchTask(ctx context.Context, task domain.Task) error {
 	if !s.scheduler.Add(task.Id) {
@@ -433,15 +505,57 @@ func (s *taskService) calculateScheduledTime(automation easyflow.AutomationPrope
 	if !automation.IsTiming {
 		return time.Now().UnixMilli()
 	}
-	unit := Unit(automation.Unit)
-	if unit == 0 {
-		unit = HOUR
+
+	var unit Unit = HOUR
+	var quantity int64 = 2
+
+	// 根据执行方式解析时长单位和数值
+	switch automation.ExecMethod {
+	case "template":
+		quantity = s.parseTemplateQuantity(automation.TemplateField, data)
+	case "hand":
+		unit = Unit(automation.Unit)
+		if unit == 0 {
+			unit = HOUR
+		}
+		quantity = automation.Quantity
+		if quantity <= 0 {
+			quantity = 2
+		}
 	}
-	quantity := automation.Quantity
-	if quantity <= 0 {
-		quantity = 2
+
+	duration := s.calculateDuration(unit, quantity)
+	return time.Now().Add(duration).UnixMilli()
+}
+
+// parseTemplateQuantity 尝试从动态表单上下文中提取并转换为合法的时长数量 (int64)
+func (s *taskService) parseTemplateQuantity(field string, data map[string]interface{}) int64 {
+	const defaultQuantity = 2
+
+	quantityVal, exist := data[field]
+	if !exist {
+		s.logger.Warn("模板时长字段不存在, 赋予默认值 2 小时", elog.String("field", field))
+		return defaultQuantity
 	}
-	return time.Now().Add(s.calculateDuration(unit, quantity)).UnixMilli()
+
+	switch v := quantityVal.(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case float64:
+		return int64(v)
+	case string:
+		parsedQuantity, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			s.logger.Error("模板时长解析失败, 赋予默认值 2 小时", elog.FieldErr(err), elog.Any("value", v))
+			return defaultQuantity
+		}
+		return parsedQuantity
+	default:
+		s.logger.Warn("模板时长类型未知, 赋予默认值 2 小时", elog.Any("type", fmt.Sprintf("%T", v)), elog.Any("value", v))
+		return defaultQuantity
+	}
 }
 
 func (s *taskService) calculateDuration(unit Unit, quantity int64) time.Duration {
@@ -468,4 +582,48 @@ func (s *taskService) toEasyWorkflow(wf domain.Workflow) easyflow.Workflow {
 		Id: wf.Id, Name: wf.Name, Owner: wf.Owner,
 		FlowData: easyflow.LogicFlow{Edges: edges, Nodes: nodes},
 	}
+}
+
+func (s *taskService) assembleRuntimeArgs(ctx context.Context, ticket domain.Ticket) (map[string]interface{}, error) {
+	// 获取基础表单参数和用户信息
+	args, err := s.prepareUserArgs(ctx, ticket)
+	if err != nil {
+		return nil, err
+	}
+
+	// 获取用户审批提交的增量表单数据
+	formValues, err := s.ticketSvc.ListTaskFormsByTicketID(ctx, ticket.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	// 覆盖合并
+	for _, value := range formValues {
+		args[value.Key] = value.Value
+	}
+
+	return args, nil
+}
+
+func (s *taskService) prepareUserArgs(ctx context.Context, ticket domain.Ticket) (map[string]interface{}, error) {
+	args := make(map[string]interface{})
+	for k, v := range ticket.Data {
+		args[k] = v
+	}
+
+	resp, err := s.userClient.QueryByUsername(ctx, &userv1.QueryByUsernameReq{
+		Username: ticket.CreateBy,
+	})
+	if err != nil {
+		s.logger.Error("获取用户信息失败", elog.FieldErr(err))
+		return args, nil
+	}
+	if resp.User == nil {
+		s.logger.Warn("获取用户信息为空", elog.String("username", ticket.CreateBy))
+		return args, nil
+	}
+
+	userInfoJSON, _ := json.Marshal(resp.User)
+	args["user_info"] = string(userInfoJSON)
+	return args, nil
 }
