@@ -75,8 +75,8 @@ func (g *gormTaskFormDAO) FindByTicketID(ctx context.Context, ticketID int64) ([
 		Group("`key`")
 
 	err := g.db.WithContext(ctx).Model(&TaskForm{}).
-		Joins("INNER JOIN (?) as t2 ON task_form.key = t2.key AND task_form.ctime = t2.max_ctime", subQuery).
-		Where("task_form.ticket_id = ?", ticketID).
+		Joins("INNER JOIN (?) as t2 ON ticket_task_form.key = t2.key AND ticket_task_form.ctime = t2.max_ctime", subQuery).
+		Where("ticket_task_form.ticket_id = ?", ticketID).
 		Find(&res).Error
 
 	return res, err
