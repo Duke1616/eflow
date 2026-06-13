@@ -109,9 +109,7 @@ func (s *UserTestSuite) TestSend_StandardApproval() {
 		hasTaskID := false
 		for _, v := range noti.Template.Values {
 			if v.Key == "task_id" {
-				if val, ok := v.Value.(int); ok && val == 50001 {
-					hasTaskID = true
-				} else if val, ok := v.Value.(int64); ok && val == 50001 {
+				if val, ok := v.Value.(string); ok && val == "50001" {
 					hasTaskID = true
 				}
 			}
