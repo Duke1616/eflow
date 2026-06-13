@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package eflow.ticket.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "eflow/ticket/v1;ticket";
+
+// 工单来源
+enum Provide {
+  PROVIDE_UNSPECIFIED = 0; // 未指定
+  SYSTEM = 1;              // 本工单平台系统直接创建
+  WECHAT = 2;              // 企业微信等外部渠道同步过来创建
+  ALERT = 3;               // 监控告警系统自动触发生成的告警工单
+}
+
+// 消息通知媒介渠道
+enum Channel {
+  CHANNEL_UNSPECIFIED = 0;
+  LARK_CARD = 1;           // 飞书互动卡片通知渠道
+  EMAIL = 2;               // 通用邮件通知渠道
+  IN_APP = 3;              // 系统站内信通知渠道
+}
+
+// 外部触发通知选项配置
+message NotificationConf {
+  int64 template_id = 1;                  // 消息模板 ID
+  google.protobuf.Struct template_params = 2; // 发送通知所携带的参数字典
+  Channel channel = 3;                    // 通知的发送媒介渠道
+}
+
+message CreateTicketRequest {
+  int64 biz_id = 1;                       // 外部关联的业务实体 ID
+  string key = 2;                         // 工单的唯一业务 Key (用以幂等校验等)
+  int64 template_id = 3;                  // 所关联的页面渲染模板 ID
+  int64 workflow_id = 4;                  // 所关联的工作流流程定义 ID
+  Provide provide = 5;                    // 工单来源渠道提供商
+  string create_by = 6;                   // 工单创建/发起人 ID 或是系统名
+  google.protobuf.Struct data = 7;        // 用户在表单中填写的工单实时数据属性集合
+  NotificationConf notification_conf = 8; // 为支持告警自动转单等引入的外部通知媒介配置
+}
+
+message CreateTicketResponse {
+  int64 id = 1;                           // 生成的工单实例 ID
+}
+
+service TicketService {
+  // 创建工单
+  rpc CreateTicket(CreateTicketRequest) returns (CreateTicketResponse);
+}

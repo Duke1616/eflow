@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package ealert.oncall.v1;
+
+option go_package = "ealert/oncall/v1;oncallv1";
+
+// OnCallGroup 值班组
+message OnCallGroup {
+  int64 id = 1;                   // 值班组 ID
+  string name = 2;                // 组名称
+  repeated string members = 3;    // 值班人员账号列表
+}
+
+// OnCallSchedule 当前排班计划信息
+message OnCallSchedule {
+  string title = 1;               // 排班计划标题
+  int64 start_time = 2;           // 开始时间戳
+  int64 end_time = 3;             // 结束时间戳
+  OnCallGroup oncall_group = 4;   // 值班组信息
+}
+
+// GetCurrentScheduleRequest 查询单个排班请求
+message GetCurrentScheduleRequest {
+  int64 id = 1;                   // 排班计划 ID
+}
+
+// GetCurrentScheduleResponse 查询单个排班响应
+message GetCurrentScheduleResponse {
+  OnCallSchedule schedule = 1;    // 排班计划信息
+}
+
+// GetCurrentSchedulesByIDsRequest 批量查询当前排班请求
+message GetCurrentSchedulesByIDsRequest {
+  repeated int64 ids = 1;         // 排班计划 IDs
+}
+
+// GetCurrentSchedulesByIDsResponse 批量查询当前排班响应
+message GetCurrentSchedulesByIDsResponse {
+  repeated OnCallSchedule schedules = 1; // 批量排班计划信息
+}
+
+// OnCallService 值班排班服务
+service OnCallService {
+  // GetCurrentSchedule 查找单个排班的当前值班信息
+  rpc GetCurrentSchedule(GetCurrentScheduleRequest) returns (GetCurrentScheduleResponse);
+
+  // GetCurrentSchedulesByIDs 批量查找多个排班的当前值班信息
+  rpc GetCurrentSchedulesByIDs(GetCurrentSchedulesByIDsRequest) returns (GetCurrentSchedulesByIDsResponse);
+}
