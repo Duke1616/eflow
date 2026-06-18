@@ -15,7 +15,6 @@ import (
 	"github.com/Duke1616/eflow/internal/pkg/resolve"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
-	codebookSvc "github.com/Duke1616/eflow/internal/service/codebook"
 	departmentSvc "github.com/Duke1616/eflow/internal/service/department"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
@@ -27,16 +26,13 @@ import (
 	"github.com/Duke1616/eflow/internal/service/event/strategy/chat"
 	"github.com/Duke1616/eflow/internal/service/event/strategy/start"
 	userstrategy "github.com/Duke1616/eflow/internal/service/event/strategy/user"
-	runnerSvc "github.com/Duke1616/eflow/internal/service/runner"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	"github.com/Duke1616/eflow/internal/service/task/dispatch"
 	"github.com/Duke1616/eflow/internal/service/task/scheduler"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
-	"github.com/Duke1616/eflow/internal/web/codebook"
 	dispatchHdl "github.com/Duke1616/eflow/internal/web/dispatch"
-	"github.com/Duke1616/eflow/internal/web/runner"
 	"github.com/Duke1616/eflow/internal/web/task"
 	"github.com/Duke1616/eflow/internal/web/template"
 	"github.com/Duke1616/eflow/internal/web/ticket"
@@ -78,22 +74,6 @@ var (
 		engineSvc.NewEngineService,
 	)
 
-	// CodebookSet 自动化脚本库模块 Provider 集合
-	CodebookSet = wire.NewSet(
-		dao.NewCodebookDAO,
-		repository.NewCodebookRepository,
-		codebookSvc.NewService,
-		codebook.NewHandler,
-	)
-
-	// RunnerSet 自动化执行器模块 Provider 集合
-	RunnerSet = wire.NewSet(
-		dao.NewRunnerDAO,
-		repository.NewRunnerRepository,
-		runnerSvc.NewRunnerService,
-		runner.NewHandler,
-	)
-
 	// TaskSet 自动化任务模块 Provider 集合
 	TaskSet = wire.NewSet(
 		dao.NewTaskDAO,
@@ -102,7 +82,6 @@ var (
 		task.NewHandler,
 		scheduler.NewScheduler,
 		dispatch.NewTaskDispatcher,
-		InitCrypto,
 	)
 
 	// TicketSet 工单核心模块的 Provider 集合
@@ -186,7 +165,7 @@ var (
 		// 导出具体的 Client，直接满足底层 Service 的注入需求！
 		wire.FieldsOf(new(*ecmdb.ECMDBClient), "RotaClient"),
 		wire.FieldsOf(new(*eiam.EIAMClient), "UserClient"),
-		wire.FieldsOf(new(*etask.ETASKClient), "TaskClient", "ExecutorClient"),
+		wire.FieldsOf(new(*etask.ETASKClient), "TaskClient", "ExecutorClient", "CodebookClient", "RunnerClient"),
 		wire.FieldsOf(new(*ealert.EALERTClient), "TeamClient", "NotificationClient", "TemplateClient"),
 	)
 	// WebSet Web 服务 Provider 集合
@@ -205,8 +184,6 @@ var (
 		TemplateSet,
 		WorkflowSet,
 		EngineSet,
-		CodebookSet,
-		RunnerSet,
 		TaskSet,
 		TicketSet,
 		EventSet,

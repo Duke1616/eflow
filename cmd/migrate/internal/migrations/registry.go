@@ -7,8 +7,6 @@ const DefaultTenantID int64 = 2
 // All 按外键和业务依赖顺序返回所有迁移任务。
 func All() []migration.Migrator {
 	migrators := []migration.Migrator{
-		NewCodebookMigrator(),
-		NewRunnerMigrator(),
 		NewTemplateGroupMigrator(),
 		NewTemplateMigrator(),
 		NewWorkflowMigrator(),

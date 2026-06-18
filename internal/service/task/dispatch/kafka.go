@@ -7,10 +7,8 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/Duke1616/ecmdb/pkg/cryptox"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/pkg/mqx"
-	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/mq-api"
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/robfig/cron/v3"
@@ -40,18 +38,16 @@ type AgentExecuteEvent struct {
 type kafkaService struct {
 	mq       mq.MQ
 	producer *mqx.MultipleProducer[AgentExecuteEvent]
-	crypto   cryptox.Crypto
 	cron     *cron.Cron
 	logger   *elog.Component
 }
 
-// NewKafkaService 实例化基于 Kafka 渠道派发自动化任务的服务，补全 Crypto 依赖
-func NewKafkaService(q mq.MQ, crypto cryptox.Crypto) TaskDispatcher {
+// NewKafkaService 实例化基于 Kafka 渠道派发自动化任务的服务
+func NewKafkaService(q mq.MQ) TaskDispatcher {
 	p := mqx.NewMultipleProducer[AgentExecuteEvent](q)
 	k := &kafkaService{
 		mq:       q,
 		producer: p,
-		crypto:   crypto,
 		cron:     cron.New(cron.WithSeconds()),
 		logger:   elog.DefaultLogger.With(elog.FieldComponentName("kafkaService")),
 	}
@@ -89,7 +85,7 @@ func (e *kafkaService) immediateDispatch(ctx context.Context, task domain.Task) 
 		Code:      task.Code,
 		Language:  task.Language,
 		Args:      task.Args,
-		Variables: e.decryptVariables(task.Variables),
+		Variables: e.marshalVariables(task.Variables),
 	}
 
 	if err := e.producer.Produce(ctx, task.Target, evt); err != nil {
@@ -118,29 +114,7 @@ func (e *kafkaService) scheduleTimingTask(ctx context.Context, task domain.Task)
 	return nil
 }
 
-// decryptVariables 处理变量，进行解密
-func (e *kafkaService) decryptVariables(req []domain.Variables) string {
-	variables := slice.Map(req, func(idx int, src domain.Variables) domain.Variables {
-		if src.Secret {
-			val, er := e.crypto.Decrypt(src.Value)
-			if er != nil {
-				return domain.Variables{}
-			}
-
-			return domain.Variables{
-				Key:    src.Key,
-				Value:  val,
-				Secret: src.Secret,
-			}
-		}
-
-		return domain.Variables{
-			Key:    src.Key,
-			Value:  src.Value,
-			Secret: src.Secret,
-		}
-	})
-
-	jsonVar, _ := json.Marshal(variables)
+func (e *kafkaService) marshalVariables(req []domain.Variables) string {
+	jsonVar, _ := json.Marshal(req)
 	return string(jsonVar)
 }

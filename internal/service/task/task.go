@@ -3,17 +3,18 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
+	codebookv1 "github.com/Duke1616/eflow/api/proto/gen/etask/codebook/v1"
+	runnerv1 "github.com/Duke1616/eflow/api/proto/gen/etask/runner/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
-	"github.com/Duke1616/eflow/internal/service/codebook"
 	"github.com/Duke1616/eflow/internal/service/engine"
-	"github.com/Duke1616/eflow/internal/service/runner"
 	"github.com/Duke1616/eflow/internal/service/task/dispatch"
 	"github.com/Duke1616/eflow/internal/service/task/scheduler"
 	"github.com/Duke1616/eflow/internal/service/ticket"
@@ -34,6 +35,8 @@ const (
 	// ResetRetryCountFlag 特殊约定：-1 表示重置重试计数器为 0
 	ResetRetryCountFlag = -1
 )
+
+var ErrSecretVariableManagedByEtask = errors.New("敏感变量由 etask 管理，eflow 不允许新增或改写敏感变量明文")
 
 // Service 自动化任务管理服务接口
 type Service interface {
@@ -77,8 +80,8 @@ type taskService struct {
 	repo        repository.TaskRepository
 	engineSvc   engine.Service
 	workflowSvc workflow.Service
-	codebookSvc codebook.Service
-	runnerSvc   runner.Service
+	codebookCli codebookv1.CodebookServiceClient
+	runnerCli   runnerv1.RunnerServiceClient
 	ticketSvc   ticket.Service
 	scheduler   scheduler.Scheduler
 	dispatcher  dispatch.TaskDispatcher
@@ -86,15 +89,15 @@ type taskService struct {
 	logger      *elog.Component
 }
 
-func NewTaskService(repo repository.TaskRepository, workflowSvc workflow.Service, codebookSvc codebook.Service,
-	runnerSvc runner.Service, engineSvc engine.Service, ticketSvc ticket.Service, scheduler scheduler.Scheduler, dispatcher dispatch.TaskDispatcher,
+func NewTaskService(repo repository.TaskRepository, workflowSvc workflow.Service, codebookCli codebookv1.CodebookServiceClient,
+	runnerCli runnerv1.RunnerServiceClient, engineSvc engine.Service, ticketSvc ticket.Service, scheduler scheduler.Scheduler, dispatcher dispatch.TaskDispatcher,
 	userClient userv1.UserServiceClient) Service {
 	return &taskService{
 		repo:        repo,
 		engineSvc:   engineSvc,
 		workflowSvc: workflowSvc,
-		codebookSvc: codebookSvc,
-		runnerSvc:   runnerSvc,
+		codebookCli: codebookCli,
+		runnerCli:   runnerCli,
 		ticketSvc:   ticketSvc,
 		scheduler:   scheduler,
 		dispatcher:  dispatcher,
@@ -188,17 +191,22 @@ func (s *taskService) UpdateVariables(ctx context.Context, id int64, variables [
 		return 0, err
 	}
 	oldVars := slice.ToMap(task.Variables, func(element domain.Variables) string { return element.Key })
-	variables = slice.Map(variables, func(idx int, src domain.Variables) domain.Variables {
+	updated := make([]domain.Variables, 0, len(variables))
+	for _, src := range variables {
 		old, ok := oldVars[src.Key]
 		if ok && old.Secret {
-			return old
+			updated = append(updated, old)
+			continue
 		}
 		if ok {
 			src.Secret = old.Secret
 		}
-		return src
-	})
-	return s.repo.UpdateVariables(ctx, id, variables)
+		if src.Secret {
+			return 0, ErrSecretVariableManagedByEtask
+		}
+		updated = append(updated, src)
+	}
+	return s.repo.UpdateVariables(ctx, id, updated)
 }
 
 func (s *taskService) ListTaskByStatus(ctx context.Context, offset, limit int64, status uint8) ([]domain.Task, int64, error) {
@@ -321,8 +329,8 @@ func (e *taskPrepareError) Error() string {
 type taskProcessContext struct {
 	workflowID int64
 	automation easyflow.AutomationProperty
-	runner     domain.Runner
-	codebook   domain.Codebook
+	runner     *runnerv1.Runner
+	codebook   *codebookv1.Codebook
 }
 
 func (s *taskService) buildTaskProcessContext(ctx context.Context, task domain.Task) (*taskProcessContext, error) {
@@ -367,7 +375,10 @@ func (s *taskService) buildTaskProcessContext(ctx context.Context, task domain.T
 		elog.String("codebookUid", automation.CodebookUid),
 		elog.String("tag", automation.Tag),
 	)
-	runner, err := s.runnerSvc.FindByCodebookUidAndTag(ctx, automation.CodebookUid, automation.Tag)
+	runnerResp, err := s.runnerCli.FindRunnerByCodebookUidAndTag(ctx, &runnerv1.FindRunnerByCodebookUidAndTagRequest{
+		CodebookUid: automation.CodebookUid,
+		Tag:         automation.Tag,
+	})
 	if err != nil {
 		s.logger.Error("获取执行器 Runner 失败",
 			elog.Int64("taskId", task.Id),
@@ -381,18 +392,21 @@ func (s *taskService) buildTaskProcessContext(ctx context.Context, task domain.T
 			err:             err,
 		}
 	}
+	runner := runnerResp.GetRunner()
 
 	s.logger.Info("成功匹配 Runner 执行器",
 		elog.Int64("taskId", task.Id),
-		elog.Int64("runnerId", runner.Id),
-		elog.String("runnerName", runner.Name),
-		elog.String("runnerKind", runner.Kind.ToString()),
-		elog.String("runnerTarget", runner.Target),
-		elog.String("runnerHandler", runner.Handler),
+		elog.Int64("runnerId", runner.GetId()),
+		elog.String("runnerName", runner.GetName()),
+		elog.String("runnerKind", runner.GetKind()),
+		elog.String("runnerTarget", runner.GetTarget()),
+		elog.String("runnerHandler", runner.GetHandler()),
 	)
 
 	// 5. 获取代码模板 Codebook
-	codebook, err := s.codebookSvc.GetByIdentifier(ctx, runner.CodebookUid)
+	codebookResp, err := s.codebookCli.GetCodebookByIdentifier(ctx, &codebookv1.GetCodebookByIdentifierRequest{
+		Identifier: runner.GetCodebookUid(),
+	})
 	if err != nil {
 		return nil, &taskPrepareError{
 			triggerPosition: domain.TriggerPositionErrorGetTaskTemplate.ToString(),
@@ -400,6 +414,7 @@ func (s *taskService) buildTaskProcessContext(ctx context.Context, task domain.T
 			err:             err,
 		}
 	}
+	codebook := codebookResp.GetCodebook()
 
 	return &taskProcessContext{
 		workflowID: flow.Id,
@@ -427,13 +442,19 @@ func (s *taskService) prepareTask(ctx context.Context, task domain.Task, ticket 
 	}
 
 	task.WorkflowId = pCtx.workflowID
-	task.CodebookUid = pCtx.codebook.Identifier
-	task.Code = pCtx.codebook.Code
-	task.Language = pCtx.codebook.Language
-	task.Kind = pCtx.runner.Kind
-	task.Target = pCtx.runner.Target
-	task.Handler = pCtx.runner.Handler
-	task.Variables = pCtx.runner.Variables
+	task.CodebookUid = pCtx.codebook.GetIdentifier()
+	task.Code = pCtx.codebook.GetCode()
+	task.Language = pCtx.codebook.GetLanguage()
+	task.Kind = domain.Kind(pCtx.runner.GetKind())
+	task.Target = pCtx.runner.GetTarget()
+	task.Handler = pCtx.runner.GetHandler()
+	task.Variables = slice.Map(pCtx.runner.GetVariables(), func(_ int, src *runnerv1.Variable) domain.Variables {
+		return domain.Variables{
+			Key:    src.GetKey(),
+			Value:  src.GetValue(),
+			Secret: src.GetSecret(),
+		}
+	})
 
 	// 合并必要的 ID 标识
 	args["ticket_id"] = task.TicketID
@@ -450,7 +471,6 @@ func (s *taskService) prepareTask(ctx context.Context, task domain.Task, ticket 
 	_, err = s.repo.UpdateTask(ctx, task)
 	return task, err
 }
-
 
 func (s *taskService) dispatchTask(ctx context.Context, task domain.Task) error {
 	if !s.scheduler.Add(task.Id) {

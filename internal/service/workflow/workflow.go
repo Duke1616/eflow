@@ -31,6 +31,8 @@ type IWorkflowCoreService interface {
 	FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Workflow, int64, error)
 	// GetAutomationProperty 获取已发布画布中特定自动任务节点的脚本或事件自动化扩展属性
 	GetAutomationProperty(workflow easyflow.Workflow, nodeId string) (easyflow.AutomationProperty, error)
+	// GetAutomationCodebookUids 获取工作流画布中自动化节点引用的脚本模板 UID 列表
+	GetAutomationCodebookUids(ctx context.Context, workflowId int64) ([]string, error)
 	// GetWorkflowSnapshot 依据引擎流程 ID 和发布版本号获取精确锁定的快照图结构详情
 	GetWorkflowSnapshot(ctx context.Context, processID, version int) (domain.Workflow, error)
 	// FindInstanceFlow 获取流程实例运行时所绑定版本的流程定义，提供特定历史快照回溯与降级解析
@@ -186,6 +188,40 @@ func (s *workflowService) GetAutomationProperty(workflow easyflow.Workflow, node
 	}
 
 	return easyflow.AutomationProperty{}, errors.New("node not found")
+}
+
+func (s *workflowService) GetAutomationCodebookUids(ctx context.Context, workflowId int64) ([]string, error) {
+	wf, err := s.Find(ctx, workflowId)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes, err := easyflow.ParseNodes(wf.FlowData.Nodes)
+	if err != nil {
+		return nil, err
+	}
+
+	codebookUids := make([]string, 0)
+	seen := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		if node.Type != "automation" {
+			continue
+		}
+		property, err := easyflow.ToNodeProperty[easyflow.AutomationProperty](node)
+		if err != nil {
+			return nil, err
+		}
+		if property.CodebookUid == "" {
+			continue
+		}
+		if _, ok := seen[property.CodebookUid]; ok {
+			continue
+		}
+		seen[property.CodebookUid] = struct{}{}
+		codebookUids = append(codebookUids, property.CodebookUid)
+	}
+
+	return codebookUids, nil
 }
 
 func (s *workflowService) GetWorkflowSnapshot(ctx context.Context, processID, version int) (domain.Workflow, error) {

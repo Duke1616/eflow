@@ -6,7 +6,6 @@ import "gorm.io/gorm"
 // 新增实体时在此处添加对应的 DAO 结构体
 func InitTables(db *gorm.DB) error {
 	return db.AutoMigrate(
-		&Codebook{},
 		&TemplateGroup{},
 		&Template{},
 		&TemplateFavorite{},
@@ -15,7 +14,6 @@ func InitTables(db *gorm.DB) error {
 		&Snapshot{},
 		&Ticket{},
 		&TaskForm{},
-		&Runner{},
 		&Task{},
 		&Department{},
 		&Dispatch{},

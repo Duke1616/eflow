@@ -22,7 +22,7 @@ type TaskDAO interface {
 	// UpdateTaskStatus 更新任务在物理实体中的执行状态、结果和日志
 	UpdateTaskStatus(ctx context.Context, req Task) (int64, error)
 	// UpdateVariables 覆写任务对应的环境变量 JSON 字段数据
-	UpdateVariables(ctx context.Context, id int64, variables []Variables) (int64, error)
+	UpdateVariables(ctx context.Context, id int64, variables []domain.Variables) (int64, error)
 	// UpdateArgs 覆写任务对应的透传参数 JSON 字段数据
 	UpdateArgs(ctx context.Context, id int64, args domain.TaskArgs) (int64, error)
 	// ListTask 分页抓取全量作业任务表记录
@@ -166,9 +166,9 @@ func (g *gormTaskDAO) UpdateTaskStatus(ctx context.Context, req Task) (int64, er
 	return res.RowsAffected, res.Error
 }
 
-func (g *gormTaskDAO) UpdateVariables(ctx context.Context, id int64, variables []Variables) (int64, error) {
+func (g *gormTaskDAO) UpdateVariables(ctx context.Context, id int64, variables []domain.Variables) (int64, error) {
 	res := g.db.WithContext(ctx).Model(&Task{}).Where("id = ?", id).Updates(map[string]any{
-		"variables": sqlx.JsonField[[]Variables]{Val: variables, Valid: true},
+		"variables": sqlx.JsonField[[]domain.Variables]{Val: variables, Valid: true},
 		"utime":     time.Now().UnixMilli(),
 	})
 	return res.RowsAffected, res.Error

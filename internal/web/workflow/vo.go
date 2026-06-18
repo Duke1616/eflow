@@ -28,6 +28,16 @@ type FindByIdsReq struct {
 	Ids []int64 `json:"ids"`
 }
 
+// CodebookUidsByWorkflowIdReq 根据工作流 ID 查询自动化节点引用的脚本模板 UID
+type CodebookUidsByWorkflowIdReq struct {
+	WorkflowId int64 `json:"workflow_id"`
+}
+
+// RetrieveCodebookUids 承载工作流关联的脚本模板 UID 列表
+type RetrieveCodebookUids struct {
+	CodebookUids []string `json:"codebook_uids"`
+}
+
 // ByKeywordReq 按照关键字模糊查询工作流列表请求参数
 type ByKeywordReq struct {
 	Keyword string `json:"keyword"` // 模糊查询关键字 (匹配名字或描述)

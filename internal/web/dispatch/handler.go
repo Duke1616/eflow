@@ -30,22 +30,21 @@ func (h *Handler) PublicRoutes(server *gin.Engine) {
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/dispatch")
 	g.POST("/create", h.Capability("创建自动派发", "add").
-		Needs("ticket:runner:view_by_workflow_id").
+		Needs("ticket:workflow:view_codebook_uids", "task:runner:view_by_ids").
 		Handle(ginx.B[CreateDispatchReq](h.Create)),
 	)
 	g.POST("/update", h.Capability("修改自动派发", "edit").
-		Needs("ticket:runner:view_by_workflow_id").
+		Needs("ticket:workflow:view_codebook_uids", "task:runner:view_by_ids").
 		Handle(ginx.B[UpdateDispatchReq](h.Update)),
 	)
 	g.POST("/delete", h.Capability("删除自动派发", "delete").
 		Handle(ginx.B[DeleteDispatchReq](h.Delete)),
 	)
 	g.POST("/sync", h.Capability("同步自动派发", "sync").
-		Needs("ticket:center:pipeline").
 		Handle(ginx.B[SyncDispatchReq](h.Sync)),
 	)
 	g.POST("/list/by_template_id", h.Capability("自动派发列表", "view").
-		Needs("ticket:template:get", "ticket:runner:view_by_ids").
+		Needs("ticket:template:get", "task:runner:view_by_ids").
 		Handle(ginx.B[ListByTemplateId](h.ListByTemplateId)),
 	)
 }

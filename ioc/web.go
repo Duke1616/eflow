@@ -5,9 +5,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/Duke1616/eflow/internal/web/codebook"
 	"github.com/Duke1616/eflow/internal/web/dispatch"
-	"github.com/Duke1616/eflow/internal/web/runner"
 	"github.com/Duke1616/eflow/internal/web/task"
 	"github.com/Duke1616/eflow/internal/web/template"
 	"github.com/Duke1616/eflow/internal/web/ticket"
@@ -24,7 +22,7 @@ import (
 func InitGinWebServer(mdls []gin.HandlerFunc, sdk *sdk.SDK,
 	syncer capability.Syncer, providers []capability.PermissionProvider,
 	templateHdl *template.Handler, workflowHdl *workflow.Handler,
-	codebookHdl *codebook.Handler, runnerHdl *runner.Handler, taskHdl *task.Handler,
+	taskHdl *task.Handler,
 	ticketHdl *ticket.Handler, dispatchHdl *dispatch.Handler,
 	listener net.Listener) *egin.Component {
 
@@ -42,8 +40,6 @@ func InitGinWebServer(mdls []gin.HandlerFunc, sdk *sdk.SDK,
 	// 注册各个业务模块的私有路由及 EIAM 敏防 Capability 网关防护
 	templateHdl.PrivateRoutes(server.Engine)
 	workflowHdl.PrivateRoutes(server.Engine)
-	codebookHdl.PrivateRoutes(server.Engine)
-	runnerHdl.PrivateRoutes(server.Engine)
 	taskHdl.PrivateRoutes(server.Engine)
 	ticketHdl.PrivateRoutes(server.Engine)
 	dispatchHdl.PrivateRoutes(server.Engine)

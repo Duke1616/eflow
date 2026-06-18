@@ -36,7 +36,7 @@ func NewHandler(svc ticketSvc.Service, engineSvc engineSvc.Service, userSvc user
 		userSvc:     userSvc,
 		engineSvc:   engineSvc,
 		workflowSvc: workflowSvc,
-		IRegistry:   capability.NewRegistry("ticket", "center", "工单中心"),
+		IRegistry:   capability.NewRegistry("ticket", "manager", "工单中心"),
 	}
 }
 
@@ -57,7 +57,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		return h.Capability(name, code).Group("工单中心/工单列表")
 	}
 
-	g.POST("/create", op("创建工单", "create").
+	g.POST("/submit", op("提交工单", "submit").
 		Needs("ticket:template:get", "ticket:template:toggle_favorite", "ticket:template:view_favorite",
 			"ticket:workflow:view_by_ids", "ticket:tempalte:view_group_summary").
 		Handle(ginx.B[CreateTicketReq](h.CreateTicket)),
@@ -98,7 +98,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.B[RevokeOrderReq](h.Revoke)),
 	)
 	g.POST("/task/form_config", detail("任务节点表单配置", "form_config").
-		Needs("ticket:template:get", "ticket:ticket:get").
+		Needs("ticket:template:get", "ticket:manager:get").
 		Handle(ginx.B[TaskFormConfigReq](h.GetTaskFormConfig)),
 	)
 	//g.POST("/upstream/:task_id", detail("查询上游处理节点", "upstream").

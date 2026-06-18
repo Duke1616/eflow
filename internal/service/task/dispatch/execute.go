@@ -9,38 +9,34 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Duke1616/ecmdb/pkg/cryptox"
 	taskv1 "github.com/Duke1616/eflow/api/proto/gen/etask/task/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/etask/pkg/grpc/interceptors/bizid"
-	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
 )
 
 type executeService struct {
 	grpcClient taskv1.TaskServiceClient
 	repo       repository.TaskRepository
-	crypto     cryptox.Crypto
 	logger     *elog.Component
 }
 
-// NewExecuteService 初始化 gRPC 分布式任务平台派发服务，补全对齐 Crypto 加解密组件
-func NewExecuteService(grpcClient taskv1.TaskServiceClient, repo repository.TaskRepository, crypto cryptox.Crypto) TaskDispatcher {
+// NewExecuteService 初始化 gRPC 分布式任务平台派发服务
+func NewExecuteService(grpcClient taskv1.TaskServiceClient, repo repository.TaskRepository) TaskDispatcher {
 	return &executeService{
 		grpcClient: grpcClient,
 		repo:       repo,
-		crypto:     crypto,
 		logger:     elog.DefaultLogger.With(elog.FieldComponentName("executeService")),
 	}
 }
 
 // Dispatch 派发任务到外部 gRPC 任务平台
 func (e *executeService) Dispatch(ctx context.Context, task domain.Task) error {
-	// 1. 核心属性预处理 (一次性完成序列化与解密)
+	// 1. 核心属性预处理，敏感变量密文由 eflow 原样转发，etask 执行侧负责解密
 	taskId := strconv.FormatInt(task.Id, 10)
 	args := e.marshalArgs(task.Args)
-	vars := e.decryptVariables(task.Variables)
+	vars := e.marshalVariables(task.Variables)
 
 	// 2. 极致性能哈希：基于确定顺序的字节流写入，生成确定性任务名称
 	taskHash := e.sumHash(taskId, task.Code, args, vars)
@@ -125,29 +121,7 @@ func (e *executeService) marshalArgs(args map[string]interface{}) string {
 	return string(res)
 }
 
-// decryptVariables 处理变量，进行解密
-func (e *executeService) decryptVariables(req []domain.Variables) string {
-	variables := slice.Map(req, func(idx int, src domain.Variables) domain.Variables {
-		if src.Secret {
-			val, er := e.crypto.Decrypt(src.Value)
-			if er != nil {
-				return domain.Variables{}
-			}
-
-			return domain.Variables{
-				Key:    src.Key,
-				Value:  val,
-				Secret: src.Secret,
-			}
-		}
-
-		return domain.Variables{
-			Key:    src.Key,
-			Value:  src.Value,
-			Secret: src.Secret,
-		}
-	})
-
-	jsonVar, _ := json.Marshal(variables)
+func (e *executeService) marshalVariables(req []domain.Variables) string {
+	jsonVar, _ := json.Marshal(req)
 	return string(jsonVar)
 }

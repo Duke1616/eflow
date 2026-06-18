@@ -2,6 +2,7 @@ package task
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
@@ -122,6 +123,9 @@ func (h *Handler) UpdateVariableReq(ctx *ginx.Context, req UpdateVariablesReq) (
 	}
 	count, err := h.svc.UpdateVariables(ctx.Context, req.Id, variables)
 	if err != nil {
+		if errors.Is(err, taskSvc.ErrSecretVariableManagedByEtask) {
+			return invalidParameterResult(err), err
+		}
 		return systemErrorResult, err
 	}
 	return ginx.Result{Data: count, Msg: "修改Variables成功"}, nil

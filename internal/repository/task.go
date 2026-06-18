@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Duke1616/ecmdb/pkg/cryptox"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/pkg/sqlx"
@@ -61,12 +60,11 @@ type TaskRepository interface {
 }
 
 type taskRepository struct {
-	dao    dao.TaskDAO
-	crypto cryptox.Crypto
+	dao dao.TaskDAO
 }
 
-func NewTaskRepository(dao dao.TaskDAO, crypto cryptox.Crypto) TaskRepository {
-	return &taskRepository{dao: dao, crypto: crypto}
+func NewTaskRepository(dao dao.TaskDAO) TaskRepository {
+	return &taskRepository{dao: dao}
 }
 
 func (repo *taskRepository) CreateTask(ctx context.Context, req domain.Task) (domain.Task, error) {
@@ -107,8 +105,7 @@ func (repo *taskRepository) UpdateTaskStatus(ctx context.Context, req domain.Tas
 }
 
 func (repo *taskRepository) UpdateVariables(ctx context.Context, id int64, variables []domain.Variables) (int64, error) {
-	// toDAOVariables returns []dao.Variables and performs the encryption
-	return repo.dao.UpdateVariables(ctx, id, toDAOVariables(repo.crypto, variables))
+	return repo.dao.UpdateVariables(ctx, id, variables)
 }
 
 func (repo *taskRepository) ListTask(ctx context.Context, offset, limit int64) ([]domain.Task, error) {
@@ -200,7 +197,7 @@ func (repo *taskRepository) toEntity(req domain.Task) dao.Task {
 		Language:        req.Language,
 		Args:            sqlx.JsonField[domain.TaskArgs]{Val: req.Args, Valid: true},
 		Variables: sqlx.JsonField[[]domain.Variables]{
-			Val:   encryptVariables(repo.crypto, req.Variables),
+			Val:   req.Variables,
 			Valid: true,
 		},
 		Status:        req.Status.ToUint8(),
@@ -230,7 +227,7 @@ func (repo *taskRepository) toDomain(req dao.Task) domain.Task {
 		Code:            req.Code,
 		Language:        req.Language,
 		Args:            req.Args.Val,
-		Variables: decryptVariables(repo.crypto, req.Variables.Val),
+		Variables:       req.Variables.Val,
 		Status:          domain.TaskStatus(req.Status),
 		Result:          req.Result,
 		WantResult:      req.WantResult,

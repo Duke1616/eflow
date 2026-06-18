@@ -3,7 +3,6 @@ package dispatch
 import (
 	"context"
 
-	"github.com/Duke1616/ecmdb/pkg/cryptox"
 	taskv1 "github.com/Duke1616/eflow/api/proto/gen/etask/task/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
@@ -23,10 +22,10 @@ type taskDispatcher struct {
 
 // NewTaskDispatcher 实例化并组合任务统一分发器网关
 func NewTaskDispatcher(q mq.MQ, grpcClient taskv1.TaskServiceClient,
-	repo repository.TaskRepository, crypto cryptox.Crypto) TaskDispatcher {
+	repo repository.TaskRepository) TaskDispatcher {
 	return &taskDispatcher{
-		kafkaSvc:   NewKafkaService(q, crypto),
-		executeSvc: NewExecuteService(grpcClient, repo, crypto),
+		kafkaSvc:   NewKafkaService(q),
+		executeSvc: NewExecuteService(grpcClient, repo),
 	}
 }
 
