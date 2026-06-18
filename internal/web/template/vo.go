@@ -30,6 +30,7 @@ type Page struct {
 // ListTemplateReq 分页获取模板列表请求
 type ListTemplateReq struct {
 	Page
+	GroupId int64 `json:"group_id,omitempty"`
 }
 
 // FindByTemplateIds 批量模板 ID 请求
@@ -124,6 +125,13 @@ type CreateTemplateGroupReq struct {
 	Icon string `json:"icon"`
 }
 
+// UpdateTemplateGroupReq 修改模板分组请求
+type UpdateTemplateGroupReq struct {
+	Id   int64  `json:"id"`
+	Name string `json:"name"`
+	Icon string `json:"icon"`
+}
+
 // TemplateGroup 模板分类分组信息
 type TemplateGroup struct {
 	Id   int64  `json:"id"`
@@ -131,10 +139,24 @@ type TemplateGroup struct {
 	Icon string `json:"icon"`
 }
 
+// TemplateGroupSummary 模板分组摘要信息
+type TemplateGroupSummary struct {
+	Id    int64  `json:"id"`
+	Name  string `json:"name"`
+	Icon  string `json:"icon"`
+	Total int64  `json:"total"`
+}
+
 // RetrieveTemplateGroup 分页模板分类组详情响应
 type RetrieveTemplateGroup struct {
 	TemplateGroups []TemplateGroup `json:"template_groups"`
 	Total          int64           `json:"total"`
+}
+
+// RetrieveTemplateGroupSummary 模板分组摘要响应
+type RetrieveTemplateGroupSummary struct {
+	TemplateGroups []TemplateGroupSummary `json:"template_groups"`
+	Total          int64                  `json:"total"`
 }
 
 // TemplateCombination 分类下的组合数据结构

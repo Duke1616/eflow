@@ -17,14 +17,17 @@ type Rule map[string]interface{}
 // TemplateOptions 局部定义，用于物理层表单扩展选项的无损映射
 type TemplateOptions map[string]interface{}
 
+// ErrTemplateGroupNotEmpty 删除分组前发现分组内仍存在模板
+var ErrTemplateGroupNotEmpty = errors.New("请先删除分组下的模板后再删除分组")
+
 // TemplateFavorite 模版收藏实体定义
 type TemplateFavorite struct {
-	Id         int64  `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'收藏关系主键ID'"`
-	TenantID   int64  `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
-	UserId     int64  `gorm:"column:user_id;type:bigint;not null;index;comment:'收藏的用户ID'"`
-	TemplateId int64  `gorm:"column:template_id;type:bigint;not null;index;comment:'被收藏的工单模版ID'"`
-	Ctime      int64  `gorm:"column:ctime;type:bigint;comment:'收藏时间(毫秒戳)'"`
-	Utime      int64  `gorm:"column:utime;type:bigint;comment:'更新时间(毫秒戳)'"`
+	Id         int64 `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'收藏关系主键ID'"`
+	TenantID   int64 `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
+	UserId     int64 `gorm:"column:user_id;type:bigint;not null;index;comment:'收藏的用户ID'"`
+	TemplateId int64 `gorm:"column:template_id;type:bigint;not null;index;comment:'被收藏的工单模版ID'"`
+	Ctime      int64 `gorm:"column:ctime;type:bigint;comment:'收藏时间(毫秒戳)'"`
+	Utime      int64 `gorm:"column:utime;type:bigint;comment:'更新时间(毫秒戳)'"`
 }
 
 // TableName 指定物理表名，规避 GORM 默认复数表名机制可能引发的找表报错
@@ -40,6 +43,14 @@ type TemplateGroup struct {
 	Icon     string `gorm:"column:icon;type:varchar(256);comment:'分组关联图标'"`
 	Ctime    int64  `gorm:"column:ctime;type:bigint;comment:'创建时间(毫秒)'"`
 	Utime    int64  `gorm:"column:utime;type:bigint;comment:'修改时间(毫秒)'"`
+}
+
+// TemplateGroupSummary 模板分组摘要查询结果
+type TemplateGroupSummary struct {
+	Id    int64  `gorm:"column:id"`
+	Name  string `gorm:"column:name"`
+	Icon  string `gorm:"column:icon"`
+	Total int64  `gorm:"column:total"`
 }
 
 // TableName 指定物理表名
@@ -87,12 +98,12 @@ type ITemplateCoreDAO interface {
 	DeleteTemplate(ctx context.Context, id int64) (int64, error)
 	// UpdateTemplate 覆盖更新物理层中的模板基本字段配置，返回受影响行数
 	UpdateTemplate(ctx context.Context, t Template) (int64, error)
-	// ListTemplate 根据分页大小及偏移量获取工单模板列表（按创建时间逆序）
-	ListTemplate(ctx context.Context, offset, limit int64) ([]Template, error)
+	// ListTemplate 根据分页大小及偏移量获取工单模板列表，groupId 大于 0 时按分组过滤（按创建时间逆序）
+	ListTemplate(ctx context.Context, groupId int64, offset, limit int64) ([]Template, error)
 	// ListSystemTemplates 检索获取系统中所有由系统自身创建（非企微同步）的激活工单模板
 	ListSystemTemplates(ctx context.Context) ([]Template, error)
-	// Count 统计当前租户空间下物理模板的总记录数
-	Count(ctx context.Context) (int64, error)
+	// Count 统计当前租户空间下物理模板的总记录数，groupId 大于 0 时按分组过滤
+	Count(ctx context.Context, groupId int64) (int64, error)
 	// FindByTemplateIds 根据一批指定的主键 ID 批量检索对应的模板记录列表
 	FindByTemplateIds(ctx context.Context, ids []int64) ([]Template, error)
 	// GetByWorkflowId 检索与指定的工作流流程定义 ID 绑定的所有工单模板列表
@@ -107,12 +118,18 @@ type ITemplateCoreDAO interface {
 type ITemplateGroupDAO interface {
 	// CreateGroup 新建一个模板所属的分类分组实体记录，返回生成的自增 ID
 	CreateGroup(ctx context.Context, g TemplateGroup) (int64, error)
+	// UpdateGroup 更新模板分组基本信息，返回受影响行数
+	UpdateGroup(ctx context.Context, g TemplateGroup) (int64, error)
+	// DeleteGroup 删除模板分组，删除前校验分组下没有模板
+	DeleteGroup(ctx context.Context, id int64) (int64, error)
 	// ListGroup 分页获取模板的分类分组列表（按创建时间逆序排列）
 	ListGroup(ctx context.Context, offset, limit int64) ([]TemplateGroup, error)
 	// CountGroup 统计系统当前可用的模板分类分组总条数
 	CountGroup(ctx context.Context) (int64, error)
 	// ListGroupsByIds 根据指定的分类主键 ID 列表批量拉取对应分类详情集合
 	ListGroupsByIds(ctx context.Context, ids []int64) ([]TemplateGroup, error)
+	// ListGroupSummaries 获取模板分组摘要及每组模板数量
+	ListGroupSummaries(ctx context.Context) ([]TemplateGroupSummary, error)
 }
 
 // ITemplateFavoriteDAO 模板收藏物理数据访问接口
@@ -195,10 +212,13 @@ func (g *gormTemplateDAO) UpdateTemplate(ctx context.Context, t Template) (int64
 	return result.RowsAffected, result.Error
 }
 
-func (g *gormTemplateDAO) ListTemplate(ctx context.Context, offset, limit int64) ([]Template, error) {
+func (g *gormTemplateDAO) ListTemplate(ctx context.Context, groupId int64, offset, limit int64) ([]Template, error) {
 	var ts []Template
-	err := g.db.WithContext(ctx).
-		Order("ctime desc").
+	query := g.db.WithContext(ctx)
+	if groupId > 0 {
+		query = query.Where("group_id = ?", groupId)
+	}
+	err := query.Order("ctime desc").
 		Limit(int(limit)).
 		Offset(int(offset)).
 		Find(&ts).Error
@@ -213,9 +233,13 @@ func (g *gormTemplateDAO) ListSystemTemplates(ctx context.Context) ([]Template, 
 	return ts, err
 }
 
-func (g *gormTemplateDAO) Count(ctx context.Context) (int64, error) {
+func (g *gormTemplateDAO) Count(ctx context.Context, groupId int64) (int64, error) {
 	var total int64
-	err := g.db.WithContext(ctx).Model(&Template{}).Count(&total).Error
+	query := g.db.WithContext(ctx).Model(&Template{})
+	if groupId > 0 {
+		query = query.Where("group_id = ?", groupId)
+	}
+	err := query.Count(&total).Error
 	return total, err
 }
 
@@ -272,6 +296,34 @@ func (g *gormTemplateDAO) CreateGroup(ctx context.Context, group TemplateGroup) 
 	return group.Id, err
 }
 
+func (g *gormTemplateDAO) UpdateGroup(ctx context.Context, group TemplateGroup) (int64, error) {
+	updates := map[string]interface{}{
+		"name":  group.Name,
+		"icon":  group.Icon,
+		"utime": time.Now().UnixMilli(),
+	}
+	result := g.db.WithContext(ctx).Model(&TemplateGroup{}).Where("id = ?", group.Id).Updates(updates)
+	return result.RowsAffected, result.Error
+}
+
+func (g *gormTemplateDAO) DeleteGroup(ctx context.Context, id int64) (int64, error) {
+	var rowsAffected int64
+	err := g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var total int64
+		if err := tx.Model(&Template{}).Where("group_id = ?", id).Count(&total).Error; err != nil {
+			return err
+		}
+		if total > 0 {
+			return ErrTemplateGroupNotEmpty
+		}
+
+		result := tx.Where("id = ?", id).Delete(&TemplateGroup{})
+		rowsAffected = result.RowsAffected
+		return result.Error
+	})
+	return rowsAffected, err
+}
+
 func (g *gormTemplateDAO) ListGroup(ctx context.Context, offset, limit int64) ([]TemplateGroup, error) {
 	var gs []TemplateGroup
 	err := g.db.WithContext(ctx).
@@ -295,6 +347,18 @@ func (g *gormTemplateDAO) ListGroupsByIds(ctx context.Context, ids []int64) ([]T
 	}
 	err := g.db.WithContext(ctx).Where("id IN ?", ids).Find(&gs).Error
 	return gs, err
+}
+
+func (g *gormTemplateDAO) ListGroupSummaries(ctx context.Context) ([]TemplateGroupSummary, error) {
+	var summaries []TemplateGroupSummary
+	err := g.db.WithContext(ctx).
+		Table("template_group AS tg").
+		Select("tg.id, tg.name, tg.icon, COUNT(t.id) AS total").
+		Joins("LEFT JOIN template AS t ON t.group_id = tg.id").
+		Group("tg.id, tg.name, tg.icon").
+		Order("tg.ctime desc").
+		Scan(&summaries).Error
+	return summaries, err
 }
 
 // --- Favorite 收藏物理访问实现 ---

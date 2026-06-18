@@ -48,6 +48,14 @@ type TemplateGroup struct {
 	Icon string // 分组图标样式
 }
 
+// TemplateGroupSummary 模板分组摘要，用于管理页按分组懒加载模板列表
+type TemplateGroupSummary struct {
+	Id    int64  // 分组 ID
+	Name  string // 分组名称
+	Icon  string // 分组图标样式
+	Total int64  // 分组下模板数量
+}
+
 // TemplateCombination 聚合结构，用户在列表页中获取组以及组下的模板组合
 type TemplateCombination struct {
 	Id         int64      // 分组 ID

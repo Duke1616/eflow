@@ -12,6 +12,9 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// ErrTemplateGroupNotEmpty 删除分组前发现分组内仍存在模板
+var ErrTemplateGroupNotEmpty = repository.ErrTemplateGroupNotEmpty
+
 // ITemplateCoreService 工单页面模板核心业务子接口
 type ITemplateCoreService interface {
 	// FindOrCreateByWechat 接收企微同步通知并拉取其 OA 审批模板详情，不存在则自动将其转换为本地模板存入，存在则完成增量校验更新
@@ -25,7 +28,7 @@ type ITemplateCoreService interface {
 	// DetailTemplateByExternalTemplateId 通过外部关联系统 ID (如飞书、企业微信的模板 UUID) 获取对应模板配置
 	DetailTemplateByExternalTemplateId(ctx context.Context, externalId string) (domain.Template, error)
 	// ListTemplate 分页获取所有可用工单模板列表，并返回包含所有模板的总记录数目
-	ListTemplate(ctx context.Context, offset, limit int64) ([]domain.Template, int64, error)
+	ListTemplate(ctx context.Context, groupId int64, offset, limit int64) ([]domain.Template, int64, error)
 	// DeleteTemplate 删除指定的工单模板实体，返回被成功删除的记录条数
 	DeleteTemplate(ctx context.Context, id int64) (int64, error)
 	// UpdateTemplate 覆盖更新替换已有的工单模板属性（如规则、选项等）
@@ -43,11 +46,20 @@ type ITemplateGroupService interface {
 	// CreateGroup 新建一个分类分组，返回生成的自增 ID
 	CreateGroup(ctx context.Context, req domain.TemplateGroup) (int64, error)
 
+	// UpdateGroup 更新分类分组基本信息，返回受影响行数
+	UpdateGroup(ctx context.Context, req domain.TemplateGroup) (int64, error)
+
+	// DeleteGroup 删除分类分组，分组下存在模板时拒绝删除
+	DeleteGroup(ctx context.Context, id int64) (int64, error)
+
 	// ListGroup 分页获取模板的分类分组列表
 	ListGroup(ctx context.Context, offset, limit int64) ([]domain.TemplateGroup, int64, error)
 
 	// ListGroupsByIds 根据主键 ID 列表批量获取分类分组列表
 	ListGroupsByIds(ctx context.Context, ids []int64) ([]domain.TemplateGroup, error)
+
+	// ListGroupSummaries 获取模板分组摘要及每组模板数量
+	ListGroupSummaries(ctx context.Context) ([]domain.TemplateGroupSummary, error)
 }
 
 // ITemplateFavoriteService 模板收藏业务子接口
@@ -149,7 +161,7 @@ func (s *templateService) DetailTemplate(ctx context.Context, id int64) (domain.
 	return s.repo.DetailTemplate(ctx, id)
 }
 
-func (s *templateService) ListTemplate(ctx context.Context, offset, limit int64) ([]domain.Template, int64, error) {
+func (s *templateService) ListTemplate(ctx context.Context, groupId int64, offset, limit int64) ([]domain.Template, int64, error) {
 	var (
 		eg    errgroup.Group
 		ts    []domain.Template
@@ -157,13 +169,13 @@ func (s *templateService) ListTemplate(ctx context.Context, offset, limit int64)
 	)
 	eg.Go(func() error {
 		var err error
-		ts, err = s.repo.ListTemplate(ctx, offset, limit)
+		ts, err = s.repo.ListTemplate(ctx, groupId, offset, limit)
 		return err
 	})
 
 	eg.Go(func() error {
 		var err error
-		total, err = s.repo.Total(ctx)
+		total, err = s.repo.Total(ctx, groupId)
 		return err
 	})
 
@@ -211,6 +223,14 @@ func (s *templateService) CreateGroup(ctx context.Context, req domain.TemplateGr
 	return s.repo.CreateGroup(ctx, req)
 }
 
+func (s *templateService) UpdateGroup(ctx context.Context, req domain.TemplateGroup) (int64, error) {
+	return s.repo.UpdateGroup(ctx, req)
+}
+
+func (s *templateService) DeleteGroup(ctx context.Context, id int64) (int64, error) {
+	return s.repo.DeleteGroup(ctx, id)
+}
+
 func (s *templateService) ListGroup(ctx context.Context, offset, limit int64) ([]domain.TemplateGroup, int64, error) {
 	var (
 		eg    errgroup.Group
@@ -237,4 +257,8 @@ func (s *templateService) ListGroup(ctx context.Context, offset, limit int64) ([
 
 func (s *templateService) ListGroupsByIds(ctx context.Context, ids []int64) ([]domain.TemplateGroup, error) {
 	return s.repo.ListGroupsByIds(ctx, ids)
+}
+
+func (s *templateService) ListGroupSummaries(ctx context.Context) ([]domain.TemplateGroupSummary, error) {
+	return s.repo.ListGroupSummaries(ctx)
 }

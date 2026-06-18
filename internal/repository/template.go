@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"sort"
 
 	"github.com/Duke1616/eflow/internal/domain"
@@ -13,8 +14,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// ErrTemplateNotFound 未找到对应工单模板的仓储层 Sentinel 错误
-var ErrTemplateNotFound = gorm.ErrRecordNotFound
+var (
+	// ErrTemplateNotFound 未找到对应工单模板的仓储层 Sentinel 错误
+	ErrTemplateNotFound = gorm.ErrRecordNotFound
+	// ErrTemplateGroupNotEmpty 删除分组前发现分组内仍存在模板
+	ErrTemplateGroupNotEmpty = errors.New("请先删除分组下的模板后再删除分组")
+)
 
 // ITemplateCoreRepository 工单模板核心防腐仓储子接口
 type ITemplateCoreRepository interface {
@@ -32,10 +37,10 @@ type ITemplateCoreRepository interface {
 	DetailTemplateByExternalTemplateId(ctx context.Context, externalId string) (domain.Template, error)
 	// UpdateTemplate 覆盖更新当前模板相关的字段配置，返回受影响行数
 	UpdateTemplate(ctx context.Context, req domain.Template) (int64, error)
-	// ListTemplate 分页拉取工单模板列表，按照时间逆序
-	ListTemplate(ctx context.Context, offset, limit int64) ([]domain.Template, error)
-	// Total 统计当前租户空间下所有的模板总数
-	Total(ctx context.Context) (int64, error)
+	// ListTemplate 分页拉取工单模板列表，groupId 大于 0 时按分组过滤，按照时间逆序
+	ListTemplate(ctx context.Context, groupId int64, offset, limit int64) ([]domain.Template, error)
+	// Total 统计当前租户空间下模板总数，groupId 大于 0 时按分组过滤
+	Total(ctx context.Context, groupId int64) (int64, error)
 	// Pipeline 获取系统默认模板，并在 Repository 内部通过 lo.GroupBy 内存聚合并联查分类分组信息后排好序输出组合列表
 	Pipeline(ctx context.Context) ([]domain.TemplateCombination, error)
 	// FindByTemplateIds 根据一批指定的主键 ID 列表批量拉取模板详情集合
@@ -53,6 +58,12 @@ type ITemplateGroupRepository interface {
 	// CreateGroup 新建一个分类分组，返回生成的自增 ID
 	CreateGroup(ctx context.Context, req domain.TemplateGroup) (int64, error)
 
+	// UpdateGroup 更新分类分组基本信息，返回受影响行数
+	UpdateGroup(ctx context.Context, req domain.TemplateGroup) (int64, error)
+
+	// DeleteGroup 删除分类分组，分组下存在模板时拒绝删除
+	DeleteGroup(ctx context.Context, id int64) (int64, error)
+
 	// ListGroup 分页获取模板的分类分组列表
 	ListGroup(ctx context.Context, offset, limit int64) ([]domain.TemplateGroup, error)
 
@@ -61,6 +72,8 @@ type ITemplateGroupRepository interface {
 
 	// ListGroupsByIds 根据主键 ID 列表批量获取分类分组列表
 	ListGroupsByIds(ctx context.Context, ids []int64) ([]domain.TemplateGroup, error)
+	// ListGroupSummaries 获取模板分组摘要及每组模板数量
+	ListGroupSummaries(ctx context.Context) ([]domain.TemplateGroupSummary, error)
 }
 
 // ITemplateFavoriteRepository 模板收藏防腐仓储子接口
@@ -136,8 +149,8 @@ func (repo *templateRepository) UpdateTemplate(ctx context.Context, req domain.T
 	return repo.dao.UpdateTemplate(ctx, repo.toEntity(req))
 }
 
-func (repo *templateRepository) ListTemplate(ctx context.Context, offset, limit int64) ([]domain.Template, error) {
-	ts, err := repo.dao.ListTemplate(ctx, offset, limit)
+func (repo *templateRepository) ListTemplate(ctx context.Context, groupId int64, offset, limit int64) ([]domain.Template, error) {
+	ts, err := repo.dao.ListTemplate(ctx, groupId, offset, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -146,8 +159,8 @@ func (repo *templateRepository) ListTemplate(ctx context.Context, offset, limit 
 	}), nil
 }
 
-func (repo *templateRepository) Total(ctx context.Context) (int64, error) {
-	return repo.dao.Count(ctx)
+func (repo *templateRepository) Total(ctx context.Context, groupId int64) (int64, error) {
+	return repo.dao.Count(ctx, groupId)
 }
 
 func (repo *templateRepository) Pipeline(ctx context.Context) ([]domain.TemplateCombination, error) {
@@ -246,6 +259,18 @@ func (repo *templateRepository) CreateGroup(ctx context.Context, req domain.Temp
 	return repo.dao.CreateGroup(ctx, repo.toGroupEntity(req))
 }
 
+func (repo *templateRepository) UpdateGroup(ctx context.Context, req domain.TemplateGroup) (int64, error) {
+	return repo.dao.UpdateGroup(ctx, repo.toGroupEntity(req))
+}
+
+func (repo *templateRepository) DeleteGroup(ctx context.Context, id int64) (int64, error) {
+	affected, err := repo.dao.DeleteGroup(ctx, id)
+	if errors.Is(err, dao.ErrTemplateGroupNotEmpty) {
+		return affected, ErrTemplateGroupNotEmpty
+	}
+	return affected, err
+}
+
 func (repo *templateRepository) ListGroup(ctx context.Context, offset, limit int64) ([]domain.TemplateGroup, error) {
 	gs, err := repo.dao.ListGroup(ctx, offset, limit)
 	if err != nil {
@@ -267,6 +292,21 @@ func (repo *templateRepository) ListGroupsByIds(ctx context.Context, ids []int64
 	}
 	return slice.Map(gs, func(idx int, src dao.TemplateGroup) domain.TemplateGroup {
 		return repo.toGroupDomain(src)
+	}), nil
+}
+
+func (repo *templateRepository) ListGroupSummaries(ctx context.Context) ([]domain.TemplateGroupSummary, error) {
+	summaries, err := repo.dao.ListGroupSummaries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return slice.Map(summaries, func(idx int, src dao.TemplateGroupSummary) domain.TemplateGroupSummary {
+		return domain.TemplateGroupSummary{
+			Id:    src.Id,
+			Name:  src.Name,
+			Icon:  src.Icon,
+			Total: src.Total,
+		}
 	}), nil
 }
 

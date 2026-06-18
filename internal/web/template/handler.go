@@ -2,6 +2,7 @@ package template
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
@@ -36,7 +37,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.W(h.DetailTemplate)),
 	)
 	g.POST("/list", h.Capability("工单模板列表", "view").
-		Needs("ticket:template:view_group_by_ids").
+		Needs("ticket:template:view_group_by_ids", "ticket:tempalte:view_group_summary").
 		Handle(ginx.B[ListTemplateReq](h.ListTemplate)),
 	)
 
@@ -91,12 +92,22 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		NoSync().
 		Handle(ginx.B[Page](h.ListTemplateGroup)),
 	)
+	gg.POST("/summary", h.Capability("查询模板分组摘要", "view_group_summary").
+		NoSync().
+		Handle(ginx.W(h.ListTemplateGroupSummary)),
+	)
 	gg.POST("/by_ids", h.Capability("批量查询模板组", "view_group_by_ids").
 		NoSync().
 		Handle(ginx.B[FindTemplateGroupsByIdsReq](h.FindTemplateGroupByIds)),
 	)
 	gg.POST("/create", h.Capability("创建模板分类", "add_group").
 		Handle(ginx.B[CreateTemplateGroupReq](h.CreateTemplateGroup)),
+	)
+	gg.POST("/update", h.Capability("修改模板分类", "edit_group").
+		Handle(ginx.B[UpdateTemplateGroupReq](h.UpdateTemplateGroup)),
+	)
+	gg.DELETE("/delete/:id", h.Capability("删除模板分类", "delete_group").
+		Handle(ginx.W(h.DeleteTemplateGroup)),
 	)
 }
 
@@ -205,7 +216,7 @@ func (h *Handler) GetTemplatesByWorkflowId(ctx *ginx.Context, req GetTemplatesBy
 
 // ListTemplate 分页获取所有可用的工单模板
 func (h *Handler) ListTemplate(ctx *ginx.Context, req ListTemplateReq) (ginx.Result, error) {
-	ts, total, err := h.svc.ListTemplate(ctx.Context, req.Offset, req.Limit)
+	ts, total, err := h.svc.ListTemplate(ctx.Context, req.GroupId, req.Offset, req.Limit)
 	if err != nil {
 		return SystemErrorResult, err
 	}
@@ -364,6 +375,45 @@ func (h *Handler) CreateTemplateGroup(ctx *ginx.Context, req CreateTemplateGroup
 	}, nil
 }
 
+// UpdateTemplateGroup 修改模板分类分组
+func (h *Handler) UpdateTemplateGroup(ctx *ginx.Context, req UpdateTemplateGroupReq) (ginx.Result, error) {
+	if req.Id <= 0 {
+		return ErrTemplateGroupInvalidId, nil
+	}
+
+	affectedRows, err := h.svc.UpdateGroup(ctx.Context, domain.TemplateGroup{
+		Id:   req.Id,
+		Name: req.Name,
+		Icon: req.Icon,
+	})
+	if err != nil {
+		return SystemErrorResult, err
+	}
+
+	return ginx.Result{
+		Msg:  "修改工单模板组成功",
+		Data: affectedRows,
+	}, nil
+}
+
+// DeleteTemplateGroup 删除模板分类分组，分组下存在模板时拒绝删除
+func (h *Handler) DeleteTemplateGroup(ctx *ginx.Context) (ginx.Result, error) {
+	id, err := ctx.Param("id").AsInt64()
+	if err != nil {
+		return ErrTemplateGroupInvalidId, err
+	}
+
+	affectedRows, err := h.svc.DeleteGroup(ctx.Context, id)
+	if err != nil {
+		return h.translateGroupError(err), err
+	}
+
+	return ginx.Result{
+		Msg:  "删除工单模板组成功",
+		Data: affectedRows,
+	}, nil
+}
+
 // FindTemplateGroupByIds 批量拉取特定的分组信息
 func (h *Handler) FindTemplateGroupByIds(ctx *ginx.Context, req FindTemplateGroupsByIdsReq) (ginx.Result, error) {
 	gs, err := h.svc.ListGroupsByIds(ctx.Context, req.Ids)
@@ -405,6 +455,36 @@ func (h *Handler) ListTemplateGroup(ctx *ginx.Context, req Page) (ginx.Result, e
 			}),
 		},
 	}, nil
+}
+
+// ListTemplateGroupSummary 查询模板分组摘要及每组模板数量
+func (h *Handler) ListTemplateGroupSummary(ctx *ginx.Context) (ginx.Result, error) {
+	summaries, err := h.svc.ListGroupSummaries(ctx.Context)
+	if err != nil {
+		return SystemErrorResult, err
+	}
+
+	return ginx.Result{
+		Msg: "查询工单模板组摘要成功",
+		Data: RetrieveTemplateGroupSummary{
+			Total: int64(len(summaries)),
+			TemplateGroups: slice.Map(summaries, func(idx int, src domain.TemplateGroupSummary) TemplateGroupSummary {
+				return TemplateGroupSummary{
+					Id:    src.Id,
+					Name:  src.Name,
+					Icon:  src.Icon,
+					Total: src.Total,
+				}
+			}),
+		},
+	}, nil
+}
+
+func (h *Handler) translateGroupError(err error) ginx.Result {
+	if errors.Is(err, templateSvc.ErrTemplateGroupNotEmpty) {
+		return ErrTemplateGroupNotEmpty
+	}
+	return SystemErrorResult
 }
 
 // --- 辅助映射处理转换 ---
