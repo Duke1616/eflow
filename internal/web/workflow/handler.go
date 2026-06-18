@@ -59,6 +59,10 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		NoSync().
 		Handle(ginx.B[ByKeywordReq](h.ByKeyword)),
 	)
+	g.POST("/by_ids", h.Capability("批量获取流程详情", "view_by_ids").
+		NoSync().
+		Handle(ginx.B[FindByIdsReq](h.FindByIds)),
+	)
 	g.GET("/detail/:id", h.Capability("流程详情", "get").
 		Handle(ginx.W(h.Detail)),
 	)
@@ -111,6 +115,33 @@ func (h *Handler) ByKeyword(ctx *ginx.Context, req ByKeywordReq) (ginx.Result, e
 		Msg: "根据关键字搜索流程成功",
 		Data: RetrieveWorkflows{
 			Total: total,
+			Workflows: slice.Map(ws, func(idx int, src domain.Workflow) Workflow {
+				return h.toWorkflowVo(src)
+			}),
+		},
+	}, nil
+}
+
+// FindByIds 根据 ID 列表批量拉取工作流元数据，常用于前端展示流程名称
+func (h *Handler) FindByIds(ctx *ginx.Context, req FindByIdsReq) (ginx.Result, error) {
+	if len(req.Ids) == 0 {
+		return ginx.Result{
+			Msg: "批量查询流程成功",
+			Data: RetrieveWorkflows{
+				Workflows: []Workflow{},
+			},
+		}, nil
+	}
+
+	ws, err := h.svc.FindByIds(ctx.Context, req.Ids)
+	if err != nil {
+		return SystemErrorResult, err
+	}
+
+	return ginx.Result{
+		Msg: "批量查询流程成功",
+		Data: RetrieveWorkflows{
+			Total: int64(len(ws)),
 			Workflows: slice.Map(ws, func(idx int, src domain.Workflow) Workflow {
 				return h.toWorkflowVo(src)
 			}),

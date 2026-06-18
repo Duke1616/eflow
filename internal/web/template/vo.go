@@ -30,7 +30,8 @@ type Page struct {
 // ListTemplateReq 分页获取模板列表请求
 type ListTemplateReq struct {
 	Page
-	GroupId int64 `json:"group_id,omitempty"`
+	GroupId int64  `json:"group_id,omitempty"`
+	Keyword string `json:"keyword,omitempty"`
 }
 
 // FindByTemplateIds 批量模板 ID 请求
@@ -166,20 +167,4 @@ type TemplateCombination struct {
 	Icon      string     `json:"icon,omitempty"`
 	Total     int64      `json:"total"`
 	Templates []Template `json:"templates"`
-}
-
-// RetrieveTemplateCombination 分类聚合数据总响应
-type RetrieveTemplateCombination struct {
-	TemplateCombinations []TemplateCombination `json:"template_combinations"`
-}
-
-// FindTemplateGroupsByIdsReq 根据一批 ID 批量拉取模板分组请求
-type FindTemplateGroupsByIdsReq struct {
-	Ids []int64 `json:"ids"`
-}
-
-// ByKeywordReq 模糊过滤模板参数
-type ByKeywordReq struct {
-	Keyword string `json:"keyword"`
-	Page
 }

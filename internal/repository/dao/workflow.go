@@ -88,6 +88,8 @@ type IWorkflowCoreDAO interface {
 	DeleteWorkflow(ctx context.Context, id int64) (int64, error)
 	// FindWorkflow 根据主键 ID 精确检索单个工作流模板详情
 	FindWorkflow(ctx context.Context, id int64) (Workflow, error)
+	// FindByIds 根据主键 ID 列表批量检索流程定义，省略大 JSON 字段
+	FindByIds(ctx context.Context, ids []int64) ([]Workflow, error)
 	// FindByKeyword 按照关键字模糊匹配流程名称及描述的分页检索
 	FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]Workflow, error)
 	// CountByKeyword 计算含有对应关键字特征的流程总条数
@@ -194,6 +196,18 @@ func (g *gormWorkflowDAO) FindWorkflow(ctx context.Context, id int64) (Workflow,
 	var w Workflow
 	err := g.db.WithContext(ctx).Where("id = ?", id).First(&w).Error
 	return w, err
+}
+
+func (g *gormWorkflowDAO) FindByIds(ctx context.Context, ids []int64) ([]Workflow, error) {
+	var ws []Workflow
+	if len(ids) == 0 {
+		return ws, nil
+	}
+	err := g.db.WithContext(ctx).
+		Omit("flow_data").
+		Where("id IN ?", ids).
+		Find(&ws).Error
+	return ws, err
 }
 
 func (g *gormWorkflowDAO) FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]Workflow, error) {

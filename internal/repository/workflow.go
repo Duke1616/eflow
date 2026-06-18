@@ -25,6 +25,8 @@ type IWorkflowCoreRepository interface {
 	Delete(ctx context.Context, id int64) (int64, error)
 	// Find 根据主键 ID 查询流程定义（返回最新版元数据及完整画布数据）
 	Find(ctx context.Context, id int64) (domain.Workflow, error)
+	// FindByIds 根据主键 ID 列表批量查询流程定义元数据
+	FindByIds(ctx context.Context, ids []int64) ([]domain.Workflow, error)
 	// FindByKeyword 模糊匹配流程名称及描述的分页检索
 	FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Workflow, error)
 	// CountByKeyword 计算含有对应关键字特征的流程定义总条数
@@ -109,6 +111,16 @@ func (repo *workflowRepository) Find(ctx context.Context, id int64) (domain.Work
 		return domain.Workflow{}, err
 	}
 	return repo.toDomain(w), nil
+}
+
+func (repo *workflowRepository) FindByIds(ctx context.Context, ids []int64) ([]domain.Workflow, error) {
+	ws, err := repo.dao.FindByIds(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	return slice.Map(ws, func(idx int, src dao.Workflow) domain.Workflow {
+		return repo.toDomain(src)
+	}), nil
 }
 
 func (repo *workflowRepository) FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Workflow, error) {

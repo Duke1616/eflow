@@ -2,13 +2,13 @@ package workflow
 
 // CreateReq 创建工作流流程模板请求参数封装
 type CreateReq struct {
-	TemplateId   int64      `json:"template_id"`   // 挂载绑定的工单模板 ID
-	Name         string     `json:"name"`          // 工作流展示名字
-	Icon         string     `json:"icon"`          // 画布展现图标
-	Owner        string     `json:"owner"`         // 流程负责人邮箱
-	Desc         string     `json:"desc"`          // 流程作用详细描述
-	IsNotify     bool       `json:"is_notify"`     // 节点流转时是否触发推送通知
-	NotifyMethod uint8      `json:"notify_method"` // 流程的默认第一通知渠道类型
+	TemplateId   int64      `json:"template_id"`         // 挂载绑定的工单模板 ID
+	Name         string     `json:"name"`                // 工作流展示名字
+	Icon         string     `json:"icon"`                // 画布展现图标
+	Owner        string     `json:"owner"`               // 流程负责人邮箱
+	Desc         string     `json:"desc"`                // 流程作用详细描述
+	IsNotify     bool       `json:"is_notify"`           // 节点流转时是否触发推送通知
+	NotifyMethod uint8      `json:"notify_method"`       // 流程的默认第一通知渠道类型
 	FlowData     *LogicFlow `json:"flow_data,omitempty"` // 画布原始图结构数据 (可选)
 }
 
@@ -21,6 +21,11 @@ type Page struct {
 // ListReq 分页检索工作流列表请求参数
 type ListReq struct {
 	Page
+}
+
+// FindByIdsReq 根据一批 ID 批量拉取工作流元数据
+type FindByIdsReq struct {
+	Ids []int64 `json:"ids"`
 }
 
 // ByKeywordReq 按照关键字模糊查询工作流列表请求参数
@@ -36,12 +41,12 @@ type DeployReq struct {
 
 // UpdateReq 更新工作流流程配置请求参数封装
 type UpdateReq struct {
-	Id           int64      `json:"id"`            // 更新的工作流唯一自增 ID
-	Name         string     `json:"name"`          // 流程名称
-	Desc         string     `json:"desc"`          // 流程描述
-	Owner        string     `json:"owner"`         // 流程管理员/设计者
-	IsNotify     bool       `json:"is_notify"`     // 是否支持流转通知推送
-	NotifyMethod uint8      `json:"notify_method"` // 推送渠道
+	Id           int64      `json:"id"`                  // 更新的工作流唯一自增 ID
+	Name         string     `json:"name"`                // 流程名称
+	Desc         string     `json:"desc"`                // 流程描述
+	Owner        string     `json:"owner"`               // 流程管理员/设计者
+	IsNotify     bool       `json:"is_notify"`           // 是否支持流转通知推送
+	NotifyMethod uint8      `json:"notify_method"`       // 推送渠道
 	FlowData     *LogicFlow `json:"flow_data,omitempty"` // 图画布原始节点拓扑 json
 }
 
@@ -52,14 +57,14 @@ type DeleteReq struct {
 
 // Workflow 表现层统一输出的 Workflow 数据模型
 type Workflow struct {
-	Id           int64      `json:"id"`            // 唯一 ID
-	TemplateId   int64      `json:"template_id"`   // 绑定的工单模板 ID
-	Name         string     `json:"name"`          // 展示名
-	Icon         string     `json:"icon"`          // 展示图标
-	Owner        string     `json:"owner"`         // 流程所有人
-	Desc         string     `json:"desc"`          // 描述
-	IsNotify     bool       `json:"is_notify"`     // 是否通知
-	NotifyMethod uint8      `json:"notify_method"` // 默认渠道类型
+	Id           int64      `json:"id"`                  // 唯一 ID
+	TemplateId   int64      `json:"template_id"`         // 绑定的工单模板 ID
+	Name         string     `json:"name"`                // 展示名
+	Icon         string     `json:"icon"`                // 展示图标
+	Owner        string     `json:"owner"`               // 流程所有人
+	Desc         string     `json:"desc"`                // 描述
+	IsNotify     bool       `json:"is_notify"`           // 是否通知
+	NotifyMethod uint8      `json:"notify_method"`       // 默认渠道类型
 	FlowData     *LogicFlow `json:"flow_data,omitempty"` // 前端流程图画布数据
 }
 

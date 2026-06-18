@@ -19,6 +19,8 @@ type IWorkflowCoreService interface {
 	List(ctx context.Context, offset, limit int64) ([]domain.Workflow, int64, error)
 	// Find 精确获取指定主键 ID 的工作流详情，承载最新的画布设计与元数据属性
 	Find(ctx context.Context, id int64) (domain.Workflow, error)
+	// FindByIds 根据一批主键 ID 批量获取工作流元数据，用于前端展示流程名称等轻量信息
+	FindByIds(ctx context.Context, ids []int64) ([]domain.Workflow, error)
 	// Update 更新现有的工作流设计与图结构，返回受影响行数
 	Update(ctx context.Context, req domain.Workflow) (int64, error)
 	// Delete 根据 ID 删除工作流定义，返回受影响行数
@@ -104,6 +106,10 @@ func (s *workflowService) List(ctx context.Context, offset, limit int64) ([]doma
 
 func (s *workflowService) Find(ctx context.Context, id int64) (domain.Workflow, error) {
 	return s.repo.Find(ctx, id)
+}
+
+func (s *workflowService) FindByIds(ctx context.Context, ids []int64) ([]domain.Workflow, error) {
+	return s.repo.FindByIds(ctx, ids)
 }
 
 func (s *workflowService) Update(ctx context.Context, req domain.Workflow) (int64, error) {

@@ -58,7 +58,8 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	}
 
 	g.POST("/create", op("创建工单", "create").
-		Needs("ticket:template:get").
+		Needs("ticket:template:get", "ticket:template:toggle_favorite", "ticket:template:view_favorite",
+			"ticket:workflow:view_by_ids", "ticket:tempalte:view_group_summary").
 		Handle(ginx.B[CreateTicketReq](h.CreateTicket)),
 	)
 	g.POST("/detail/process_inst_id", detail("工单详情", "get").

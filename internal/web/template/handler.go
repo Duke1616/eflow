@@ -37,16 +37,10 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.W(h.DetailTemplate)),
 	)
 	g.POST("/list", h.Capability("工单模板列表", "view").
-		Needs("ticket:template:view_group_by_ids", "ticket:tempalte:view_group_summary").
+		Needs("ticket:workflow:view_by_ids", "ticket:tempalte:view_group_summary").
 		Handle(ginx.B[ListTemplateReq](h.ListTemplate)),
 	)
 
-	g.POST("/list/pipeline", h.Capability("工单中心", "pipeline").
-		Module("center").
-		Group("工单中心").
-		Needs("ticket:template:toggle_favorite", "ticket:template:view_favorite").
-		Handle(ginx.W(h.Pipeline)),
-	)
 	g.POST("/by_ids", h.Capability("批量获取模板详情", "view_by_ids").
 		NoSync().
 		Handle(ginx.B[FindByTemplateIds](h.FindByTemplateIds)),
@@ -59,11 +53,6 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		NoSync().
 		Handle(ginx.B[GetRulesByWorkFlowIdReq](h.GetRulesByWorkFlowId)),
 	)
-	g.POST("/list/by_keyword", h.Capability("模糊搜索模板", "view_by_keyword").
-		NoSync().
-		Handle(ginx.B[ByKeywordReq](h.ByKeyword)),
-	)
-
 	g.POST("/create", h.Capability("创建工单模板", "add").
 		Needs("ticket:template:view_group", "ticket:workflow:view").
 		Handle(ginx.B[CreateTemplateReq](h.CreateTemplate)),
@@ -95,10 +84,6 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	gg.POST("/summary", h.Capability("查询模板分组摘要", "view_group_summary").
 		NoSync().
 		Handle(ginx.W(h.ListTemplateGroupSummary)),
-	)
-	gg.POST("/by_ids", h.Capability("批量查询模板组", "view_group_by_ids").
-		NoSync().
-		Handle(ginx.B[FindTemplateGroupsByIdsReq](h.FindTemplateGroupByIds)),
 	)
 	gg.POST("/create", h.Capability("创建模板分类", "add_group").
 		Handle(ginx.B[CreateTemplateGroupReq](h.CreateTemplateGroup)),
@@ -216,7 +201,7 @@ func (h *Handler) GetTemplatesByWorkflowId(ctx *ginx.Context, req GetTemplatesBy
 
 // ListTemplate 分页获取所有可用的工单模板
 func (h *Handler) ListTemplate(ctx *ginx.Context, req ListTemplateReq) (ginx.Result, error) {
-	ts, total, err := h.svc.ListTemplate(ctx.Context, req.GroupId, req.Offset, req.Limit)
+	ts, total, err := h.svc.ListTemplate(ctx.Context, req.GroupId, req.Keyword, req.Offset, req.Limit)
 	if err != nil {
 		return SystemErrorResult, err
 	}
@@ -267,48 +252,6 @@ func (h *Handler) UpdateTemplate(ctx *ginx.Context, req UpdateTemplateReq) (ginx
 
 	return ginx.Result{
 		Data: affectedRows,
-	}, nil
-}
-
-// ByKeyword 模糊搜索模板列表及相应计数汇总
-func (h *Handler) ByKeyword(ctx *ginx.Context, req ByKeywordReq) (ginx.Result, error) {
-	ts, total, err := h.svc.FindByKeyword(ctx.Context, req.Keyword, req.Offset, req.Limit)
-	if err != nil {
-		return SystemErrorResult, err
-	}
-
-	return ginx.Result{
-		Msg: "根据关键字搜索模板成功",
-		Data: RetrieveTemplates{
-			Total: total,
-			Templates: slice.Map(ts, func(idx int, src domain.Template) TemplateJson {
-				return h.toTemplateJsonVo(src)
-			}),
-		},
-	}, nil
-}
-
-// Pipeline 获取系统默认模板并按其分类聚类输出（聚合及排序业务均已下沉下托至 Repository 内部完成）
-func (h *Handler) Pipeline(ctx *ginx.Context) (ginx.Result, error) {
-	pipeline, err := h.svc.Pipeline(ctx.Context)
-	if err != nil {
-		return SystemErrorResult, err
-	}
-
-	tc := slice.Map(pipeline, func(idx int, src domain.TemplateCombination) TemplateCombination {
-		return TemplateCombination{
-			Id:    src.Id,
-			Name:  src.Name,
-			Icon:  src.Icon,
-			Total: int64(src.Total),
-			Templates: slice.Map(src.Templates, func(idx int, src domain.Template) Template {
-				return h.toTemplateVo(src)
-			}),
-		}
-	})
-
-	return ginx.Result{
-		Data: RetrieveTemplateCombination{TemplateCombinations: tc},
 	}, nil
 }
 
@@ -411,27 +354,6 @@ func (h *Handler) DeleteTemplateGroup(ctx *ginx.Context) (ginx.Result, error) {
 	return ginx.Result{
 		Msg:  "删除工单模板组成功",
 		Data: affectedRows,
-	}, nil
-}
-
-// FindTemplateGroupByIds 批量拉取特定的分组信息
-func (h *Handler) FindTemplateGroupByIds(ctx *ginx.Context, req FindTemplateGroupsByIdsReq) (ginx.Result, error) {
-	gs, err := h.svc.ListGroupsByIds(ctx.Context, req.Ids)
-	if err != nil {
-		return SystemErrorResult, err
-	}
-
-	return ginx.Result{
-		Msg: "根据 IDS 查询工单模板组成功",
-		Data: RetrieveTemplateGroup{
-			TemplateGroups: slice.Map(gs, func(idx int, src domain.TemplateGroup) TemplateGroup {
-				return TemplateGroup{
-					Id:   src.Id,
-					Name: src.Name,
-					Icon: src.Icon,
-				}
-			}),
-		},
 	}, nil
 }
 

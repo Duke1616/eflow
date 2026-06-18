@@ -98,20 +98,14 @@ type ITemplateCoreDAO interface {
 	DeleteTemplate(ctx context.Context, id int64) (int64, error)
 	// UpdateTemplate 覆盖更新物理层中的模板基本字段配置，返回受影响行数
 	UpdateTemplate(ctx context.Context, t Template) (int64, error)
-	// ListTemplate 根据分页大小及偏移量获取工单模板列表，groupId 大于 0 时按分组过滤（按创建时间逆序）
-	ListTemplate(ctx context.Context, groupId int64, offset, limit int64) ([]Template, error)
-	// ListSystemTemplates 检索获取系统中所有由系统自身创建（非企微同步）的激活工单模板
-	ListSystemTemplates(ctx context.Context) ([]Template, error)
-	// Count 统计当前租户空间下物理模板的总记录数，groupId 大于 0 时按分组过滤
-	Count(ctx context.Context, groupId int64) (int64, error)
+	// ListTemplate 根据分页大小及偏移量获取工单模板列表，groupId 大于 0 时按分组过滤，keyword 非空时按名称或描述模糊搜索（按创建时间逆序）
+	ListTemplate(ctx context.Context, groupId int64, keyword string, offset, limit int64) ([]Template, error)
+	// Count 统计当前租户空间下物理模板的总记录数，groupId 大于 0 时按分组过滤，keyword 非空时按名称或描述模糊搜索
+	Count(ctx context.Context, groupId int64, keyword string) (int64, error)
 	// FindByTemplateIds 根据一批指定的主键 ID 批量检索对应的模板记录列表
 	FindByTemplateIds(ctx context.Context, ids []int64) ([]Template, error)
 	// GetByWorkflowId 检索与指定的工作流流程定义 ID 绑定的所有工单模板列表
 	GetByWorkflowId(ctx context.Context, workflowId int64) ([]Template, error)
-	// FindByKeyword 按照关键字（匹配模板名及描述）执行模板列表的分页模糊过滤检索
-	FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]Template, error)
-	// CountByKeyword 计算符合指定关键字模糊匹配过滤特征的模板总记录数
-	CountByKeyword(ctx context.Context, keyword string) (int64, error)
 }
 
 // ITemplateGroupDAO 模板分类分组物理数据访问接口
@@ -126,8 +120,6 @@ type ITemplateGroupDAO interface {
 	ListGroup(ctx context.Context, offset, limit int64) ([]TemplateGroup, error)
 	// CountGroup 统计系统当前可用的模板分类分组总条数
 	CountGroup(ctx context.Context) (int64, error)
-	// ListGroupsByIds 根据指定的分类主键 ID 列表批量拉取对应分类详情集合
-	ListGroupsByIds(ctx context.Context, ids []int64) ([]TemplateGroup, error)
 	// ListGroupSummaries 获取模板分组摘要及每组模板数量
 	ListGroupSummaries(ctx context.Context) ([]TemplateGroupSummary, error)
 }
@@ -212,11 +204,15 @@ func (g *gormTemplateDAO) UpdateTemplate(ctx context.Context, t Template) (int64
 	return result.RowsAffected, result.Error
 }
 
-func (g *gormTemplateDAO) ListTemplate(ctx context.Context, groupId int64, offset, limit int64) ([]Template, error) {
+func (g *gormTemplateDAO) ListTemplate(ctx context.Context, groupId int64, keyword string, offset, limit int64) ([]Template, error) {
 	var ts []Template
 	query := g.db.WithContext(ctx)
 	if groupId > 0 {
 		query = query.Where("group_id = ?", groupId)
+	}
+	if keyword != "" {
+		likePattern := "%" + keyword + "%"
+		query = query.Where("name LIKE ? OR `desc` LIKE ?", likePattern, likePattern)
 	}
 	err := query.Order("ctime desc").
 		Limit(int(limit)).
@@ -225,19 +221,15 @@ func (g *gormTemplateDAO) ListTemplate(ctx context.Context, groupId int64, offse
 	return ts, err
 }
 
-func (g *gormTemplateDAO) ListSystemTemplates(ctx context.Context) ([]Template, error) {
-	var ts []Template
-	err := g.db.WithContext(ctx).
-		Where("create_type = ?", 1). // 1 为 SystemCreate 属性
-		Find(&ts).Error
-	return ts, err
-}
-
-func (g *gormTemplateDAO) Count(ctx context.Context, groupId int64) (int64, error) {
+func (g *gormTemplateDAO) Count(ctx context.Context, groupId int64, keyword string) (int64, error) {
 	var total int64
 	query := g.db.WithContext(ctx).Model(&Template{})
 	if groupId > 0 {
 		query = query.Where("group_id = ?", groupId)
+	}
+	if keyword != "" {
+		likePattern := "%" + keyword + "%"
+		query = query.Where("name LIKE ? OR `desc` LIKE ?", likePattern, likePattern)
 	}
 	err := query.Count(&total).Error
 	return total, err
@@ -259,31 +251,6 @@ func (g *gormTemplateDAO) GetByWorkflowId(ctx context.Context, workflowId int64)
 		Order("ctime desc").
 		Find(&ts).Error
 	return ts, err
-}
-
-func (g *gormTemplateDAO) FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]Template, error) {
-	var ts []Template
-	query := g.db.WithContext(ctx)
-	if keyword != "" {
-		likePattern := "%" + keyword + "%"
-		query = query.Where("name LIKE ? OR `desc` LIKE ?", likePattern, likePattern)
-	}
-	err := query.Order("ctime desc").
-		Limit(int(limit)).
-		Offset(int(offset)).
-		Find(&ts).Error
-	return ts, err
-}
-
-func (g *gormTemplateDAO) CountByKeyword(ctx context.Context, keyword string) (int64, error) {
-	var total int64
-	query := g.db.WithContext(ctx).Model(&Template{})
-	if keyword != "" {
-		likePattern := "%" + keyword + "%"
-		query = query.Where("name LIKE ? OR `desc` LIKE ?", likePattern, likePattern)
-	}
-	err := query.Count(&total).Error
-	return total, err
 }
 
 // --- TemplateGroup 分组物理访问实现 ---
@@ -338,15 +305,6 @@ func (g *gormTemplateDAO) CountGroup(ctx context.Context) (int64, error) {
 	var total int64
 	err := g.db.WithContext(ctx).Model(&TemplateGroup{}).Count(&total).Error
 	return total, err
-}
-
-func (g *gormTemplateDAO) ListGroupsByIds(ctx context.Context, ids []int64) ([]TemplateGroup, error) {
-	var gs []TemplateGroup
-	if len(ids) == 0 {
-		return gs, nil
-	}
-	err := g.db.WithContext(ctx).Where("id IN ?", ids).Find(&gs).Error
-	return gs, err
 }
 
 func (g *gormTemplateDAO) ListGroupSummaries(ctx context.Context) ([]TemplateGroupSummary, error) {

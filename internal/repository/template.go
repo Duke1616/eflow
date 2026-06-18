@@ -3,13 +3,11 @@ package repository
 import (
 	"context"
 	"errors"
-	"sort"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/pkg/sqlx"
 	"github.com/ecodeclub/ekit/slice"
-	"github.com/samber/lo"
 	"github.com/xen0n/go-workwx"
 	"gorm.io/gorm"
 )
@@ -37,20 +35,14 @@ type ITemplateCoreRepository interface {
 	DetailTemplateByExternalTemplateId(ctx context.Context, externalId string) (domain.Template, error)
 	// UpdateTemplate 覆盖更新当前模板相关的字段配置，返回受影响行数
 	UpdateTemplate(ctx context.Context, req domain.Template) (int64, error)
-	// ListTemplate 分页拉取工单模板列表，groupId 大于 0 时按分组过滤，按照时间逆序
-	ListTemplate(ctx context.Context, groupId int64, offset, limit int64) ([]domain.Template, error)
-	// Total 统计当前租户空间下模板总数，groupId 大于 0 时按分组过滤
-	Total(ctx context.Context, groupId int64) (int64, error)
-	// Pipeline 获取系统默认模板，并在 Repository 内部通过 lo.GroupBy 内存聚合并联查分类分组信息后排好序输出组合列表
-	Pipeline(ctx context.Context) ([]domain.TemplateCombination, error)
+	// ListTemplate 分页拉取工单模板列表，groupId 大于 0 时按分组过滤，keyword 非空时按名称或描述模糊搜索，按照时间逆序
+	ListTemplate(ctx context.Context, groupId int64, keyword string, offset, limit int64) ([]domain.Template, error)
+	// Total 统计当前租户空间下模板总数，groupId 大于 0 时按分组过滤，keyword 非空时按名称或描述模糊搜索
+	Total(ctx context.Context, groupId int64, keyword string) (int64, error)
 	// FindByTemplateIds 根据一批指定的主键 ID 列表批量拉取模板详情集合
 	FindByTemplateIds(ctx context.Context, ids []int64) ([]domain.Template, error)
 	// GetByWorkflowId 获取某个特定工作流流程关联的所有工单模板
 	GetByWorkflowId(ctx context.Context, workflowId int64) ([]domain.Template, error)
-	// FindByKeyword 模糊匹配模板名称及描述，进行模板列表的分页模糊检索
-	FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Template, error)
-	// CountByKeyword 计算含有对应关键字特征的工单模板总条数
-	CountByKeyword(ctx context.Context, keyword string) (int64, error)
 }
 
 // ITemplateGroupRepository 模板分类分组防腐仓储子接口
@@ -70,8 +62,6 @@ type ITemplateGroupRepository interface {
 	// TotalGroup 统计系统当前有效的模板分组总条数
 	TotalGroup(ctx context.Context) (int64, error)
 
-	// ListGroupsByIds 根据主键 ID 列表批量获取分类分组列表
-	ListGroupsByIds(ctx context.Context, ids []int64) ([]domain.TemplateGroup, error)
 	// ListGroupSummaries 获取模板分组摘要及每组模板数量
 	ListGroupSummaries(ctx context.Context) ([]domain.TemplateGroupSummary, error)
 }
@@ -149,8 +139,8 @@ func (repo *templateRepository) UpdateTemplate(ctx context.Context, req domain.T
 	return repo.dao.UpdateTemplate(ctx, repo.toEntity(req))
 }
 
-func (repo *templateRepository) ListTemplate(ctx context.Context, groupId int64, offset, limit int64) ([]domain.Template, error) {
-	ts, err := repo.dao.ListTemplate(ctx, groupId, offset, limit)
+func (repo *templateRepository) ListTemplate(ctx context.Context, groupId int64, keyword string, offset, limit int64) ([]domain.Template, error) {
+	ts, err := repo.dao.ListTemplate(ctx, groupId, keyword, offset, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -159,52 +149,8 @@ func (repo *templateRepository) ListTemplate(ctx context.Context, groupId int64,
 	}), nil
 }
 
-func (repo *templateRepository) Total(ctx context.Context, groupId int64) (int64, error) {
-	return repo.dao.Count(ctx, groupId)
-}
-
-func (repo *templateRepository) Pipeline(ctx context.Context) ([]domain.TemplateCombination, error) {
-	// 1. 获取所有 CreateType = 1 (SystemCreate) 的模板数据
-	ts, err := repo.dao.ListSystemTemplates(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// 2. 在 Go 内存中借助 samber/lo.GroupBy 对模板数据按 GroupId 进行高性能分组聚合
-	grouped := lo.GroupBy(ts, func(t dao.Template) int64 {
-		return t.GroupId
-	})
-
-	// 3. 提取所有关联的分组 GroupId，并进行批量联查，规避循环单查的数据库压力
-	groupIds := lo.Keys(grouped)
-	groups, err := repo.dao.ListGroupsByIds(ctx, groupIds)
-	if err != nil {
-		return nil, err
-	}
-	groupMap := slice.ToMap(groups, func(element dao.TemplateGroup) int64 {
-		return element.Id
-	})
-
-	// 4. 将分组和模板集合在内存中完成无缝聚合拼接，补齐 Name 与 Icon 信息
-	combinations := lo.MapToSlice(grouped, func(groupId int64, list []dao.Template) domain.TemplateCombination {
-		gInfo, _ := groupMap[groupId]
-		return domain.TemplateCombination{
-			Id:    groupId,
-			Name:  gInfo.Name,
-			Icon:  gInfo.Icon,
-			Total: len(list),
-			Templates: slice.Map(list, func(idx int, src dao.Template) domain.Template {
-				return repo.toDomain(src)
-			}),
-		}
-	})
-
-	// 5. 沉淀排序逻辑：在 Repository 中按分类 ID 升序物理排序，消除 Web 表现层中残留的排序逻辑，以保障响应数据确定性
-	sort.Slice(combinations, func(i, j int) bool {
-		return combinations[i].Id < combinations[j].Id
-	})
-
-	return combinations, nil
+func (repo *templateRepository) Total(ctx context.Context, groupId int64, keyword string) (int64, error) {
+	return repo.dao.Count(ctx, groupId, keyword)
 }
 
 func (repo *templateRepository) FindByTemplateIds(ctx context.Context, ids []int64) ([]domain.Template, error) {
@@ -225,20 +171,6 @@ func (repo *templateRepository) GetByWorkflowId(ctx context.Context, workflowId 
 	return slice.Map(ts, func(idx int, src dao.Template) domain.Template {
 		return repo.toDomain(src)
 	}), nil
-}
-
-func (repo *templateRepository) FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Template, error) {
-	ts, err := repo.dao.FindByKeyword(ctx, keyword, offset, limit)
-	if err != nil {
-		return nil, err
-	}
-	return slice.Map(ts, func(idx int, src dao.Template) domain.Template {
-		return repo.toDomain(src)
-	}), nil
-}
-
-func (repo *templateRepository) CountByKeyword(ctx context.Context, keyword string) (int64, error) {
-	return repo.dao.CountByKeyword(ctx, keyword)
 }
 
 func (repo *templateRepository) ToggleFavorite(ctx context.Context, userId int64, templateId int64) (bool, error) {
@@ -283,16 +215,6 @@ func (repo *templateRepository) ListGroup(ctx context.Context, offset, limit int
 
 func (repo *templateRepository) TotalGroup(ctx context.Context) (int64, error) {
 	return repo.dao.CountGroup(ctx) // 使用解耦拆分后的 Group 专用 Count
-}
-
-func (repo *templateRepository) ListGroupsByIds(ctx context.Context, ids []int64) ([]domain.TemplateGroup, error) {
-	gs, err := repo.dao.ListGroupsByIds(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-	return slice.Map(gs, func(idx int, src dao.TemplateGroup) domain.TemplateGroup {
-		return repo.toGroupDomain(src)
-	}), nil
 }
 
 func (repo *templateRepository) ListGroupSummaries(ctx context.Context) ([]domain.TemplateGroupSummary, error) {

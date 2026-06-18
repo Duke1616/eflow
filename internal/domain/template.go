@@ -56,16 +56,6 @@ type TemplateGroupSummary struct {
 	Total int64  // 分组下模板数量
 }
 
-// TemplateCombination 聚合结构，用户在列表页中获取组以及组下的模板组合
-type TemplateCombination struct {
-	Id         int64      // 分组 ID
-	Name       string     // 分组名称
-	Icon       string     // 分组图标
-	Total      int        // 分组下的模板总数
-	CreateType CreateType // 组合的创建类型
-	Templates  []Template // 分组包含的模板列表
-}
-
 // WechatInfo 用于企业微信与本地进行模板绑定和信息交互的承载对象
 type WechatInfo struct {
 	TemplateId   string // 微信模板唯一 ID

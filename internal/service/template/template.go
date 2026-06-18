@@ -28,17 +28,13 @@ type ITemplateCoreService interface {
 	// DetailTemplateByExternalTemplateId 通过外部关联系统 ID (如飞书、企业微信的模板 UUID) 获取对应模板配置
 	DetailTemplateByExternalTemplateId(ctx context.Context, externalId string) (domain.Template, error)
 	// ListTemplate 分页获取所有可用工单模板列表，并返回包含所有模板的总记录数目
-	ListTemplate(ctx context.Context, groupId int64, offset, limit int64) ([]domain.Template, int64, error)
+	ListTemplate(ctx context.Context, groupId int64, keyword string, offset, limit int64) ([]domain.Template, int64, error)
 	// DeleteTemplate 删除指定的工单模板实体，返回被成功删除的记录条数
 	DeleteTemplate(ctx context.Context, id int64) (int64, error)
 	// UpdateTemplate 覆盖更新替换已有的工单模板属性（如规则、选项等）
 	UpdateTemplate(ctx context.Context, t domain.Template) (int64, error)
-	// Pipeline 负责以组别结构的形式聚合返回不同组合分类的模板列表（已在仓储层内存优化），供工作流选单展示
-	Pipeline(ctx context.Context) ([]domain.TemplateCombination, error)
 	// GetByWorkflowId 获取关联了某个具体工作流流程定义 ID 的模板清单列表
 	GetByWorkflowId(ctx context.Context, workflowId int64) ([]domain.Template, error)
-	// FindByKeyword 输入过滤词对模板的标题或备注进行模糊查询，并分页反馈数据和符合条件的条数汇总
-	FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Template, int64, error)
 }
 
 // ITemplateGroupService 模板分类分组业务子接口
@@ -54,9 +50,6 @@ type ITemplateGroupService interface {
 
 	// ListGroup 分页获取模板的分类分组列表
 	ListGroup(ctx context.Context, offset, limit int64) ([]domain.TemplateGroup, int64, error)
-
-	// ListGroupsByIds 根据主键 ID 列表批量获取分类分组列表
-	ListGroupsByIds(ctx context.Context, ids []int64) ([]domain.TemplateGroup, error)
 
 	// ListGroupSummaries 获取模板分组摘要及每组模板数量
 	ListGroupSummaries(ctx context.Context) ([]domain.TemplateGroupSummary, error)
@@ -161,7 +154,7 @@ func (s *templateService) DetailTemplate(ctx context.Context, id int64) (domain.
 	return s.repo.DetailTemplate(ctx, id)
 }
 
-func (s *templateService) ListTemplate(ctx context.Context, groupId int64, offset, limit int64) ([]domain.Template, int64, error) {
+func (s *templateService) ListTemplate(ctx context.Context, groupId int64, keyword string, offset, limit int64) ([]domain.Template, int64, error) {
 	var (
 		eg    errgroup.Group
 		ts    []domain.Template
@@ -169,13 +162,13 @@ func (s *templateService) ListTemplate(ctx context.Context, groupId int64, offse
 	)
 	eg.Go(func() error {
 		var err error
-		ts, err = s.repo.ListTemplate(ctx, groupId, offset, limit)
+		ts, err = s.repo.ListTemplate(ctx, groupId, keyword, offset, limit)
 		return err
 	})
 
 	eg.Go(func() error {
 		var err error
-		total, err = s.repo.Total(ctx, groupId)
+		total, err = s.repo.Total(ctx, groupId, keyword)
 		return err
 	})
 
@@ -187,34 +180,6 @@ func (s *templateService) ListTemplate(ctx context.Context, groupId int64, offse
 
 func (s *templateService) DeleteTemplate(ctx context.Context, id int64) (int64, error) {
 	return s.repo.DeleteTemplate(ctx, id)
-}
-
-func (s *templateService) Pipeline(ctx context.Context) ([]domain.TemplateCombination, error) {
-	return s.repo.Pipeline(ctx)
-}
-
-func (s *templateService) FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Template, int64, error) {
-	var (
-		eg    errgroup.Group
-		ts    []domain.Template
-		total int64
-	)
-	eg.Go(func() error {
-		var err error
-		ts, err = s.repo.FindByKeyword(ctx, keyword, offset, limit)
-		return err
-	})
-
-	eg.Go(func() error {
-		var err error
-		total, err = s.repo.CountByKeyword(ctx, keyword)
-		return err
-	})
-
-	if err := eg.Wait(); err != nil {
-		return ts, total, err
-	}
-	return ts, total, nil
 }
 
 // --- TemplateGroup 业务逻辑实现 ---
@@ -253,10 +218,6 @@ func (s *templateService) ListGroup(ctx context.Context, offset, limit int64) ([
 		return gs, total, err
 	}
 	return gs, total, nil
-}
-
-func (s *templateService) ListGroupsByIds(ctx context.Context, ids []int64) ([]domain.TemplateGroup, error) {
-	return s.repo.ListGroupsByIds(ctx, ids)
 }
 
 func (s *templateService) ListGroupSummaries(ctx context.Context) ([]domain.TemplateGroupSummary, error) {
