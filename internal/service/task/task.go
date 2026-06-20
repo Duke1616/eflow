@@ -429,7 +429,7 @@ func (s *taskService) prepareTask(ctx context.Context, task domain.Task, ticket 
 	pCtx, err := s.buildTaskProcessContext(ctx, task)
 	if err != nil {
 		// 统一在此处处理前置数据拉取的异常状态记录
-		if prepErr, ok := err.(*taskPrepareError); ok {
+		if prepErr, ok := errors.AsType[*taskPrepareError](err); ok {
 			_ = s.handleTaskError(ctx, task.Id, prepErr.triggerPosition, prepErr.status, prepErr.err)
 		}
 		return domain.Task{}, err

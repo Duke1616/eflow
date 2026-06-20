@@ -30,21 +30,23 @@ func (h *Handler) PublicRoutes(server *gin.Engine) {
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/dispatch")
 	g.POST("/create", h.Capability("创建自动派发", "add").
-		Needs("ticket:workflow:view_codebook_uids", "task:runner:view_by_ids").
+		Needs("ticket:workflow:view_automation_codebooks", "task:runner:view_by_ids").
 		Handle(ginx.B[CreateDispatchReq](h.Create)),
 	)
 	g.POST("/update", h.Capability("修改自动派发", "edit").
-		Needs("ticket:workflow:view_codebook_uids", "task:runner:view_by_ids").
+		Needs("ticket:workflow:view_automation_codebooks", "task:runner:view_by_ids").
 		Handle(ginx.B[UpdateDispatchReq](h.Update)),
 	)
 	g.POST("/delete", h.Capability("删除自动派发", "delete").
 		Handle(ginx.B[DeleteDispatchReq](h.Delete)),
 	)
 	g.POST("/sync", h.Capability("同步自动派发", "sync").
+		Needs("ticket:template:view", "ticket:template:view_group_summary").
 		Handle(ginx.B[SyncDispatchReq](h.Sync)),
 	)
 	g.POST("/list/by_template_id", h.Capability("自动派发列表", "view").
-		Needs("ticket:template:get", "task:runner:view_by_ids").
+		Needs("ticket:template:get", "task:runner:view_by_codebook_uid",
+			"ticket:workflow:view_automation_codebooks").
 		Handle(ginx.B[ListByTemplateId](h.ListByTemplateId)),
 	)
 }
@@ -91,19 +93,14 @@ func (h *Handler) ListByTemplateId(ctx *ginx.Context, req ListByTemplateId) (gin
 }
 
 func (h *Handler) Sync(ctx *ginx.Context, req SyncDispatchReq) (ginx.Result, error) {
-	ds, total, err := h.svc.ListByTemplateId(ctx.Context, 0, 100, req.SyncTemplateId)
+	count, total, err := h.svc.Sync(ctx.Context, req.TemplateId, req.SyncTemplateId)
+	if err != nil {
+		return systemErrorResult, err
+	}
 	if total == 0 {
 		return ginx.Result{
 			Msg: "没有可同步数据",
 		}, nil
-	}
-
-	if err != nil {
-		return systemErrorResult, err
-	}
-	count, err := h.svc.Sync(ctx.Context, req.TemplateId, ds)
-	if err != nil {
-		return systemErrorResult, err
 	}
 
 	return ginx.Result{

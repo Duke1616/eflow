@@ -37,7 +37,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.W(h.DetailTemplate)),
 	)
 	g.POST("/list", h.Capability("工单模板列表", "view").
-		Needs("ticket:workflow:view_by_ids", "ticket:tempalte:view_group_summary").
+		Needs("ticket:workflow:view_by_ids", "ticket:template:view_group_summary").
 		Handle(ginx.B[ListTemplateReq](h.ListTemplate)),
 	)
 

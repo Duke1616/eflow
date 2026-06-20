@@ -18,8 +18,8 @@ type Service interface {
 	Delete(ctx context.Context, id int64) (int64, error)
 	// ListByTemplateId 依据模板 ID 分页获取所有的自动派发规则与总计数，采用 errgroup 并发优化查询速度
 	ListByTemplateId(ctx context.Context, offset, limit int64, templateId int64) ([]domain.Dispatch, int64, error)
-	// Sync 全量同步指定模板的自动派发规则
-	Sync(ctx context.Context, templateId int64, ds []domain.Dispatch) (int64, error)
+	// Sync 全量同步来源模板的自动派发规则到目标模板，返回新增条数和来源总条数
+	Sync(ctx context.Context, templateId, syncTemplateId int64) (int64, int64, error)
 }
 
 type service struct {
@@ -27,8 +27,21 @@ type service struct {
 }
 
 // Sync 执行批量数据同步
-func (s *service) Sync(ctx context.Context, templateId int64, ds []domain.Dispatch) (int64, error) {
-	return s.repo.Sync(ctx, templateId, ds)
+func (s *service) Sync(ctx context.Context, templateId, syncTemplateId int64) (int64, int64, error) {
+	total, err := s.repo.CountByTemplateId(ctx, syncTemplateId)
+	if err != nil {
+		return 0, 0, err
+	}
+	if total == 0 {
+		return 0, 0, nil
+	}
+
+	ds, err := s.repo.ListByTemplateId(ctx, 0, total, syncTemplateId)
+	if err != nil {
+		return 0, total, err
+	}
+	count, err := s.repo.Sync(ctx, templateId, ds)
+	return count, total, err
 }
 
 // Delete 删除指定自动派发规则
