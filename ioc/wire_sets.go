@@ -165,7 +165,7 @@ var (
 		// 导出具体的 Client，直接满足底层 Service 的注入需求！
 		wire.FieldsOf(new(*ecmdb.ECMDBClient), "RotaClient"),
 		wire.FieldsOf(new(*eiam.EIAMClient), "UserClient"),
-		wire.FieldsOf(new(*etask.ETASKClient), "TaskClient", "ExecutorClient", "CodebookClient", "RunnerClient"),
+		wire.FieldsOf(new(*etask.ETASKClient), "TaskClient", "ExecutorClient", "Client", "RunnerClient"),
 		wire.FieldsOf(new(*ealert.EALERTClient), "TeamClient", "NotificationClient", "TemplateClient"),
 	)
 	// WebSet Web 服务 Provider 集合

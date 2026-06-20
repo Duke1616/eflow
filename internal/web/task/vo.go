@@ -24,7 +24,7 @@ type Task struct {
 	Id              int64  `json:"id"`
 	TicketID        int64  `json:"ticket_id"`
 	Kind            string `json:"kind"`
-	CodebookUid     string `json:"codebook_uid"`
+	CodebookID      int64  `json:"codebook_id"`
 	Target          string `json:"target"`
 	Handler         string `json:"handler"`
 	Status          Status `json:"status"`

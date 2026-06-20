@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
@@ -372,17 +373,17 @@ func (s *taskService) buildTaskProcessContext(ctx context.Context, task domain.T
 	// 4. 动态匹配或静态查找执行节点 Runner 实体
 	s.logger.Info("准备匹配 Runner 执行器",
 		elog.Int64("taskId", task.Id),
-		elog.String("codebookUid", automation.CodebookUid),
+		elog.Int64("codebookId", automation.CodebookId),
 		elog.String("tag", automation.Tag),
 	)
-	runnerResp, err := s.runnerCli.FindRunnerByCodebookUidAndTag(ctx, &runnerv1.FindRunnerByCodebookUidAndTagRequest{
-		CodebookUid: automation.CodebookUid,
-		Tag:         automation.Tag,
+	runnerResp, err := s.runnerCli.FindRunnerByCodebookIdAndTag(ctx, &runnerv1.FindRunnerByCodebookIdAndTagRequest{
+		CodebookId: automation.CodebookId,
+		Tag:        automation.Tag,
 	})
 	if err != nil {
 		s.logger.Error("获取执行器 Runner 失败",
 			elog.Int64("taskId", task.Id),
-			elog.String("codebookUid", automation.CodebookUid),
+			elog.Int64("codebookId", automation.CodebookId),
 			elog.String("tag", automation.Tag),
 			elog.FieldErr(err),
 		)
@@ -404,8 +405,8 @@ func (s *taskService) buildTaskProcessContext(ctx context.Context, task domain.T
 	)
 
 	// 5. 获取代码模板 Codebook
-	codebookResp, err := s.codebookCli.GetCodebookByIdentifier(ctx, &codebookv1.GetCodebookByIdentifierRequest{
-		Identifier: runner.GetCodebookUid(),
+	codebookResp, err := s.codebookCli.GetCodebookByID(ctx, &codebookv1.GetCodebookByIDRequest{
+		Id: runner.GetCodebookId(),
 	})
 	if err != nil {
 		return nil, &taskPrepareError{
@@ -442,9 +443,9 @@ func (s *taskService) prepareTask(ctx context.Context, task domain.Task, ticket 
 	}
 
 	task.WorkflowId = pCtx.workflowID
-	task.CodebookUid = pCtx.codebook.GetIdentifier()
+	task.CodebookId = pCtx.codebook.GetId()
 	task.Code = pCtx.codebook.GetCode()
-	task.Language = pCtx.codebook.GetLanguage()
+	task.Language = getLanguageFromName(pCtx.codebook.GetName())
 	task.Kind = domain.Kind(pCtx.runner.GetKind())
 	task.Target = pCtx.runner.GetTarget()
 	task.Handler = pCtx.runner.GetHandler()
@@ -646,4 +647,15 @@ func (s *taskService) prepareUserArgs(ctx context.Context, ticket domain.Ticket)
 	userInfoJSON, _ := json.Marshal(resp.User)
 	args["user_info"] = string(userInfoJSON)
 	return args, nil
+}
+
+func getLanguageFromName(name string) string {
+	name = strings.ToLower(name)
+	if strings.HasSuffix(name, ".sh") {
+		return "shell"
+	}
+	if strings.HasSuffix(name, ".py") {
+		return "python"
+	}
+	return "python"
 }

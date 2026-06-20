@@ -69,6 +69,11 @@ func runMigrate(force bool) {
 			easyEngine.DB = db
 			return easyEngine.DatabaseInitialize()
 		}),
+		migration.WithPostHooks(
+			migrations.ResolveTaskCodebookIDs,
+			migrations.ResolveWorkflowCodebookIDs,
+			migrations.ResolveWorkflowInstanceFlowCodebookIDs,
+		),
 	)
 
 	if err = runner.Run(ctx); err != nil {

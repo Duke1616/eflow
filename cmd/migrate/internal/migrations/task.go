@@ -74,7 +74,6 @@ func (taskMigrator) Convert(src mongoTask) dao.Task {
 		CurrentNodeId:   src.CurrentNodeID,
 		TriggerPosition: src.TriggerPosition,
 		WorkflowId:      src.WorkflowID,
-		CodebookUid:     src.CodebookUID,
 		Code:            src.Code,
 		Language:        src.Language,
 		Args:            sqlx.JsonField[domain.TaskArgs]{Val: src.Args, Valid: src.Args != nil},

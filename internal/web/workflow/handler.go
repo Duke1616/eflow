@@ -65,7 +65,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	)
 	g.POST("/automation/codebooks", h.Capability("查询流程自动化脚本模板", "view_automation_codebooks").
 		NoSync().
-		Handle(ginx.B[AutomationCodebookUidsReq](h.AutomationCodebookUids)),
+		Handle(ginx.B[AutomationCodebookIdsReq](h.AutomationCodebookIds)),
 	)
 	g.GET("/detail/:id", h.Capability("流程详情", "get").
 		Handle(ginx.W(h.Detail)),
@@ -153,17 +153,17 @@ func (h *Handler) FindByIds(ctx *ginx.Context, req FindByIdsReq) (ginx.Result, e
 	}, nil
 }
 
-// AutomationCodebookUids 查询工作流画布中自动化节点引用的脚本模板 UID
-func (h *Handler) AutomationCodebookUids(ctx *ginx.Context, req AutomationCodebookUidsReq) (ginx.Result, error) {
-	codebookUids, err := h.svc.GetAutomationCodebookUids(ctx.Context, req.WorkflowId)
+// AutomationCodebookIds 查询工作流画布中自动化节点引用的脚本模板 ID
+func (h *Handler) AutomationCodebookIds(ctx *ginx.Context, req AutomationCodebookIdsReq) (ginx.Result, error) {
+	codebookIds, err := h.svc.GetAutomationCodebookIds(ctx.Context, req.WorkflowId)
 	if err != nil {
 		return SystemErrorResult, err
 	}
 
 	return ginx.Result{
 		Msg: "查询流程自动化脚本模板成功",
-		Data: RetrieveAutomationCodebookUids{
-			AutomationCodebooks: codebookUids,
+		Data: RetrieveAutomationCodebookIds{
+			AutomationCodebooks: codebookIds,
 		},
 	}, nil
 }

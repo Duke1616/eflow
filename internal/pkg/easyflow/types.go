@@ -379,7 +379,7 @@ type ConditionProperty struct {
 
 type AutomationProperty struct {
 	Name          string  `json:"name"`
-	CodebookUid   string  `json:"codebook_uid"`   // 代码库UID
+	CodebookId    int64   `json:"codebook_id"`    // 代码库ID
 	Tag           string  `json:"tag"`            // runner tags
 	IsNotify      bool    `json:"is_notify"`      // 是否开始消息通知
 	Unit          uint8   `json:"unit"`           // 定时执行：单位

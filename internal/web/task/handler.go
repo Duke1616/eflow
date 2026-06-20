@@ -152,7 +152,7 @@ func (h *Handler) toTaskVo(req domain.Task) Task {
 		Language:        req.Language,
 		Code:            req.Code,
 		Kind:            string(req.Kind),
-		CodebookUid:     req.CodebookUid,
+		CodebookID:      req.CodebookId,
 		Target:          req.Target,
 		Handler:         req.Handler,
 		Status:          Status(req.Status),

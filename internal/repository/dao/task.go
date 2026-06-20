@@ -70,7 +70,7 @@ type Task struct {
 	CurrentNodeId   string                             `gorm:"column:current_node_id;type:varchar(128);index;comment:'当前自动化节点ID'"`
 	TriggerPosition string                             `gorm:"column:trigger_position;type:varchar(255);comment:'最近状态触发位置'"`
 	WorkflowId      int64                              `gorm:"column:workflow_id;type:bigint;index;comment:'关联工作流定义ID'"`
-	CodebookUid     string                             `gorm:"column:codebook_uid;type:varchar(64);index;comment:'关联脚本库模板UID'"`
+	CodebookId      int64                              `gorm:"column:codebook_id;type:bigint;index;comment:'关联脚本库模板ID'"`
 	Code            string                             `gorm:"column:code;type:text;comment:'运行脚本源码快照'"`
 	Language        string                             `gorm:"column:language;type:varchar(32);comment:'脚本语言(python/shell等)'"`
 	Args            sqlx.JsonField[domain.TaskArgs]    `gorm:"column:args;type:json;comment:'流程变量透传临时参数json'"`
@@ -123,7 +123,7 @@ func (g *gormTaskDAO) UpdateTask(ctx context.Context, req Task) (int64, error) {
 		"current_node_id":  req.CurrentNodeId,
 		"trigger_position": req.TriggerPosition,
 		"workflow_id":      req.WorkflowId,
-		"codebook_uid":     req.CodebookUid,
+		"codebook_id":     req.CodebookId,
 		"code":             req.Code,
 		"language":         req.Language,
 		"args":             req.Args,

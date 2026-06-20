@@ -45,7 +45,7 @@ func (e *executeService) Dispatch(ctx context.Context, task domain.Task) error {
 	// 使用 SDK 标准方法注入 biz_id
 	ctx = bizid.AppendToOutgoing(ctx, bizid.Alert)
 	taskResult, err := e.grpcClient.CreateTask(ctx, &taskv1.CreateTaskRequest{
-		Name:     fmt.Sprintf("%s_%s", task.CodebookUid, taskHash),
+		Name:     fmt.Sprintf("%d_%s", task.CodebookId, taskHash),
 		Type:     taskv1.TaskType_ONE_TIME,
 		CronExpr: e.calculateCronExpr(task),
 		GrpcConfig: &taskv1.GrpcConfig{
@@ -72,7 +72,7 @@ func (e *executeService) Dispatch(ctx context.Context, task domain.Task) error {
 	case taskv1.TaskErrorCode_DUPLICATE_NAME:
 		// 处理业务冲突：如果名称已存在（索引冲突），尝试通过 Retry 接口获取 ID 并触发任务
 		retryResp, retryErr := e.grpcClient.RetryTaskByName(ctx, &taskv1.RetryTaskByNameRequest{
-			Name: fmt.Sprintf("%s_%s", task.CodebookUid, taskHash),
+			Name: fmt.Sprintf("%d_%s", task.CodebookId, taskHash),
 		})
 		if retryErr != nil {
 			e.logger.Error("任务已存在且尝试重试获取 ID 失败:", elog.FieldErr(retryErr), elog.Int64("任务ID", task.Id))
