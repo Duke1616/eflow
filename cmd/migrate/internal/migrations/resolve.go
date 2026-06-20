@@ -6,9 +6,9 @@ import (
 	"log"
 	"strings"
 
-	"github.com/Duke1616/eiam/pkg/migration"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository/dao"
+	"github.com/Duke1616/eiam/pkg/migration"
 	"go.mongodb.org/mongo-driver/bson"
 	"gorm.io/gorm"
 )
@@ -93,12 +93,10 @@ func updateFlowNodesCodebookIDs(nodes []domain.FlowNode, lookup map[string]int64
 	for i, node := range nodes {
 		props, ok := node["properties"].(map[string]any)
 		if !ok {
-			log.Printf("[debug] node properties cast failed: node_id=%v, properties_type=%T", node["id"], node["properties"])
 			continue
 		}
 		uidVal, ok := props["codebook_uid"].(string)
 		if !ok {
-			// 可能有些节点没有 codebook_uid 或者是别的类型节点
 			continue
 		}
 		if cbID, exists := lookup[strings.TrimSpace(uidVal)]; exists {
@@ -106,9 +104,6 @@ func updateFlowNodesCodebookIDs(nodes []domain.FlowNode, lookup map[string]int64
 			delete(props, "codebook_uid")
 			nodes[i]["properties"] = props
 			changed = true
-			log.Printf("[debug] 成功将节点 %v 的 codebook_uid %q 替换为 codebook_id %d", node["id"], uidVal, cbID)
-		} else {
-			log.Printf("[debug] 节点 %v 的 codebook_uid %q 在 lookup 中未找到", node["id"], uidVal)
 		}
 	}
 	return changed
@@ -130,7 +125,6 @@ func ResolveWorkflowCodebookIDs(ctx context.Context, env migration.MigrationEnv)
 	if err := env.MySQLDst.WithContext(ctx).Find(&wfs).Error; err != nil {
 		return fmt.Errorf("查询目标 MySQL 中的 workflow 失败: %w", err)
 	}
-	log.Printf("[debug] 查找到 workflow 记录数: %d", len(wfs))
 
 	return env.MySQLDst.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, wf := range wfs {
@@ -162,7 +156,6 @@ func ResolveWorkflowInstanceFlowCodebookIDs(ctx context.Context, env migration.M
 	if err := env.MySQLDst.WithContext(ctx).Find(&snapshots).Error; err != nil {
 		return fmt.Errorf("查询目标 MySQL 中的 workflow_snapshot 失败: %w", err)
 	}
-	log.Printf("[debug] 查找到 workflow_snapshot 记录数: %d", len(snapshots))
 
 	return env.MySQLDst.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, snap := range snapshots {

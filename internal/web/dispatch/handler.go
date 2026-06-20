@@ -45,7 +45,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.B[SyncDispatchReq](h.Sync)),
 	)
 	g.POST("/list/by_template_id", h.Capability("自动派发列表", "view").
-		Needs("ticket:template:get", "task:runner:view_by_codebook_uid",
+		Needs("ticket:template:get", "task:runner:view_by_codebook_id",
 			"ticket:workflow:view_automation_codebooks").
 		Handle(ginx.B[ListByTemplateId](h.ListByTemplateId)),
 	)
