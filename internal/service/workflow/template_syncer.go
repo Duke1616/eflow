@@ -96,8 +96,7 @@ func (s *templateSyncer) ensureChannelTemplate(ctx context.Context, cfg template
 		return 0, err
 	}
 
-	// 兼容老版本：如果存量模板的 Scope 属性缺失或不是 GLOBAL，自动修复升级
-	if err = s.upgradeScopeIfNeeded(ctx, tmpl); err != nil {
+	if err = s.ensureGlobalScope(ctx, tmpl); err != nil {
 		return 0, err
 	}
 
@@ -121,8 +120,8 @@ func (s *templateSyncer) getTemplate(ctx context.Context, templateId int64) (*te
 	return resp.Template, nil
 }
 
-// upgradeScopeIfNeeded 在老版本模板没有 Scope 属性时进行兼容性修复升级
-func (s *templateSyncer) upgradeScopeIfNeeded(ctx context.Context, tmpl *templatev1.ChannelTemplate) error {
+// ensureGlobalScope 确保默认模板保持全局可见。
+func (s *templateSyncer) ensureGlobalScope(ctx context.Context, tmpl *templatev1.ChannelTemplate) error {
 	if tmpl.Scope == templatev1.Scope_GLOBAL {
 		return nil
 	}
@@ -209,6 +208,7 @@ func (s *templateSyncer) ensureTemplateSet(ctx context.Context, cfg templateConf
 		BizId:       int64(notificationv1.Business_TICKET),
 		Name:        cfg.Name,
 		Description: cfg.Desc,
+		OwnerId:     1,
 		Scope:       templatev1.Scope_GLOBAL,
 		Items: []*templatev1.TemplateSetItem{
 			{
