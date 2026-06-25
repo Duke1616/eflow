@@ -10,7 +10,6 @@ func All() []migration.Migrator {
 		NewTemplateGroupMigrator(),
 		NewTemplateMigrator(),
 		NewWorkflowMigrator(),
-		NewWorkflowNotificationMigrator(),
 		NewWorkflowInstanceFlowMigrator(),
 		NewTicketMigrator(),
 		NewTaskMigrator(),

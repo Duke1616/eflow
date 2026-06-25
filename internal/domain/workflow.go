@@ -33,6 +33,11 @@ const (
 	NotifyTypeRevoke NotifyType = "revoke"
 )
 
+// NotifyTemplateSetKey 生成 ealert 侧默认通知模板集的业务唯一标识。
+func NotifyTemplateSetKey(notifyType NotifyType) string {
+	return "eflow.workflow.notify." + string(notifyType)
+}
+
 // Workflow 工作流流程定义领域模型
 type Workflow struct {
 	Id           int64        // 工作流主键 ID
@@ -57,17 +62,6 @@ type FlowNode map[string]interface{}
 type LogicFlow struct {
 	Edges []FlowEdge // 画布中的所有连线/路由信息
 	Nodes []FlowNode // 画布中的所有审批/自动/开始/结束节点数据
-}
-
-// NotifyBinding 流程节点具体的通知渠道与对应模板的绑定关系领域模型
-type NotifyBinding struct {
-	Id         int64      // 绑定关系唯一 ID
-	WorkflowId int64      // 所属工作流定义 ID
-	NotifyType NotifyType // 触发的通知时机/类型
-	Channel    string     // 通知媒介渠道 (如 LARK_CARD, EMAIL 等)
-	TemplateId int64      // 所绑定的外部通用通知内容模板 ID
-	Ctime      int64      // 创建时间
-	Utime      int64      // 修改时间
 }
 
 // Edge 具体的 LogicFlow 连接线描述，供程序处理审批条件和流转路径时使用

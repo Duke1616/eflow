@@ -161,7 +161,7 @@ func (s *UserTestSuite) TestSend_AlertOrder() {
 	s.mockBase.EXPECT().IsGlobalNotify(gomock.Any()).Return(true)
 
 	s.mockNotiSvc.EXPECT().SendNotification(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, req *notificationv1.SendNotificationRequest, opts ...grpc.CallOption) (*notificationv1.SendNotificationResponse, error) {
-		s.Equal(int64(12345), req.Notification.TemplateId)
+		s.Equal(int64(12345), req.Notification.TemplateSetId)
 		s.Len(req.Notification.Receivers, 1)
 		s.Equal("fs_op1", req.Notification.Receivers[0])
 		return &notificationv1.SendNotificationResponse{}, nil

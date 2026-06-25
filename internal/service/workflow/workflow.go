@@ -39,25 +39,9 @@ type IWorkflowCoreService interface {
 	FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error)
 }
 
-// IWorkflowBindingService 通知渠道绑定管理业务服务子接口
-type IWorkflowBindingService interface {
-	// Create 创建通知与特定模版的绑定记录，返回生成的主键 ID
-	Create(ctx context.Context, n domain.NotifyBinding) (int64, error)
-	// Update 覆盖更新绑定项，返回受影响行数
-	Update(ctx context.Context, n domain.NotifyBinding) (int64, error)
-	// Delete 根据主键 ID 删除绑定记录，返回受影响行数
-	Delete(ctx context.Context, id int64) (int64, error)
-	// List 查询特定工作流 ID 挂载的所有消息绑定详情列表
-	List(ctx context.Context, workflowId int64) ([]domain.NotifyBinding, error)
-	// GetEffective 根据流转时机类型及渠道获取匹配到的生效消息模版配置 (支持特定绑定 -> 全局 0 降级)
-	GetEffective(ctx context.Context, workflowId int64, notifyType domain.NotifyType, channel string) (domain.NotifyBinding, error)
-}
-
-// Service 工作流大业务服务接口 (遵循接口隔离原则进行拆分并借助接口组合以兼容历史嵌套引用)
+// Service 工作流大业务服务接口
 type Service interface {
 	IWorkflowCoreService
-	// AdminNotifyBinding 管理侧通道绑定子接口获取，提供对已有模块嵌套调用的完全向后兼容
-	AdminNotifyBinding() IWorkflowBindingService
 }
 
 type workflowService struct {
@@ -264,36 +248,4 @@ func (s *workflowService) toEasyWorkflow(wf domain.Workflow) easyflow.Workflow {
 			Nodes: nodes,
 		},
 	}
-}
-
-// --- AdminNotifyBinding 兼容嵌套接口返回逻辑 ---
-
-func (s *workflowService) AdminNotifyBinding() IWorkflowBindingService {
-	return &adminNotifyBindingService{
-		repo: s.repo,
-	}
-}
-
-type adminNotifyBindingService struct {
-	repo repository.IWorkflowRepository
-}
-
-func (s *adminNotifyBindingService) Create(ctx context.Context, n domain.NotifyBinding) (int64, error) {
-	return s.repo.CreateBinding(ctx, n)
-}
-
-func (s *adminNotifyBindingService) Update(ctx context.Context, n domain.NotifyBinding) (int64, error) {
-	return s.repo.UpdateBinding(ctx, n)
-}
-
-func (s *adminNotifyBindingService) Delete(ctx context.Context, id int64) (int64, error) {
-	return s.repo.DeleteBinding(ctx, id)
-}
-
-func (s *adminNotifyBindingService) List(ctx context.Context, workflowId int64) ([]domain.NotifyBinding, error) {
-	return s.repo.ListBindings(ctx, workflowId)
-}
-
-func (s *adminNotifyBindingService) GetEffective(ctx context.Context, workflowId int64, notifyType domain.NotifyType, channel string) (domain.NotifyBinding, error) {
-	return s.repo.GetEffectiveBinding(ctx, workflowId, notifyType, channel)
 }

@@ -73,10 +73,27 @@ type TemplateJson struct {
 	Desc       string                   `json:"desc"`
 }
 
+// TemplateListItem 模板列表响应模型
+type TemplateListItem struct {
+	Id         int64      `json:"id"`
+	Name       string     `json:"name"`
+	WorkflowId int64      `json:"workflow_id"`
+	Icon       string     `json:"icon"`
+	GroupId    int64      `json:"group_id"`
+	CreateType CreateType `json:"create_type"`
+	Desc       string     `json:"desc"`
+}
+
 // RetrieveTemplates 响应数据结构包
 type RetrieveTemplates struct {
 	Total     int64          `json:"total"`
 	Templates []TemplateJson `json:"templates"`
+}
+
+// RetrieveTemplateList 模板列表响应数据结构包
+type RetrieveTemplateList struct {
+	Total     int64              `json:"total"`
+	Templates []TemplateListItem `json:"templates"`
 }
 
 // GetRulesByWorkFlowIdReq 通过工作流检索校验规则请求

@@ -116,7 +116,8 @@ func InitApp() (*App, error) {
 	strategyService := strategy.NewService(userServiceClient, service, taskService, ticketService, engineService, resolveEngine)
 	larkClient := InitLarkClient()
 	notificationServiceClient := ealertClient.NotificationClient
-	notificationSender, err := InitNotificationSender(larkClient, notificationServiceClient, workflowService)
+	templateServiceClient := ealertClient.TemplateClient
+	notificationSender, err := InitNotificationSender(larkClient, notificationServiceClient, templateServiceClient)
 	if err != nil {
 		return nil, err
 	}
@@ -152,8 +153,7 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	templateServiceClient := ealertClient.TemplateClient
-	v3 := InitTasks(taskService, engineService, taskExecutionServiceClient, executeResultConsumer, processEventConsumer, wechatTicketConsumer, larkCallbackTicketServer, wechatApprovalCallbackConsumer, workflowService, templateServiceClient)
+	v3 := InitTasks(taskService, engineService, taskExecutionServiceClient, executeResultConsumer, processEventConsumer, wechatTicketConsumer, larkCallbackTicketServer, wechatApprovalCallbackConsumer, templateServiceClient)
 	app := &App{
 		Web:   component,
 		Event: processEvent,

@@ -2,13 +2,13 @@ package ioc
 
 import (
 	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
+	templatev1 "github.com/Duke1616/eflow/api/proto/gen/ealert/template/v1"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	"github.com/Duke1616/eflow/internal/pkg/notification/channel"
 	"github.com/Duke1616/eflow/internal/pkg/notification/provider"
 	"github.com/Duke1616/eflow/internal/pkg/notification/provider/feishu"
 	"github.com/Duke1616/eflow/internal/pkg/notification/provider/sequential"
 	"github.com/Duke1616/eflow/internal/pkg/notification/sender"
-	"github.com/Duke1616/eflow/internal/service/workflow"
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 )
 
@@ -17,11 +17,11 @@ import (
 func InitNotificationSender(
 	larkClient *lark.Client,
 	notificationSvc notificationv1.NotificationServiceClient,
-	workflowSvc workflow.Service,
+	templateSvc templatev1.TemplateServiceClient,
 ) (sender.NotificationSender, error) {
 
 	// 1. 初始化 feishu 相关的 providers
-	grpcProvider := feishu.NewGRPCProvider(notificationSvc, workflowSvc)
+	grpcProvider := feishu.NewGRPCProvider(notificationSvc, templateSvc)
 
 	larkCardProvider, err := feishu.NewLarkCardProvider(larkClient)
 	if err != nil {

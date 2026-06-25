@@ -208,10 +208,10 @@ func (h *Handler) ListTemplate(ctx *ginx.Context, req ListTemplateReq) (ginx.Res
 
 	return ginx.Result{
 		Msg: "查询工单模板列表成功",
-		Data: RetrieveTemplates{
+		Data: RetrieveTemplateList{
 			Total: total,
-			Templates: slice.Map(ts, func(idx int, src domain.Template) TemplateJson {
-				return h.toTemplateJsonVo(src)
+			Templates: slice.Map(ts, func(idx int, src domain.Template) TemplateListItem {
+				return h.toTemplateListItemVo(src)
 			}),
 		},
 	}, nil
@@ -479,6 +479,18 @@ func (h *Handler) toTemplateJsonVo(req domain.Template) TemplateJson {
 		CreateType: CreateType(req.CreateType),
 		Rules:      rules,
 		Options:    req.Options,
+		Desc:       req.Desc,
+	}
+}
+
+func (h *Handler) toTemplateListItemVo(req domain.Template) TemplateListItem {
+	return TemplateListItem{
+		Id:         req.Id,
+		Name:       req.Name,
+		WorkflowId: req.WorkflowId,
+		GroupId:    req.GroupId,
+		Icon:       req.Icon,
+		CreateType: CreateType(req.CreateType),
 		Desc:       req.Desc,
 	}
 }

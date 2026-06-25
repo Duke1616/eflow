@@ -2,7 +2,6 @@ package dao
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
@@ -36,23 +35,6 @@ func (Workflow) TableName() string {
 type LogicFlow struct {
 	Edges []domain.FlowEdge `json:"edges"`
 	Nodes []domain.FlowNode `json:"nodes"`
-}
-
-// NotifyBinding 工作流通知渠道绑定实体
-type NotifyBinding struct {
-	Id         int64  `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'通知绑定关系自增ID'"`
-	TenantID   int64  `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
-	WorkflowId int64  `gorm:"column:workflow_id;type:bigint;not null;index;comment:'绑定的流程定义ID'"`
-	NotifyType string `gorm:"column:notify_type;type:varchar(64);not null;comment:'触发通知的具体事件动作环节(如开始、驳回)'"`
-	Channel    string `gorm:"column:channel;type:varchar(64);not null;comment:'通知投递的特定媒介通道类型'"`
-	TemplateId int64  `gorm:"column:template_id;type:bigint;not null;comment:'关联的通知模板配置详情ID'"`
-	Ctime      int64  `gorm:"column:ctime;type:bigint;comment:'创建时间(毫秒)'"`
-	Utime      int64  `gorm:"column:utime;type:bigint;comment:'更新时间(毫秒)'"`
-}
-
-// TableName 指定物理表名
-func (NotifyBinding) TableName() string {
-	return "workflow_notify_binding"
 }
 
 // Snapshot 流程定义发布版本画布快照物理实体
@@ -96,21 +78,6 @@ type IWorkflowCoreDAO interface {
 	CountByKeyword(ctx context.Context, keyword string) (int64, error)
 }
 
-// INotifyBindingDAO 通知渠道与模版绑定关系物理访问接口
-type INotifyBindingDAO interface {
-	// CreateBinding 新建通知渠道绑定关系记录，返回生成的主键 ID
-	CreateBinding(ctx context.Context, n NotifyBinding) (int64, error)
-	// UpdateBinding 更新现有的通知绑定详情，返回受影响行数
-	UpdateBinding(ctx context.Context, n NotifyBinding) (int64, error)
-	// DeleteBinding 根据 ID 删除特定通知绑定关系，返回受影响行数
-	DeleteBinding(ctx context.Context, id int64) (int64, error)
-	// ListBindings 查询某个流程设计 ID 下绑定的所有通知渠道及关联的模版列表
-	ListBindings(ctx context.Context, workflowId int64) ([]NotifyBinding, error)
-	// FindBinding 拉取已生效的通知绑定配置 (支持默认降级)
-	// NOTE: 在 MySQL 物理中需要优雅地实现降级匹配，即优先拉取特定 workflowId，若不存在则兜底拉取 workflow_id = 0
-	FindBinding(ctx context.Context, workflowId int64, notifyType string, channel string) (NotifyBinding, error)
-}
-
 // ISnapshotDAO 流程版本发布画布快照物理数据访问接口
 type ISnapshotDAO interface {
 	// CreateSnapshot 持久化流程发布画布快照
@@ -122,7 +89,6 @@ type ISnapshotDAO interface {
 // IWorkflowDAO 工作流数据层大组合接口 (遵循 ISP 接口隔离原则拆分再优雅嵌入组合)
 type IWorkflowDAO interface {
 	IWorkflowCoreDAO
-	INotifyBindingDAO
 	ISnapshotDAO
 }
 
@@ -233,50 +199,6 @@ func (g *gormWorkflowDAO) CountByKeyword(ctx context.Context, keyword string) (i
 	}
 	err := query.Count(&total).Error
 	return total, err
-}
-
-// --- NotifyBinding 通知渠道绑定接口实现 ---
-
-func (g *gormWorkflowDAO) CreateBinding(ctx context.Context, n NotifyBinding) (int64, error) {
-	now := time.Now().UnixMilli()
-	n.Ctime = now
-	n.Utime = now
-	err := g.db.WithContext(ctx).Create(&n).Error
-	return n.Id, err
-}
-
-func (g *gormWorkflowDAO) UpdateBinding(ctx context.Context, n NotifyBinding) (int64, error) {
-	updates := map[string]interface{}{
-		"notify_type": n.NotifyType,
-		"channel":     n.Channel,
-		"template_id": n.TemplateId,
-		"utime":       time.Now().UnixMilli(),
-	}
-	result := g.db.WithContext(ctx).Model(&NotifyBinding{}).Where("id = ?", n.Id).Updates(updates)
-	return result.RowsAffected, result.Error
-}
-
-func (g *gormWorkflowDAO) DeleteBinding(ctx context.Context, id int64) (int64, error) {
-	result := g.db.WithContext(ctx).Where("id = ?", id).Delete(&NotifyBinding{})
-	return result.RowsAffected, result.Error
-}
-
-func (g *gormWorkflowDAO) ListBindings(ctx context.Context, workflowId int64) ([]NotifyBinding, error) {
-	var ns []NotifyBinding
-	err := g.db.WithContext(ctx).Where("workflow_id = ?", workflowId).Find(&ns).Error
-	return ns, err
-}
-
-func (g *gormWorkflowDAO) FindBinding(ctx context.Context, workflowId int64, notifyType string, channel string) (NotifyBinding, error) {
-	var result NotifyBinding
-	err := g.db.WithContext(ctx).
-		Where("workflow_id IN ? AND notify_type = ? AND channel = ?", []int64{workflowId, 0}, notifyType, channel).
-		Order("workflow_id DESC").
-		First(&result).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return NotifyBinding{}, nil
-	}
-	return result, err
 }
 
 // --- Snapshot 引擎版本快照接口实现 ---

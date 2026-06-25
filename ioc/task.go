@@ -25,7 +25,6 @@ func InitTasks(
 	wechatConsumer *ticketConsumer.WechatTicketConsumer,
 	larkWsServer *ticketConsumer.LarkCallbackTicketServer,
 	wechatCallbackConsumer *templateConsumer.WechatApprovalCallbackConsumer,
-	workflowSvc workflow.Service,
 	templateClient templatev1.TemplateServiceClient,
 ) []Task {
 	return []Task{
@@ -38,6 +37,6 @@ func InitTasks(
 		wechatConsumer,
 		larkWsServer,
 		wechatCallbackConsumer,
-		workflow.NewTemplateBootstrapTask(workflowSvc, templateClient),
+		workflow.NewTemplateBootstrapTask(templateClient),
 	}
 }

@@ -165,7 +165,7 @@ func (n *Notification) sendAlertNotification(ctx context.Context, tasks []model.
 			Receivers:      userIds,
 			Channel:        domain.ChannelToDomainProto(ticketInfo.NotificationConf.Channel),
 			TemplateParams: params,
-			TemplateId:     ticketInfo.NotificationConf.TemplateID,
+			TemplateSetId:  ticketInfo.NotificationConf.TemplateID,
 		},
 	})
 

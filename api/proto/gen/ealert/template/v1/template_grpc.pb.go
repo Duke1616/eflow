@@ -25,6 +25,9 @@ const (
 	TemplateService_PublishTemplate_FullMethodName       = "/ealert.template.v1.TemplateService/PublishTemplate"
 	TemplateService_ListTemplates_FullMethodName         = "/ealert.template.v1.TemplateService/ListTemplates"
 	TemplateService_CreateTemplateVersion_FullMethodName = "/ealert.template.v1.TemplateService/CreateTemplateVersion"
+	TemplateService_CreateTemplateSet_FullMethodName     = "/ealert.template.v1.TemplateService/CreateTemplateSet"
+	TemplateService_ResolveTemplateSet_FullMethodName    = "/ealert.template.v1.TemplateService/ResolveTemplateSet"
+	TemplateService_ResolveTemplateID_FullMethodName     = "/ealert.template.v1.TemplateService/ResolveTemplateID"
 )
 
 // TemplateServiceClient is the client API for TemplateService service.
@@ -45,6 +48,12 @@ type TemplateServiceClient interface {
 	ListTemplates(ctx context.Context, in *ListTemplatesRequest, opts ...grpc.CallOption) (*ListTemplatesResponse, error)
 	// CreateTemplateVersion 基于已有版本创建新版本
 	CreateTemplateVersion(ctx context.Context, in *CreateTemplateVersionRequest, opts ...grpc.CallOption) (*CreateTemplateVersionResponse, error)
+	// CreateTemplateSet 创建模板集，供远端业务系统接入模板集
+	CreateTemplateSet(ctx context.Context, in *CreateTemplateSetRequest, opts ...grpc.CallOption) (*CreateTemplateSetResponse, error)
+	// ResolveTemplateSet 根据业务ID和模板集唯一标识解析模板集
+	ResolveTemplateSet(ctx context.Context, in *ResolveTemplateSetRequest, opts ...grpc.CallOption) (*ResolveTemplateSetResponse, error)
+	// ResolveTemplateID 根据业务ID、模板集唯一标识和渠道解析渠道模板ID
+	ResolveTemplateID(ctx context.Context, in *ResolveTemplateIDRequest, opts ...grpc.CallOption) (*ResolveTemplateIDResponse, error)
 }
 
 type templateServiceClient struct {
@@ -115,6 +124,36 @@ func (c *templateServiceClient) CreateTemplateVersion(ctx context.Context, in *C
 	return out, nil
 }
 
+func (c *templateServiceClient) CreateTemplateSet(ctx context.Context, in *CreateTemplateSetRequest, opts ...grpc.CallOption) (*CreateTemplateSetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateTemplateSetResponse)
+	err := c.cc.Invoke(ctx, TemplateService_CreateTemplateSet_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *templateServiceClient) ResolveTemplateSet(ctx context.Context, in *ResolveTemplateSetRequest, opts ...grpc.CallOption) (*ResolveTemplateSetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveTemplateSetResponse)
+	err := c.cc.Invoke(ctx, TemplateService_ResolveTemplateSet_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *templateServiceClient) ResolveTemplateID(ctx context.Context, in *ResolveTemplateIDRequest, opts ...grpc.CallOption) (*ResolveTemplateIDResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveTemplateIDResponse)
+	err := c.cc.Invoke(ctx, TemplateService_ResolveTemplateID_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TemplateServiceServer is the server API for TemplateService service.
 // All implementations must embed UnimplementedTemplateServiceServer
 // for forward compatibility.
@@ -133,6 +172,12 @@ type TemplateServiceServer interface {
 	ListTemplates(context.Context, *ListTemplatesRequest) (*ListTemplatesResponse, error)
 	// CreateTemplateVersion 基于已有版本创建新版本
 	CreateTemplateVersion(context.Context, *CreateTemplateVersionRequest) (*CreateTemplateVersionResponse, error)
+	// CreateTemplateSet 创建模板集，供远端业务系统接入模板集
+	CreateTemplateSet(context.Context, *CreateTemplateSetRequest) (*CreateTemplateSetResponse, error)
+	// ResolveTemplateSet 根据业务ID和模板集唯一标识解析模板集
+	ResolveTemplateSet(context.Context, *ResolveTemplateSetRequest) (*ResolveTemplateSetResponse, error)
+	// ResolveTemplateID 根据业务ID、模板集唯一标识和渠道解析渠道模板ID
+	ResolveTemplateID(context.Context, *ResolveTemplateIDRequest) (*ResolveTemplateIDResponse, error)
 	mustEmbedUnimplementedTemplateServiceServer()
 }
 
@@ -160,6 +205,15 @@ func (UnimplementedTemplateServiceServer) ListTemplates(context.Context, *ListTe
 }
 func (UnimplementedTemplateServiceServer) CreateTemplateVersion(context.Context, *CreateTemplateVersionRequest) (*CreateTemplateVersionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateTemplateVersion not implemented")
+}
+func (UnimplementedTemplateServiceServer) CreateTemplateSet(context.Context, *CreateTemplateSetRequest) (*CreateTemplateSetResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateTemplateSet not implemented")
+}
+func (UnimplementedTemplateServiceServer) ResolveTemplateSet(context.Context, *ResolveTemplateSetRequest) (*ResolveTemplateSetResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResolveTemplateSet not implemented")
+}
+func (UnimplementedTemplateServiceServer) ResolveTemplateID(context.Context, *ResolveTemplateIDRequest) (*ResolveTemplateIDResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResolveTemplateID not implemented")
 }
 func (UnimplementedTemplateServiceServer) mustEmbedUnimplementedTemplateServiceServer() {}
 func (UnimplementedTemplateServiceServer) testEmbeddedByValue()                         {}
@@ -290,6 +344,60 @@ func _TemplateService_CreateTemplateVersion_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TemplateService_CreateTemplateSet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTemplateSetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TemplateServiceServer).CreateTemplateSet(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TemplateService_CreateTemplateSet_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TemplateServiceServer).CreateTemplateSet(ctx, req.(*CreateTemplateSetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TemplateService_ResolveTemplateSet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveTemplateSetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TemplateServiceServer).ResolveTemplateSet(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TemplateService_ResolveTemplateSet_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TemplateServiceServer).ResolveTemplateSet(ctx, req.(*ResolveTemplateSetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TemplateService_ResolveTemplateID_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveTemplateIDRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TemplateServiceServer).ResolveTemplateID(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TemplateService_ResolveTemplateID_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TemplateServiceServer).ResolveTemplateID(ctx, req.(*ResolveTemplateIDRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TemplateService_ServiceDesc is the grpc.ServiceDesc for TemplateService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -320,6 +428,18 @@ var TemplateService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateTemplateVersion",
 			Handler:    _TemplateService_CreateTemplateVersion_Handler,
+		},
+		{
+			MethodName: "CreateTemplateSet",
+			Handler:    _TemplateService_CreateTemplateSet_Handler,
+		},
+		{
+			MethodName: "ResolveTemplateSet",
+			Handler:    _TemplateService_ResolveTemplateSet_Handler,
+		},
+		{
+			MethodName: "ResolveTemplateID",
+			Handler:    _TemplateService_ResolveTemplateID_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

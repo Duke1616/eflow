@@ -35,6 +35,10 @@ type templateConfig struct {
 	NotifyType  domain.NotifyType
 }
 
+func (c templateConfig) SetKey() string {
+	return domain.NotifyTemplateSetKey(c.NotifyType)
+}
+
 // templates 静态声明需要被自愈引导注册的默认通知模板数据集
 var templates = []templateConfig{
 	{

@@ -206,7 +206,7 @@ func (g *gormTemplateDAO) UpdateTemplate(ctx context.Context, t Template) (int64
 
 func (g *gormTemplateDAO) ListTemplate(ctx context.Context, groupId int64, keyword string, offset, limit int64) ([]Template, error) {
 	var ts []Template
-	query := g.db.WithContext(ctx)
+	query := g.db.WithContext(ctx).Select("id", "name", "workflow_id", "group_id", "icon", "create_type", "desc")
 	if groupId > 0 {
 		query = query.Where("group_id = ?", groupId)
 	}

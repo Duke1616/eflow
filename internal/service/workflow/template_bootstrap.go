@@ -15,8 +15,8 @@ type TemplateBootstrapTask struct {
 }
 
 // NewTemplateBootstrapTask 构建并统一组装工作流模板自愈任务实例
-func NewTemplateBootstrapTask(workflowSvc Service, templateClient templatev1.TemplateServiceClient) *TemplateBootstrapTask {
-	syncer := NewTemplateSyncer(workflowSvc, templateClient)
+func NewTemplateBootstrapTask(templateClient templatev1.TemplateServiceClient) *TemplateBootstrapTask {
+	syncer := NewTemplateSyncer(templateClient)
 	return &TemplateBootstrapTask{
 		syncer: syncer,
 	}

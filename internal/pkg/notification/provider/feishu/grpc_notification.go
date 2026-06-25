@@ -7,11 +7,11 @@ import (
 	"time"
 
 	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
+	templatev1 "github.com/Duke1616/eflow/api/proto/gen/ealert/template/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	"github.com/Duke1616/eflow/internal/pkg/notification/provider"
 	"github.com/Duke1616/eflow/internal/service/event/errs"
-	"github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/enotify/notify/feishu/card"
 	"github.com/google/uuid"
 	"github.com/gotomicro/ego/core/elog"
@@ -20,14 +20,14 @@ import (
 
 type grpcProvider struct {
 	notification notificationv1.NotificationServiceClient
-	workflowSvc  workflow.Service
+	template     templatev1.TemplateServiceClient
 	logger       *elog.Component
 }
 
-func NewGRPCProvider(notification notificationv1.NotificationServiceClient, workflowSvc workflow.Service) provider.Provider {
+func NewGRPCProvider(notification notificationv1.NotificationServiceClient, template templatev1.TemplateServiceClient) provider.Provider {
 	return &grpcProvider{
 		notification: notification,
-		workflowSvc:  workflowSvc,
+		template:     template,
 		logger:       elog.DefaultLogger.With(elog.FieldComponentName("grpc_provider")),
 	}
 }
@@ -71,8 +71,8 @@ func (f *grpcProvider) Send(ctx context.Context, src notification.Notification) 
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	// 获取绑定的消息通知模版ID
-	templateID, err := f.getTemplateID(ctx, src.WorkFlowID, src.Template.Name, src.Channel.String())
+	// 通过模板集 key 和 channel 动态解析渠道模板 ID
+	templateID, err := f.resolveTemplateID(ctx, src.Template.Name, notificationv1.Channel_LARK_CARD)
 	if err != nil {
 		return notification.Response{}, err
 	}
@@ -102,9 +102,18 @@ func (f *grpcProvider) Send(ctx context.Context, src notification.Notification) 
 	return notification.NewSuccessResponse(int64(msg.NotificationId), msg.Status.String()), nil
 }
 
-func (f *grpcProvider) getTemplateID(ctx context.Context, workflowID int64, templateName domain.NotifyType,
-	channel string) (int64, error) {
-	effective, err := f.workflowSvc.AdminNotifyBinding().GetEffective(ctx, workflowID, templateName, channel)
-
-	return effective.TemplateId, err
+func (f *grpcProvider) resolveTemplateID(ctx context.Context, templateName domain.NotifyType,
+	channel notificationv1.Channel) (int64, error) {
+	resp, err := f.template.ResolveTemplateID(ctx, &templatev1.ResolveTemplateIDRequest{
+		BizId:   int64(notificationv1.Business_TICKET),
+		Key:     domain.NotifyTemplateSetKey(templateName),
+		Channel: channel,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("解析通知模板ID失败: %w", err)
+	}
+	if resp == nil || resp.TemplateId == 0 {
+		return 0, fmt.Errorf("解析通知模板ID失败: notify_type=%s, channel=%s", templateName, channel.String())
+	}
+	return resp.TemplateId, nil
 }

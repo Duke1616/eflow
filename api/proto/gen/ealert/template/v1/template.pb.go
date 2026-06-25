@@ -292,6 +292,200 @@ func (x *ChannelTemplateVersion) GetUtime() int64 {
 	return 0
 }
 
+// 模板集：按渠道聚合多个渠道模板
+type TemplateSet struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                     // 模板集ID
+	Key           string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`                                    // 业务唯一标识，用于幂等创建
+	BizId         int64                  `protobuf:"varint,3,opt,name=biz_id,json=bizId,proto3" json:"biz_id,omitempty"`                  // 业务ID，说明模板集归属的业务
+	OwnerId       int64                  `protobuf:"varint,4,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`            // 拥有者ID
+	Name          string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`                                  // 模板集名称
+	Description   string                 `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`                    // 模板集描述
+	Scope         Scope                  `protobuf:"varint,7,opt,name=scope,proto3,enum=ealert.template.v1.Scope" json:"scope,omitempty"` // 可见范围
+	Ctime         int64                  `protobuf:"varint,8,opt,name=ctime,proto3" json:"ctime,omitempty"`                               // 创建时间
+	Utime         int64                  `protobuf:"varint,9,opt,name=utime,proto3" json:"utime,omitempty"`                               // 更新时间
+	Items         []*TemplateSetItem     `protobuf:"bytes,10,rep,name=items,proto3" json:"items,omitempty"`                               // 模板集条目
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TemplateSet) Reset() {
+	*x = TemplateSet{}
+	mi := &file_ealert_template_v1_template_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TemplateSet) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TemplateSet) ProtoMessage() {}
+
+func (x *TemplateSet) ProtoReflect() protoreflect.Message {
+	mi := &file_ealert_template_v1_template_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TemplateSet.ProtoReflect.Descriptor instead.
+func (*TemplateSet) Descriptor() ([]byte, []int) {
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *TemplateSet) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *TemplateSet) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *TemplateSet) GetBizId() int64 {
+	if x != nil {
+		return x.BizId
+	}
+	return 0
+}
+
+func (x *TemplateSet) GetOwnerId() int64 {
+	if x != nil {
+		return x.OwnerId
+	}
+	return 0
+}
+
+func (x *TemplateSet) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *TemplateSet) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *TemplateSet) GetScope() Scope {
+	if x != nil {
+		return x.Scope
+	}
+	return Scope_SCOPE_UNSPECIFIED
+}
+
+func (x *TemplateSet) GetCtime() int64 {
+	if x != nil {
+		return x.Ctime
+	}
+	return 0
+}
+
+func (x *TemplateSet) GetUtime() int64 {
+	if x != nil {
+		return x.Utime
+	}
+	return 0
+}
+
+func (x *TemplateSet) GetItems() []*TemplateSetItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+// 模板集条目：某渠道对应的具体渠道模板
+type TemplateSetItem struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                               // 条目ID
+	SetId         int64                  `protobuf:"varint,2,opt,name=set_id,json=setId,proto3" json:"set_id,omitempty"`                            // 模板集ID
+	Channel       v1.Channel             `protobuf:"varint,3,opt,name=channel,proto3,enum=ealert.notification.v1.Channel" json:"channel,omitempty"` // 渠道类型
+	TemplateId    int64                  `protobuf:"varint,4,opt,name=template_id,json=templateId,proto3" json:"template_id,omitempty"`             // 渠道模板ID
+	Ctime         int64                  `protobuf:"varint,5,opt,name=ctime,proto3" json:"ctime,omitempty"`                                         // 创建时间
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TemplateSetItem) Reset() {
+	*x = TemplateSetItem{}
+	mi := &file_ealert_template_v1_template_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TemplateSetItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TemplateSetItem) ProtoMessage() {}
+
+func (x *TemplateSetItem) ProtoReflect() protoreflect.Message {
+	mi := &file_ealert_template_v1_template_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TemplateSetItem.ProtoReflect.Descriptor instead.
+func (*TemplateSetItem) Descriptor() ([]byte, []int) {
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *TemplateSetItem) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *TemplateSetItem) GetSetId() int64 {
+	if x != nil {
+		return x.SetId
+	}
+	return 0
+}
+
+func (x *TemplateSetItem) GetChannel() v1.Channel {
+	if x != nil {
+		return x.Channel
+	}
+	return v1.Channel(0)
+}
+
+func (x *TemplateSetItem) GetTemplateId() int64 {
+	if x != nil {
+		return x.TemplateId
+	}
+	return 0
+}
+
+func (x *TemplateSetItem) GetCtime() int64 {
+	if x != nil {
+		return x.Ctime
+	}
+	return 0
+}
+
 // GetTemplateByIDRequest 获取模板请求
 type GetTemplateByIDRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -302,7 +496,7 @@ type GetTemplateByIDRequest struct {
 
 func (x *GetTemplateByIDRequest) Reset() {
 	*x = GetTemplateByIDRequest{}
-	mi := &file_ealert_template_v1_template_proto_msgTypes[2]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -314,7 +508,7 @@ func (x *GetTemplateByIDRequest) String() string {
 func (*GetTemplateByIDRequest) ProtoMessage() {}
 
 func (x *GetTemplateByIDRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ealert_template_v1_template_proto_msgTypes[2]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -327,7 +521,7 @@ func (x *GetTemplateByIDRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTemplateByIDRequest.ProtoReflect.Descriptor instead.
 func (*GetTemplateByIDRequest) Descriptor() ([]byte, []int) {
-	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{2}
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetTemplateByIDRequest) GetId() int64 {
@@ -347,7 +541,7 @@ type GetTemplateByIDResponse struct {
 
 func (x *GetTemplateByIDResponse) Reset() {
 	*x = GetTemplateByIDResponse{}
-	mi := &file_ealert_template_v1_template_proto_msgTypes[3]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -359,7 +553,7 @@ func (x *GetTemplateByIDResponse) String() string {
 func (*GetTemplateByIDResponse) ProtoMessage() {}
 
 func (x *GetTemplateByIDResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ealert_template_v1_template_proto_msgTypes[3]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -372,7 +566,7 @@ func (x *GetTemplateByIDResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTemplateByIDResponse.ProtoReflect.Descriptor instead.
 func (*GetTemplateByIDResponse) Descriptor() ([]byte, []int) {
-	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{3}
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetTemplateByIDResponse) GetTemplate() *ChannelTemplate {
@@ -392,7 +586,7 @@ type CreateTemplateRequest struct {
 
 func (x *CreateTemplateRequest) Reset() {
 	*x = CreateTemplateRequest{}
-	mi := &file_ealert_template_v1_template_proto_msgTypes[4]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -404,7 +598,7 @@ func (x *CreateTemplateRequest) String() string {
 func (*CreateTemplateRequest) ProtoMessage() {}
 
 func (x *CreateTemplateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ealert_template_v1_template_proto_msgTypes[4]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -417,7 +611,7 @@ func (x *CreateTemplateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTemplateRequest.ProtoReflect.Descriptor instead.
 func (*CreateTemplateRequest) Descriptor() ([]byte, []int) {
-	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{4}
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CreateTemplateRequest) GetTemplate() *ChannelTemplate {
@@ -437,7 +631,7 @@ type CreateTemplateResponse struct {
 
 func (x *CreateTemplateResponse) Reset() {
 	*x = CreateTemplateResponse{}
-	mi := &file_ealert_template_v1_template_proto_msgTypes[5]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -449,7 +643,7 @@ func (x *CreateTemplateResponse) String() string {
 func (*CreateTemplateResponse) ProtoMessage() {}
 
 func (x *CreateTemplateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ealert_template_v1_template_proto_msgTypes[5]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -462,7 +656,7 @@ func (x *CreateTemplateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTemplateResponse.ProtoReflect.Descriptor instead.
 func (*CreateTemplateResponse) Descriptor() ([]byte, []int) {
-	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{5}
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CreateTemplateResponse) GetTemplate() *ChannelTemplate {
@@ -482,7 +676,7 @@ type UpdateTemplateRequest struct {
 
 func (x *UpdateTemplateRequest) Reset() {
 	*x = UpdateTemplateRequest{}
-	mi := &file_ealert_template_v1_template_proto_msgTypes[6]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -494,7 +688,7 @@ func (x *UpdateTemplateRequest) String() string {
 func (*UpdateTemplateRequest) ProtoMessage() {}
 
 func (x *UpdateTemplateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ealert_template_v1_template_proto_msgTypes[6]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -507,7 +701,7 @@ func (x *UpdateTemplateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateTemplateRequest.ProtoReflect.Descriptor instead.
 func (*UpdateTemplateRequest) Descriptor() ([]byte, []int) {
-	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{6}
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *UpdateTemplateRequest) GetTemplate() *ChannelTemplate {
@@ -526,7 +720,7 @@ type UpdateTemplateResponse struct {
 
 func (x *UpdateTemplateResponse) Reset() {
 	*x = UpdateTemplateResponse{}
-	mi := &file_ealert_template_v1_template_proto_msgTypes[7]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -538,7 +732,7 @@ func (x *UpdateTemplateResponse) String() string {
 func (*UpdateTemplateResponse) ProtoMessage() {}
 
 func (x *UpdateTemplateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ealert_template_v1_template_proto_msgTypes[7]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -551,7 +745,7 @@ func (x *UpdateTemplateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateTemplateResponse.ProtoReflect.Descriptor instead.
 func (*UpdateTemplateResponse) Descriptor() ([]byte, []int) {
-	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{7}
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{9}
 }
 
 // PublishTemplateRequest 发布模板请求
@@ -565,7 +759,7 @@ type PublishTemplateRequest struct {
 
 func (x *PublishTemplateRequest) Reset() {
 	*x = PublishTemplateRequest{}
-	mi := &file_ealert_template_v1_template_proto_msgTypes[8]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -577,7 +771,7 @@ func (x *PublishTemplateRequest) String() string {
 func (*PublishTemplateRequest) ProtoMessage() {}
 
 func (x *PublishTemplateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ealert_template_v1_template_proto_msgTypes[8]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -590,7 +784,7 @@ func (x *PublishTemplateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishTemplateRequest.ProtoReflect.Descriptor instead.
 func (*PublishTemplateRequest) Descriptor() ([]byte, []int) {
-	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{8}
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *PublishTemplateRequest) GetTemplateId() int64 {
@@ -616,7 +810,7 @@ type PublishTemplateResponse struct {
 
 func (x *PublishTemplateResponse) Reset() {
 	*x = PublishTemplateResponse{}
-	mi := &file_ealert_template_v1_template_proto_msgTypes[9]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -628,7 +822,7 @@ func (x *PublishTemplateResponse) String() string {
 func (*PublishTemplateResponse) ProtoMessage() {}
 
 func (x *PublishTemplateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ealert_template_v1_template_proto_msgTypes[9]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -641,7 +835,7 @@ func (x *PublishTemplateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishTemplateResponse.ProtoReflect.Descriptor instead.
 func (*PublishTemplateResponse) Descriptor() ([]byte, []int) {
-	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{9}
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{11}
 }
 
 // ListTemplatesRequest 获取模版列表请求
@@ -655,7 +849,7 @@ type ListTemplatesRequest struct {
 
 func (x *ListTemplatesRequest) Reset() {
 	*x = ListTemplatesRequest{}
-	mi := &file_ealert_template_v1_template_proto_msgTypes[10]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -667,7 +861,7 @@ func (x *ListTemplatesRequest) String() string {
 func (*ListTemplatesRequest) ProtoMessage() {}
 
 func (x *ListTemplatesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ealert_template_v1_template_proto_msgTypes[10]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -680,7 +874,7 @@ func (x *ListTemplatesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTemplatesRequest.ProtoReflect.Descriptor instead.
 func (*ListTemplatesRequest) Descriptor() ([]byte, []int) {
-	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{10}
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ListTemplatesRequest) GetOffset() int32 {
@@ -708,7 +902,7 @@ type ListTemplatesResponse struct {
 
 func (x *ListTemplatesResponse) Reset() {
 	*x = ListTemplatesResponse{}
-	mi := &file_ealert_template_v1_template_proto_msgTypes[11]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -720,7 +914,7 @@ func (x *ListTemplatesResponse) String() string {
 func (*ListTemplatesResponse) ProtoMessage() {}
 
 func (x *ListTemplatesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ealert_template_v1_template_proto_msgTypes[11]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -733,7 +927,7 @@ func (x *ListTemplatesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTemplatesResponse.ProtoReflect.Descriptor instead.
 func (*ListTemplatesResponse) Descriptor() ([]byte, []int) {
-	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{11}
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ListTemplatesResponse) GetTemplates() []*ChannelTemplate {
@@ -764,7 +958,7 @@ type CreateTemplateVersionRequest struct {
 
 func (x *CreateTemplateVersionRequest) Reset() {
 	*x = CreateTemplateVersionRequest{}
-	mi := &file_ealert_template_v1_template_proto_msgTypes[12]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -776,7 +970,7 @@ func (x *CreateTemplateVersionRequest) String() string {
 func (*CreateTemplateVersionRequest) ProtoMessage() {}
 
 func (x *CreateTemplateVersionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ealert_template_v1_template_proto_msgTypes[12]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -789,7 +983,7 @@ func (x *CreateTemplateVersionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTemplateVersionRequest.ProtoReflect.Descriptor instead.
 func (*CreateTemplateVersionRequest) Descriptor() ([]byte, []int) {
-	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{12}
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *CreateTemplateVersionRequest) GetTemplateId() int64 {
@@ -837,7 +1031,7 @@ type CreateTemplateVersionResponse struct {
 
 func (x *CreateTemplateVersionResponse) Reset() {
 	*x = CreateTemplateVersionResponse{}
-	mi := &file_ealert_template_v1_template_proto_msgTypes[13]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -849,7 +1043,7 @@ func (x *CreateTemplateVersionResponse) String() string {
 func (*CreateTemplateVersionResponse) ProtoMessage() {}
 
 func (x *CreateTemplateVersionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ealert_template_v1_template_proto_msgTypes[13]
+	mi := &file_ealert_template_v1_template_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -862,7 +1056,7 @@ func (x *CreateTemplateVersionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTemplateVersionResponse.ProtoReflect.Descriptor instead.
 func (*CreateTemplateVersionResponse) Descriptor() ([]byte, []int) {
-	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{13}
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *CreateTemplateVersionResponse) GetVersion() *ChannelTemplateVersion {
@@ -870,6 +1064,356 @@ func (x *CreateTemplateVersionResponse) GetVersion() *ChannelTemplateVersion {
 		return x.Version
 	}
 	return nil
+}
+
+// CreateTemplateSetRequest 创建模板集请求
+type CreateTemplateSetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`                                    // 业务唯一标识，用于幂等创建
+	BizId         int64                  `protobuf:"varint,2,opt,name=biz_id,json=bizId,proto3" json:"biz_id,omitempty"`                  // 业务ID
+	OwnerId       int64                  `protobuf:"varint,3,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`            // 拥有者ID
+	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`                                  // 模板集名称
+	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`                    // 模板集描述
+	Scope         Scope                  `protobuf:"varint,6,opt,name=scope,proto3,enum=ealert.template.v1.Scope" json:"scope,omitempty"` // 可见范围
+	Items         []*TemplateSetItem     `protobuf:"bytes,7,rep,name=items,proto3" json:"items,omitempty"`                                // 可选：创建后追加的模板集条目
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateTemplateSetRequest) Reset() {
+	*x = CreateTemplateSetRequest{}
+	mi := &file_ealert_template_v1_template_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateTemplateSetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateTemplateSetRequest) ProtoMessage() {}
+
+func (x *CreateTemplateSetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ealert_template_v1_template_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateTemplateSetRequest.ProtoReflect.Descriptor instead.
+func (*CreateTemplateSetRequest) Descriptor() ([]byte, []int) {
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *CreateTemplateSetRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *CreateTemplateSetRequest) GetBizId() int64 {
+	if x != nil {
+		return x.BizId
+	}
+	return 0
+}
+
+func (x *CreateTemplateSetRequest) GetOwnerId() int64 {
+	if x != nil {
+		return x.OwnerId
+	}
+	return 0
+}
+
+func (x *CreateTemplateSetRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateTemplateSetRequest) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *CreateTemplateSetRequest) GetScope() Scope {
+	if x != nil {
+		return x.Scope
+	}
+	return Scope_SCOPE_UNSPECIFIED
+}
+
+func (x *CreateTemplateSetRequest) GetItems() []*TemplateSetItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+// CreateTemplateSetResponse 创建模板集响应
+type CreateTemplateSetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TemplateSet   *TemplateSet           `protobuf:"bytes,1,opt,name=template_set,json=templateSet,proto3" json:"template_set,omitempty"` // 创建后的模板集信息
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateTemplateSetResponse) Reset() {
+	*x = CreateTemplateSetResponse{}
+	mi := &file_ealert_template_v1_template_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateTemplateSetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateTemplateSetResponse) ProtoMessage() {}
+
+func (x *CreateTemplateSetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ealert_template_v1_template_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateTemplateSetResponse.ProtoReflect.Descriptor instead.
+func (*CreateTemplateSetResponse) Descriptor() ([]byte, []int) {
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *CreateTemplateSetResponse) GetTemplateSet() *TemplateSet {
+	if x != nil {
+		return x.TemplateSet
+	}
+	return nil
+}
+
+// ResolveTemplateSetRequest 解析模板集请求
+type ResolveTemplateSetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BizId         int64                  `protobuf:"varint,1,opt,name=biz_id,json=bizId,proto3" json:"biz_id,omitempty"` // 业务ID
+	Key           string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`                   // 模板集业务唯一标识
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveTemplateSetRequest) Reset() {
+	*x = ResolveTemplateSetRequest{}
+	mi := &file_ealert_template_v1_template_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveTemplateSetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveTemplateSetRequest) ProtoMessage() {}
+
+func (x *ResolveTemplateSetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ealert_template_v1_template_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveTemplateSetRequest.ProtoReflect.Descriptor instead.
+func (*ResolveTemplateSetRequest) Descriptor() ([]byte, []int) {
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ResolveTemplateSetRequest) GetBizId() int64 {
+	if x != nil {
+		return x.BizId
+	}
+	return 0
+}
+
+func (x *ResolveTemplateSetRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+// ResolveTemplateSetResponse 解析模板集响应
+type ResolveTemplateSetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TemplateSet   *TemplateSet           `protobuf:"bytes,1,opt,name=template_set,json=templateSet,proto3" json:"template_set,omitempty"` // 模板集信息，未命中时为空
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveTemplateSetResponse) Reset() {
+	*x = ResolveTemplateSetResponse{}
+	mi := &file_ealert_template_v1_template_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveTemplateSetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveTemplateSetResponse) ProtoMessage() {}
+
+func (x *ResolveTemplateSetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ealert_template_v1_template_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveTemplateSetResponse.ProtoReflect.Descriptor instead.
+func (*ResolveTemplateSetResponse) Descriptor() ([]byte, []int) {
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ResolveTemplateSetResponse) GetTemplateSet() *TemplateSet {
+	if x != nil {
+		return x.TemplateSet
+	}
+	return nil
+}
+
+// ResolveTemplateIDRequest 解析模板ID请求
+type ResolveTemplateIDRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BizId         int64                  `protobuf:"varint,1,opt,name=biz_id,json=bizId,proto3" json:"biz_id,omitempty"`                            // 业务ID
+	Key           string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`                                              // 模板集业务唯一标识
+	Channel       v1.Channel             `protobuf:"varint,3,opt,name=channel,proto3,enum=ealert.notification.v1.Channel" json:"channel,omitempty"` // 渠道类型
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveTemplateIDRequest) Reset() {
+	*x = ResolveTemplateIDRequest{}
+	mi := &file_ealert_template_v1_template_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveTemplateIDRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveTemplateIDRequest) ProtoMessage() {}
+
+func (x *ResolveTemplateIDRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ealert_template_v1_template_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveTemplateIDRequest.ProtoReflect.Descriptor instead.
+func (*ResolveTemplateIDRequest) Descriptor() ([]byte, []int) {
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ResolveTemplateIDRequest) GetBizId() int64 {
+	if x != nil {
+		return x.BizId
+	}
+	return 0
+}
+
+func (x *ResolveTemplateIDRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *ResolveTemplateIDRequest) GetChannel() v1.Channel {
+	if x != nil {
+		return x.Channel
+	}
+	return v1.Channel(0)
+}
+
+// ResolveTemplateIDResponse 解析模板ID响应
+type ResolveTemplateIDResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TemplateId    int64                  `protobuf:"varint,1,opt,name=template_id,json=templateId,proto3" json:"template_id,omitempty"`            // 渠道模板ID，0表示未命中
+	TemplateSetId int64                  `protobuf:"varint,2,opt,name=template_set_id,json=templateSetId,proto3" json:"template_set_id,omitempty"` // 模板集ID，0表示未命中
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveTemplateIDResponse) Reset() {
+	*x = ResolveTemplateIDResponse{}
+	mi := &file_ealert_template_v1_template_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveTemplateIDResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveTemplateIDResponse) ProtoMessage() {}
+
+func (x *ResolveTemplateIDResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ealert_template_v1_template_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveTemplateIDResponse.ProtoReflect.Descriptor instead.
+func (*ResolveTemplateIDResponse) Descriptor() ([]byte, []int) {
+	return file_ealert_template_v1_template_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ResolveTemplateIDResponse) GetTemplateId() int64 {
+	if x != nil {
+		return x.TemplateId
+	}
+	return 0
+}
+
+func (x *ResolveTemplateIDResponse) GetTemplateSetId() int64 {
+	if x != nil {
+		return x.TemplateSetId
+	}
+	return 0
 }
 
 var File_ealert_template_v1_template_proto protoreflect.FileDescriptor
@@ -897,7 +1441,26 @@ const file_ealert_template_v1_template_proto_rawDesc = "" +
 	"\acontent\x18\x05 \x01(\tR\acontent\x12\x12\n" +
 	"\x04desc\x18\x06 \x01(\tR\x04desc\x12\x14\n" +
 	"\x05ctime\x18\a \x01(\x03R\x05ctime\x12\x14\n" +
-	"\x05utime\x18\b \x01(\x03R\x05utime\"(\n" +
+	"\x05utime\x18\b \x01(\x03R\x05utime\"\xaf\x02\n" +
+	"\vTemplateSet\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x10\n" +
+	"\x03key\x18\x02 \x01(\tR\x03key\x12\x15\n" +
+	"\x06biz_id\x18\x03 \x01(\x03R\x05bizId\x12\x19\n" +
+	"\bowner_id\x18\x04 \x01(\x03R\aownerId\x12\x12\n" +
+	"\x04name\x18\x05 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x06 \x01(\tR\vdescription\x12/\n" +
+	"\x05scope\x18\a \x01(\x0e2\x19.ealert.template.v1.ScopeR\x05scope\x12\x14\n" +
+	"\x05ctime\x18\b \x01(\x03R\x05ctime\x12\x14\n" +
+	"\x05utime\x18\t \x01(\x03R\x05utime\x129\n" +
+	"\x05items\x18\n" +
+	" \x03(\v2#.ealert.template.v1.TemplateSetItemR\x05items\"\xaa\x01\n" +
+	"\x0fTemplateSetItem\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x15\n" +
+	"\x06set_id\x18\x02 \x01(\x03R\x05setId\x129\n" +
+	"\achannel\x18\x03 \x01(\x0e2\x1f.ealert.notification.v1.ChannelR\achannel\x12\x1f\n" +
+	"\vtemplate_id\x18\x04 \x01(\x03R\n" +
+	"templateId\x12\x14\n" +
+	"\x05ctime\x18\x05 \x01(\x03R\x05ctime\"(\n" +
 	"\x16GetTemplateByIDRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\"Z\n" +
 	"\x17GetTemplateByIDResponse\x12?\n" +
@@ -929,20 +1492,46 @@ const file_ealert_template_v1_template_proto_rawDesc = "" +
 	"\acontent\x18\x04 \x01(\tR\acontent\x12\x12\n" +
 	"\x04desc\x18\x05 \x01(\tR\x04desc\"e\n" +
 	"\x1dCreateTemplateVersionResponse\x12D\n" +
-	"\aversion\x18\x01 \x01(\v2*.ealert.template.v1.ChannelTemplateVersionR\aversion*6\n" +
+	"\aversion\x18\x01 \x01(\v2*.ealert.template.v1.ChannelTemplateVersionR\aversion\"\x80\x02\n" +
+	"\x18CreateTemplateSetRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x15\n" +
+	"\x06biz_id\x18\x02 \x01(\x03R\x05bizId\x12\x19\n" +
+	"\bowner_id\x18\x03 \x01(\x03R\aownerId\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\x12/\n" +
+	"\x05scope\x18\x06 \x01(\x0e2\x19.ealert.template.v1.ScopeR\x05scope\x129\n" +
+	"\x05items\x18\a \x03(\v2#.ealert.template.v1.TemplateSetItemR\x05items\"_\n" +
+	"\x19CreateTemplateSetResponse\x12B\n" +
+	"\ftemplate_set\x18\x01 \x01(\v2\x1f.ealert.template.v1.TemplateSetR\vtemplateSet\"D\n" +
+	"\x19ResolveTemplateSetRequest\x12\x15\n" +
+	"\x06biz_id\x18\x01 \x01(\x03R\x05bizId\x12\x10\n" +
+	"\x03key\x18\x02 \x01(\tR\x03key\"`\n" +
+	"\x1aResolveTemplateSetResponse\x12B\n" +
+	"\ftemplate_set\x18\x01 \x01(\v2\x1f.ealert.template.v1.TemplateSetR\vtemplateSet\"~\n" +
+	"\x18ResolveTemplateIDRequest\x12\x15\n" +
+	"\x06biz_id\x18\x01 \x01(\x03R\x05bizId\x12\x10\n" +
+	"\x03key\x18\x02 \x01(\tR\x03key\x129\n" +
+	"\achannel\x18\x03 \x01(\x0e2\x1f.ealert.notification.v1.ChannelR\achannel\"d\n" +
+	"\x19ResolveTemplateIDResponse\x12\x1f\n" +
+	"\vtemplate_id\x18\x01 \x01(\x03R\n" +
+	"templateId\x12&\n" +
+	"\x0ftemplate_set_id\x18\x02 \x01(\x03R\rtemplateSetId*6\n" +
 	"\x05Scope\x12\x15\n" +
 	"\x11SCOPE_UNSPECIFIED\x10\x00\x12\n" +
 	"\n" +
 	"\x06TENANT\x10\x01\x12\n" +
 	"\n" +
-	"\x06GLOBAL\x10\x022\x9f\x05\n" +
+	"\x06GLOBAL\x10\x022\xf8\a\n" +
 	"\x0fTemplateService\x12j\n" +
 	"\x0fGetTemplateByID\x12*.ealert.template.v1.GetTemplateByIDRequest\x1a+.ealert.template.v1.GetTemplateByIDResponse\x12g\n" +
 	"\x0eCreateTemplate\x12).ealert.template.v1.CreateTemplateRequest\x1a*.ealert.template.v1.CreateTemplateResponse\x12g\n" +
 	"\x0eUpdateTemplate\x12).ealert.template.v1.UpdateTemplateRequest\x1a*.ealert.template.v1.UpdateTemplateResponse\x12j\n" +
 	"\x0fPublishTemplate\x12*.ealert.template.v1.PublishTemplateRequest\x1a+.ealert.template.v1.PublishTemplateResponse\x12d\n" +
 	"\rListTemplates\x12(.ealert.template.v1.ListTemplatesRequest\x1a).ealert.template.v1.ListTemplatesResponse\x12|\n" +
-	"\x15CreateTemplateVersion\x120.ealert.template.v1.CreateTemplateVersionRequest\x1a1.ealert.template.v1.CreateTemplateVersionResponseB\xd8\x01\n" +
+	"\x15CreateTemplateVersion\x120.ealert.template.v1.CreateTemplateVersionRequest\x1a1.ealert.template.v1.CreateTemplateVersionResponse\x12p\n" +
+	"\x11CreateTemplateSet\x12,.ealert.template.v1.CreateTemplateSetRequest\x1a-.ealert.template.v1.CreateTemplateSetResponse\x12s\n" +
+	"\x12ResolveTemplateSet\x12-.ealert.template.v1.ResolveTemplateSetRequest\x1a..ealert.template.v1.ResolveTemplateSetResponse\x12p\n" +
+	"\x11ResolveTemplateID\x12,.ealert.template.v1.ResolveTemplateIDRequest\x1a-.ealert.template.v1.ResolveTemplateIDResponseB\xd8\x01\n" +
 	"\x16com.ealert.template.v1B\rTemplateProtoP\x01ZEgithub.com/Duke1616/eflow/api/proto/gen/ealert/template/v1;templatev1\xa2\x02\x03ETX\xaa\x02\x12Ealert.Template.V1\xca\x02\x12Ealert\\Template\\V1\xe2\x02\x1eEalert\\Template\\V1\\GPBMetadata\xea\x02\x14Ealert::Template::V1b\x06proto3"
 
 var (
@@ -958,52 +1547,74 @@ func file_ealert_template_v1_template_proto_rawDescGZIP() []byte {
 }
 
 var file_ealert_template_v1_template_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_ealert_template_v1_template_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_ealert_template_v1_template_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_ealert_template_v1_template_proto_goTypes = []any{
 	(Scope)(0),                            // 0: ealert.template.v1.Scope
 	(*ChannelTemplate)(nil),               // 1: ealert.template.v1.ChannelTemplate
 	(*ChannelTemplateVersion)(nil),        // 2: ealert.template.v1.ChannelTemplateVersion
-	(*GetTemplateByIDRequest)(nil),        // 3: ealert.template.v1.GetTemplateByIDRequest
-	(*GetTemplateByIDResponse)(nil),       // 4: ealert.template.v1.GetTemplateByIDResponse
-	(*CreateTemplateRequest)(nil),         // 5: ealert.template.v1.CreateTemplateRequest
-	(*CreateTemplateResponse)(nil),        // 6: ealert.template.v1.CreateTemplateResponse
-	(*UpdateTemplateRequest)(nil),         // 7: ealert.template.v1.UpdateTemplateRequest
-	(*UpdateTemplateResponse)(nil),        // 8: ealert.template.v1.UpdateTemplateResponse
-	(*PublishTemplateRequest)(nil),        // 9: ealert.template.v1.PublishTemplateRequest
-	(*PublishTemplateResponse)(nil),       // 10: ealert.template.v1.PublishTemplateResponse
-	(*ListTemplatesRequest)(nil),          // 11: ealert.template.v1.ListTemplatesRequest
-	(*ListTemplatesResponse)(nil),         // 12: ealert.template.v1.ListTemplatesResponse
-	(*CreateTemplateVersionRequest)(nil),  // 13: ealert.template.v1.CreateTemplateVersionRequest
-	(*CreateTemplateVersionResponse)(nil), // 14: ealert.template.v1.CreateTemplateVersionResponse
-	(v1.Channel)(0),                       // 15: ealert.notification.v1.Channel
+	(*TemplateSet)(nil),                   // 3: ealert.template.v1.TemplateSet
+	(*TemplateSetItem)(nil),               // 4: ealert.template.v1.TemplateSetItem
+	(*GetTemplateByIDRequest)(nil),        // 5: ealert.template.v1.GetTemplateByIDRequest
+	(*GetTemplateByIDResponse)(nil),       // 6: ealert.template.v1.GetTemplateByIDResponse
+	(*CreateTemplateRequest)(nil),         // 7: ealert.template.v1.CreateTemplateRequest
+	(*CreateTemplateResponse)(nil),        // 8: ealert.template.v1.CreateTemplateResponse
+	(*UpdateTemplateRequest)(nil),         // 9: ealert.template.v1.UpdateTemplateRequest
+	(*UpdateTemplateResponse)(nil),        // 10: ealert.template.v1.UpdateTemplateResponse
+	(*PublishTemplateRequest)(nil),        // 11: ealert.template.v1.PublishTemplateRequest
+	(*PublishTemplateResponse)(nil),       // 12: ealert.template.v1.PublishTemplateResponse
+	(*ListTemplatesRequest)(nil),          // 13: ealert.template.v1.ListTemplatesRequest
+	(*ListTemplatesResponse)(nil),         // 14: ealert.template.v1.ListTemplatesResponse
+	(*CreateTemplateVersionRequest)(nil),  // 15: ealert.template.v1.CreateTemplateVersionRequest
+	(*CreateTemplateVersionResponse)(nil), // 16: ealert.template.v1.CreateTemplateVersionResponse
+	(*CreateTemplateSetRequest)(nil),      // 17: ealert.template.v1.CreateTemplateSetRequest
+	(*CreateTemplateSetResponse)(nil),     // 18: ealert.template.v1.CreateTemplateSetResponse
+	(*ResolveTemplateSetRequest)(nil),     // 19: ealert.template.v1.ResolveTemplateSetRequest
+	(*ResolveTemplateSetResponse)(nil),    // 20: ealert.template.v1.ResolveTemplateSetResponse
+	(*ResolveTemplateIDRequest)(nil),      // 21: ealert.template.v1.ResolveTemplateIDRequest
+	(*ResolveTemplateIDResponse)(nil),     // 22: ealert.template.v1.ResolveTemplateIDResponse
+	(v1.Channel)(0),                       // 23: ealert.notification.v1.Channel
 }
 var file_ealert_template_v1_template_proto_depIdxs = []int32{
-	15, // 0: ealert.template.v1.ChannelTemplate.channel:type_name -> ealert.notification.v1.Channel
+	23, // 0: ealert.template.v1.ChannelTemplate.channel:type_name -> ealert.notification.v1.Channel
 	2,  // 1: ealert.template.v1.ChannelTemplate.versions:type_name -> ealert.template.v1.ChannelTemplateVersion
 	0,  // 2: ealert.template.v1.ChannelTemplate.scope:type_name -> ealert.template.v1.Scope
-	1,  // 3: ealert.template.v1.GetTemplateByIDResponse.template:type_name -> ealert.template.v1.ChannelTemplate
-	1,  // 4: ealert.template.v1.CreateTemplateRequest.template:type_name -> ealert.template.v1.ChannelTemplate
-	1,  // 5: ealert.template.v1.CreateTemplateResponse.template:type_name -> ealert.template.v1.ChannelTemplate
-	1,  // 6: ealert.template.v1.UpdateTemplateRequest.template:type_name -> ealert.template.v1.ChannelTemplate
-	1,  // 7: ealert.template.v1.ListTemplatesResponse.templates:type_name -> ealert.template.v1.ChannelTemplate
-	2,  // 8: ealert.template.v1.CreateTemplateVersionResponse.version:type_name -> ealert.template.v1.ChannelTemplateVersion
-	3,  // 9: ealert.template.v1.TemplateService.GetTemplateByID:input_type -> ealert.template.v1.GetTemplateByIDRequest
-	5,  // 10: ealert.template.v1.TemplateService.CreateTemplate:input_type -> ealert.template.v1.CreateTemplateRequest
-	7,  // 11: ealert.template.v1.TemplateService.UpdateTemplate:input_type -> ealert.template.v1.UpdateTemplateRequest
-	9,  // 12: ealert.template.v1.TemplateService.PublishTemplate:input_type -> ealert.template.v1.PublishTemplateRequest
-	11, // 13: ealert.template.v1.TemplateService.ListTemplates:input_type -> ealert.template.v1.ListTemplatesRequest
-	13, // 14: ealert.template.v1.TemplateService.CreateTemplateVersion:input_type -> ealert.template.v1.CreateTemplateVersionRequest
-	4,  // 15: ealert.template.v1.TemplateService.GetTemplateByID:output_type -> ealert.template.v1.GetTemplateByIDResponse
-	6,  // 16: ealert.template.v1.TemplateService.CreateTemplate:output_type -> ealert.template.v1.CreateTemplateResponse
-	8,  // 17: ealert.template.v1.TemplateService.UpdateTemplate:output_type -> ealert.template.v1.UpdateTemplateResponse
-	10, // 18: ealert.template.v1.TemplateService.PublishTemplate:output_type -> ealert.template.v1.PublishTemplateResponse
-	12, // 19: ealert.template.v1.TemplateService.ListTemplates:output_type -> ealert.template.v1.ListTemplatesResponse
-	14, // 20: ealert.template.v1.TemplateService.CreateTemplateVersion:output_type -> ealert.template.v1.CreateTemplateVersionResponse
-	15, // [15:21] is the sub-list for method output_type
-	9,  // [9:15] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	0,  // 3: ealert.template.v1.TemplateSet.scope:type_name -> ealert.template.v1.Scope
+	4,  // 4: ealert.template.v1.TemplateSet.items:type_name -> ealert.template.v1.TemplateSetItem
+	23, // 5: ealert.template.v1.TemplateSetItem.channel:type_name -> ealert.notification.v1.Channel
+	1,  // 6: ealert.template.v1.GetTemplateByIDResponse.template:type_name -> ealert.template.v1.ChannelTemplate
+	1,  // 7: ealert.template.v1.CreateTemplateRequest.template:type_name -> ealert.template.v1.ChannelTemplate
+	1,  // 8: ealert.template.v1.CreateTemplateResponse.template:type_name -> ealert.template.v1.ChannelTemplate
+	1,  // 9: ealert.template.v1.UpdateTemplateRequest.template:type_name -> ealert.template.v1.ChannelTemplate
+	1,  // 10: ealert.template.v1.ListTemplatesResponse.templates:type_name -> ealert.template.v1.ChannelTemplate
+	2,  // 11: ealert.template.v1.CreateTemplateVersionResponse.version:type_name -> ealert.template.v1.ChannelTemplateVersion
+	0,  // 12: ealert.template.v1.CreateTemplateSetRequest.scope:type_name -> ealert.template.v1.Scope
+	4,  // 13: ealert.template.v1.CreateTemplateSetRequest.items:type_name -> ealert.template.v1.TemplateSetItem
+	3,  // 14: ealert.template.v1.CreateTemplateSetResponse.template_set:type_name -> ealert.template.v1.TemplateSet
+	3,  // 15: ealert.template.v1.ResolveTemplateSetResponse.template_set:type_name -> ealert.template.v1.TemplateSet
+	23, // 16: ealert.template.v1.ResolveTemplateIDRequest.channel:type_name -> ealert.notification.v1.Channel
+	5,  // 17: ealert.template.v1.TemplateService.GetTemplateByID:input_type -> ealert.template.v1.GetTemplateByIDRequest
+	7,  // 18: ealert.template.v1.TemplateService.CreateTemplate:input_type -> ealert.template.v1.CreateTemplateRequest
+	9,  // 19: ealert.template.v1.TemplateService.UpdateTemplate:input_type -> ealert.template.v1.UpdateTemplateRequest
+	11, // 20: ealert.template.v1.TemplateService.PublishTemplate:input_type -> ealert.template.v1.PublishTemplateRequest
+	13, // 21: ealert.template.v1.TemplateService.ListTemplates:input_type -> ealert.template.v1.ListTemplatesRequest
+	15, // 22: ealert.template.v1.TemplateService.CreateTemplateVersion:input_type -> ealert.template.v1.CreateTemplateVersionRequest
+	17, // 23: ealert.template.v1.TemplateService.CreateTemplateSet:input_type -> ealert.template.v1.CreateTemplateSetRequest
+	19, // 24: ealert.template.v1.TemplateService.ResolveTemplateSet:input_type -> ealert.template.v1.ResolveTemplateSetRequest
+	21, // 25: ealert.template.v1.TemplateService.ResolveTemplateID:input_type -> ealert.template.v1.ResolveTemplateIDRequest
+	6,  // 26: ealert.template.v1.TemplateService.GetTemplateByID:output_type -> ealert.template.v1.GetTemplateByIDResponse
+	8,  // 27: ealert.template.v1.TemplateService.CreateTemplate:output_type -> ealert.template.v1.CreateTemplateResponse
+	10, // 28: ealert.template.v1.TemplateService.UpdateTemplate:output_type -> ealert.template.v1.UpdateTemplateResponse
+	12, // 29: ealert.template.v1.TemplateService.PublishTemplate:output_type -> ealert.template.v1.PublishTemplateResponse
+	14, // 30: ealert.template.v1.TemplateService.ListTemplates:output_type -> ealert.template.v1.ListTemplatesResponse
+	16, // 31: ealert.template.v1.TemplateService.CreateTemplateVersion:output_type -> ealert.template.v1.CreateTemplateVersionResponse
+	18, // 32: ealert.template.v1.TemplateService.CreateTemplateSet:output_type -> ealert.template.v1.CreateTemplateSetResponse
+	20, // 33: ealert.template.v1.TemplateService.ResolveTemplateSet:output_type -> ealert.template.v1.ResolveTemplateSetResponse
+	22, // 34: ealert.template.v1.TemplateService.ResolveTemplateID:output_type -> ealert.template.v1.ResolveTemplateIDResponse
+	26, // [26:35] is the sub-list for method output_type
+	17, // [17:26] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_ealert_template_v1_template_proto_init() }
@@ -1017,7 +1628,7 @@ func file_ealert_template_v1_template_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ealert_template_v1_template_proto_rawDesc), len(file_ealert_template_v1_template_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   14,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

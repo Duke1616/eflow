@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
 	templatev1 "github.com/Duke1616/eflow/api/proto/gen/ealert/template/v1"
-	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/samber/lo"
 )
@@ -18,14 +18,12 @@ type ITemplateSyncer interface {
 
 // templateSyncer 模板同步器的核心实现结构体
 type templateSyncer struct {
-	workflowSvc    Service
 	templateClient templatev1.TemplateServiceClient
 }
 
 // NewTemplateSyncer 构建一个新的模板同步器实例
-func NewTemplateSyncer(workflowSvc Service, templateClient templatev1.TemplateServiceClient) ITemplateSyncer {
+func NewTemplateSyncer(templateClient templatev1.TemplateServiceClient) ITemplateSyncer {
 	return &templateSyncer{
-		workflowSvc:    workflowSvc,
 		templateClient: templateClient,
 	}
 }
@@ -44,33 +42,56 @@ func (s *templateSyncer) SyncAll(ctx context.Context) error {
 	return nil
 }
 
-// syncTemplate 执行单个通知模板的防重幂等自愈与绑定关系确认
+// syncTemplate 执行单个通知模板的防重幂等自愈
 func (s *templateSyncer) syncTemplate(ctx context.Context, cfg templateConfig) error {
-	// 1. 获取本地已存在的绑定规则 (0 表示默认全局绑定)
-	binding, err := s.workflowSvc.AdminNotifyBinding().GetEffective(ctx, 0, cfg.NotifyType, cfg.Channel.String())
-	if err != nil {
-		return fmt.Errorf("获取通知模板绑定失败: %w", err)
-	}
-
-	// 2. 确保模板实体正常、内容最新并存在全局 Scope 属性
-	templateId, err := s.ensureTemplate(ctx, binding, cfg)
+	resolved, err := s.resolveTemplateID(ctx, cfg)
 	if err != nil {
 		return err
 	}
 
-	// 3. 确保本地通知绑定映射关系处于正确状态
-	return s.ensureBinding(ctx, binding, cfg, templateId)
-}
-
-// ensureTemplate 校验模板存在，并负责对老版本 Scope 属性以及最新内容的变更进行自愈升级
-func (s *templateSyncer) ensureTemplate(ctx context.Context, binding domain.NotifyBinding, cfg templateConfig) (int64, error) {
-	// 模板从未初始化，开始全新创建
-	if binding.TemplateId == 0 {
-		return s.createAndPublish(ctx, cfg)
+	// 1. 确保渠道模板实体正常、内容最新并存在全局 Scope 属性
+	channelTemplateId, err := s.ensureChannelTemplate(ctx, cfg, resolved.GetTemplateId())
+	if err != nil {
+		return err
 	}
 
-	// 模板已存在，读取远程服务中的详情
-	tmpl, err := s.getTemplate(ctx, binding.TemplateId)
+	if resolved.GetTemplateSetId() != 0 && resolved.GetTemplateId() == channelTemplateId {
+		elog.Debug("默认通知模板集已存在，跳过模板集同步", elog.String("name", cfg.Name), elog.Int64("template_set_id", resolved.GetTemplateSetId()))
+		return nil
+	}
+
+	// 2. 首次初始化或模板集缺少当前渠道时，创建/补齐模板集
+	return s.ensureTemplateSet(ctx, cfg, channelTemplateId)
+}
+
+// resolveTemplateID 通过模板集 key 和 channel 优先定位已绑定的渠道模板。
+func (s *templateSyncer) resolveTemplateID(ctx context.Context, cfg templateConfig) (*templatev1.ResolveTemplateIDResponse, error) {
+	resp, err := s.templateClient.ResolveTemplateID(ctx, &templatev1.ResolveTemplateIDRequest{
+		BizId:   int64(notificationv1.Business_TICKET),
+		Key:     cfg.SetKey(),
+		Channel: cfg.Channel,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("解析默认通知模板ID失败: %w", err)
+	}
+	if resp == nil {
+		return &templatev1.ResolveTemplateIDResponse{}, nil
+	}
+	return resp, nil
+}
+
+// ensureChannelTemplate 校验渠道模板存在，并负责 Scope 以及最新内容的自愈升级
+func (s *templateSyncer) ensureChannelTemplate(ctx context.Context, cfg templateConfig, resolvedTemplateId int64) (int64, error) {
+	var (
+		tmpl *templatev1.ChannelTemplate
+		err  error
+	)
+
+	if resolvedTemplateId != 0 {
+		tmpl, err = s.getTemplate(ctx, resolvedTemplateId)
+	} else {
+		tmpl, err = s.createAndPublish(ctx, cfg)
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -86,25 +107,6 @@ func (s *templateSyncer) ensureTemplate(ctx context.Context, binding domain.Noti
 	}
 
 	return tmpl.Id, nil
-}
-
-// ensureBinding 保证本地存储的通知绑定映射关系存在且正确指向目标模板
-func (s *templateSyncer) ensureBinding(ctx context.Context, binding domain.NotifyBinding, cfg templateConfig, templateId int64) error {
-	// 若之前无绑定记录，进行全新创建
-	if binding.Id == 0 {
-		return s.createBinding(ctx, cfg.NotifyType, cfg.Channel.String(), templateId)
-	}
-
-	// 如果绑定的模板 ID 不一致，执行映射更新（自愈的边界防御设计）
-	if binding.TemplateId != templateId {
-		binding.TemplateId = templateId
-		if _, err := s.workflowSvc.AdminNotifyBinding().Update(ctx, binding); err != nil {
-			return fmt.Errorf("更新本地通知绑定失败: %w", err)
-		}
-		elog.Info("本地通知绑定关系自愈更新成功", elog.String("name", cfg.Name), elog.Int64("template_id", templateId))
-	}
-
-	return nil
 }
 
 // getTemplate 获取远程模板详情
@@ -164,8 +166,8 @@ func (s *templateSyncer) upgradeVersionIfNeeded(ctx context.Context, tmpl *templ
 	return nil
 }
 
-// createAndPublish 从零创建默认模板并激活发布
-func (s *templateSyncer) createAndPublish(ctx context.Context, cfg templateConfig) (int64, error) {
+// createAndPublish 创建默认渠道模板并激活发布；远端按 name/channel/scope 做幂等防重
+func (s *templateSyncer) createAndPublish(ctx context.Context, cfg templateConfig) (*templatev1.ChannelTemplate, error) {
 	createResp, err := s.templateClient.CreateTemplate(ctx, &templatev1.CreateTemplateRequest{
 		Template: &templatev1.ChannelTemplate{
 			Name:        cfg.Name,
@@ -182,22 +184,47 @@ func (s *templateSyncer) createAndPublish(ctx context.Context, cfg templateConfi
 		},
 	})
 	if err != nil {
-		return 0, fmt.Errorf("创建远程模板请求失败: %w", err)
+		return nil, fmt.Errorf("创建远程模板请求失败: %w", err)
 	}
 
 	tmpl := createResp.Template
 	if tmpl == nil || len(tmpl.Versions) == 0 {
-		return 0, fmt.Errorf("创建远程模板返回无效元数据")
+		return nil, fmt.Errorf("创建远程模板返回无效元数据")
 	}
 
 	templateId := tmpl.Id
 	versionId := tmpl.Versions[0].Id
 
 	if err = s.publish(ctx, templateId, versionId); err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	return templateId, nil
+	return s.getTemplate(ctx, templateId)
+}
+
+// ensureTemplateSet 创建/获取按渠道聚合后的模板集，并返回模板集 ID
+func (s *templateSyncer) ensureTemplateSet(ctx context.Context, cfg templateConfig, channelTemplateId int64) error {
+	resp, err := s.templateClient.CreateTemplateSet(ctx, &templatev1.CreateTemplateSetRequest{
+		Key:         cfg.SetKey(),
+		BizId:       int64(notificationv1.Business_TICKET),
+		Name:        cfg.Name,
+		Description: cfg.Desc,
+		Scope:       templatev1.Scope_GLOBAL,
+		Items: []*templatev1.TemplateSetItem{
+			{
+				Channel:    cfg.Channel,
+				TemplateId: channelTemplateId,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("创建远程模板集请求失败: %w", err)
+	}
+	if resp.TemplateSet == nil || resp.TemplateSet.Id == 0 {
+		return fmt.Errorf("创建远程模板集返回无效元数据")
+	}
+
+	return nil
 }
 
 // createVersion 在已有模板上新建版本
@@ -225,20 +252,6 @@ func (s *templateSyncer) publish(ctx context.Context, templateId, versionId int6
 	})
 	if err != nil {
 		return fmt.Errorf("发布活跃版本 %d 失败: %w", versionId, err)
-	}
-	return nil
-}
-
-// createBinding 本地写入新绑定规则记录
-func (s *templateSyncer) createBinding(ctx context.Context, notifyType domain.NotifyType, channel string, templateId int64) error {
-	_, err := s.workflowSvc.AdminNotifyBinding().Create(ctx, domain.NotifyBinding{
-		WorkflowId: 0,
-		NotifyType: notifyType,
-		Channel:    channel,
-		TemplateId: templateId,
-	})
-	if err != nil {
-		return fmt.Errorf("本地数据库写入绑定映射关系失败: %w", err)
 	}
 	return nil
 }
