@@ -47,16 +47,17 @@ func runMigrate(force bool) {
 
 	// NOTE: 转换为 eiam 共享迁移包的配置结构体
 	mCfg := migration.Config{
-		MongoDSN:    cfg.MongoDSN,
-		MongoDBName: cfg.MongoDBName,
-		MySQLSrcDSN: cfg.MySQLSrcDSN,
-		MySQLDstDSN: cfg.MySQLDstDSN,
-		BatchSize:   cfg.BatchSize,
-		Timeout:     cfg.Timeout,
-		AutoMigrate: cfg.AutoMigrate,
-		Truncate:    cfg.Truncate,
-		DryRun:      cfg.DryRun,
-		Force:       force,
+		MongoDSN:               cfg.MongoDSN,
+		MongoDBName:            cfg.MongoDBName,
+		MySQLSrcDSN:            cfg.MySQLSrcDSN,
+		MySQLDstDSN:            cfg.MySQLDstDSN,
+		BatchSize:              cfg.BatchSize,
+		Timeout:                cfg.Timeout,
+		AutoMigrate:            cfg.AutoMigrate,
+		Truncate:               cfg.Truncate,
+		DryRun:                 cfg.DryRun,
+		Force:                  force,
+		SkipResetAutoIncrement: !cfg.ResetAutoIncrement,
 	}
 
 	// NOTE: 构造 eiam 统一包的迁移器，并注入本地 eflow 特定的自动建表逻辑与默认租户覆盖选项
