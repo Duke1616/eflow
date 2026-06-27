@@ -6,6 +6,7 @@ import (
 
 	"github.com/Duke1616/eflow/cmd/migrate"
 	"github.com/Duke1616/eflow/cmd/server"
+	"github.com/Duke1616/eflow/cmd/sync"
 	"github.com/fsnotify/fsnotify"
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/spf13/cobra"
@@ -31,6 +32,7 @@ func main() {
 	// 3. 注册启动服务的子命令
 	rootCmd.AddCommand(server.NewCommand())
 	rootCmd.AddCommand(migrate.NewCommand())
+	rootCmd.AddCommand(sync.NewCommand())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -60,7 +62,6 @@ func initViper() {
 func setLogLevel() {
 	if viper.GetBool("log.debug") {
 		elog.DefaultLogger.SetLevel(elog.DebugLevel)
-		elog.DefaultLogger.Debug("已根据配置开启 Debug 日志级别")
 	} else {
 		elog.DefaultLogger.SetLevel(elog.InfoLevel)
 	}

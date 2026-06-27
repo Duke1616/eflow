@@ -161,3 +161,14 @@ func InitApp() (*App, error) {
 	}
 	return app, nil
 }
+
+// InitTemplateSyncer 初始化模板同步器
+func InitTemplateSyncer() (workflow.ITemplateSyncer, error) {
+	client := InitEtcdClient()
+	registry := InitRegistry(client)
+	ealertConn := InitEALERTGrpcClient(registry)
+	ealertClient := ealert.NewEALERTClient(ealertConn)
+	templateServiceClient := ealertClient.TemplateClient
+	iTemplateSyncer := workflow.NewTemplateSyncer(templateServiceClient)
+	return iTemplateSyncer, nil
+}

@@ -63,6 +63,7 @@ var (
 		dao.NewWorkflowDAO,
 		repository.NewWorkflowRepository,
 		workflowSvc.NewWorkflowService,
+		workflowSvc.NewTemplateSyncer,
 		workflow.NewHandler,
 		eflowEasyflow.NewLogicFlowToEngineConvert,
 	)
