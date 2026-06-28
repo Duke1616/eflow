@@ -7,6 +7,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/pkg/resolve"
+	"github.com/samber/lo"
 )
 
 // AppointResolver 指定内部人员解析器
@@ -39,12 +40,11 @@ func (r *AppointResolver) Resolve(ctx context.Context, target resolve.Target) ([
 }
 
 func toDomainUsers(src []*userv1.User) []domain.User {
-	res := make([]domain.User, 0, len(src))
-	for _, u := range src {
+	return lo.FilterMap(src, func(u *userv1.User, _ int) (domain.User, bool) {
 		if u == nil {
-			continue
+			return domain.User{}, false
 		}
-		res = append(res, domain.User{
+		return domain.User{
 			Id:           u.Id,
 			Username:     u.Username,
 			DisplayName:  u.DisplayName,
@@ -52,7 +52,6 @@ func toDomainUsers(src []*userv1.User) []domain.User {
 			Phone:        u.Phone,
 			LarkUserId:   u.LarkUserId,
 			WechatUserId: u.WechatUserId,
-		})
-	}
-	return res
+		}, true
+	})
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/pkg/resolve"
-	"github.com/ecodeclub/ekit/slice"
+	"github.com/samber/lo"
 )
 
 // TeamResolver 团队解析器
@@ -34,13 +34,15 @@ func (r *TeamResolver) Resolve(ctx context.Context, target resolve.Target) ([]do
 	}
 
 	// 将 string ID 列表转为 int64
-	ids := make([]int64, 0, len(target.Values))
-	for _, v := range target.Values {
+	ids, err := lo.MapErr(target.Values, func(v string, _ int) (int64, error) {
 		id, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("无效的团队 ID [%s]: %w", v, err)
+			return 0, fmt.Errorf("无效的团队 ID [%s]: %w", v, err)
 		}
-		ids = append(ids, id)
+		return id, nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// 批量查询团队信息
@@ -52,10 +54,9 @@ func (r *TeamResolver) Resolve(ctx context.Context, target resolve.Target) ([]do
 	}
 
 	// 合并所有团队的成员名单并去重
-	var usernames []string
-	for _, team := range resp.Teams {
-		usernames = slice.UnionSet(usernames, team.Members)
-	}
+	usernames := lo.Uniq(lo.FlatMap(resp.GetTeams(), func(team *teamv1.Team, _ int) []string {
+		return team.GetMembers()
+	}))
 
 	if len(usernames) == 0 {
 		return nil, nil

@@ -38,7 +38,7 @@ func (s *UserTestSuite) SetupTest() {
 	s.mockSender = sendermocks.NewMockNotificationSender(s.ctrl)
 	s.mockNotiSvc = notificationmocks.NewMockNotificationServiceClient(s.ctrl)
 
-	s.strategy = user.NewNotification(s.mockBase, nil, s.mockSender, s.mockNotiSvc)
+	s.strategy = user.NewNotification(s.mockBase, s.mockSender, s.mockNotiSvc)
 	s.mockBase.EXPECT().Logger().Return(elog.DefaultLogger).AnyTimes()
 }
 

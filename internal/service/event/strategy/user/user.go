@@ -12,7 +12,6 @@ import (
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	"github.com/Duke1616/eflow/internal/pkg/notification/sender"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
-	"github.com/Duke1616/eflow/internal/service/department"
 	"github.com/Duke1616/eflow/internal/service/event/errs"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
 	"github.com/ecodeclub/ekit/slice"
@@ -23,17 +22,15 @@ import (
 type Notification struct {
 	strategy.Service
 	sender          sender.NotificationSender
-	departmentSvc   department.Service
 	notificationSvc notificationv1.NotificationServiceClient
 }
 
-func NewNotification(base strategy.Service, departmentSvc department.Service,
-	sender sender.NotificationSender, notificationSvc notificationv1.NotificationServiceClient) *Notification {
+func NewNotification(base strategy.Service, sender sender.NotificationSender,
+	notificationSvc notificationv1.NotificationServiceClient) *Notification {
 
 	return &Notification{
 		Service:         base,
 		sender:          sender,
-		departmentSvc:   departmentSvc,
 		notificationSvc: notificationSvc,
 	}
 }

@@ -6,7 +6,6 @@ import (
 
 	easyEngine "github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Duke1616/eflow/internal/client/ealert"
-	"github.com/Duke1616/eflow/internal/client/ecmdb"
 	"github.com/Duke1616/eflow/internal/client/eiam"
 	"github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/event"
@@ -15,7 +14,6 @@ import (
 	"github.com/Duke1616/eflow/internal/pkg/resolve"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
-	departmentSvc "github.com/Duke1616/eflow/internal/service/department"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eflow/internal/service/event/assignees"
@@ -104,11 +102,6 @@ var (
 
 	// EventSet 流程事件模块的 Provider 集合
 	EventSet = wire.NewSet(
-		// 部门持久层依赖
-		dao.NewDepartmentDAO,
-		repository.NewDepartmentRepository,
-		departmentSvc.NewService,
-
 		// 7个审批人解析器
 		assignees.NewAppointResolver,
 		assignees.NewFounderResolver,
@@ -153,21 +146,18 @@ var (
 	grpcSet = wire.NewSet(
 		InitRegistry,
 		InitEIAMGrpcClient,
-		InitECMDBGrpcClient,
 		InitEALERTGrpcClient,
 		InitETASKGrpcClient,
 
 		// 引入本地客户端网关
-		ecmdb.NewECMDBClient,
 		eiam.NewEIAMClient,
 		ealert.NewEALERTClient,
 		etask.NewETASKClient,
 
 		// 导出具体的 Client，直接满足底层 Service 的注入需求！
-		wire.FieldsOf(new(*ecmdb.ECMDBClient), "RotaClient"),
-		wire.FieldsOf(new(*eiam.EIAMClient), "UserClient"),
+		wire.FieldsOf(new(*eiam.EIAMClient), "UserClient", "DepartmentClient"),
 		wire.FieldsOf(new(*etask.ETASKClient), "TaskClient", "ExecutorClient", "CodebookClient", "RunnerClient"),
-		wire.FieldsOf(new(*ealert.EALERTClient), "TeamClient", "NotificationClient", "TemplateClient"),
+		wire.FieldsOf(new(*ealert.EALERTClient), "TeamClient", "NotificationClient", "TemplateClient", "OnCallClient"),
 	)
 	// WebSet Web 服务 Provider 集合
 	WebSet = wire.NewSet(

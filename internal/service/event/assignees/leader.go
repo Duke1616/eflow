@@ -4,20 +4,20 @@ import (
 	"context"
 	"fmt"
 
+	departmentv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/department/v1"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/pkg/resolve"
-	"github.com/Duke1616/eflow/internal/service/department"
 )
 
 // LeaderResolver 部门领导解析器
 type LeaderResolver struct {
 	userSvc       userv1.UserServiceClient
-	departmentSvc department.Service
+	departmentSvc departmentv1.DepartmentServiceClient
 }
 
-func NewLeaderResolver(userSvc userv1.UserServiceClient, departmentSvc department.Service) *LeaderResolver {
+func NewLeaderResolver(userSvc userv1.UserServiceClient, departmentSvc departmentv1.DepartmentServiceClient) *LeaderResolver {
 	return &LeaderResolver{userSvc: userSvc, departmentSvc: departmentSvc}
 }
 
@@ -31,33 +31,17 @@ func (r *LeaderResolver) Resolve(ctx context.Context, target resolve.Target) ([]
 		return nil, fmt.Errorf("缺少发起人信息")
 	}
 
-	resp, err := r.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
-		Usernames: []string{target.Values[0]},
-	})
+	depart, err := queryFounderDepartment(ctx, r.userSvc, r.departmentSvc, target.Values[0])
 	if err != nil {
-		return nil, fmt.Errorf("查询发起人失败: %w", err)
+		return nil, err
 	}
 
-	if len(resp.Users) == 0 {
-		return nil, fmt.Errorf("发起人 [%s] 不存在", target.Values[0])
-	}
-
-	startUser := resp.Users[0]
-	if startUser.DepartmentId == 0 {
-		return nil, fmt.Errorf("发起人 [%s] 未分配部门", target.Values[0])
-	}
-
-	depart, err := r.departmentSvc.FindById(ctx, startUser.DepartmentId)
-	if err != nil {
-		return nil, fmt.Errorf("查询部门 [%d] 失败: %w", startUser.DepartmentId, err)
-	}
-
-	if len(depart.Leaders) == 0 {
+	if len(depart.GetLeaders()) == 0 {
 		return nil, nil
 	}
 
 	respLeaders, err := r.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
-		Usernames: depart.Leaders,
+		Usernames: depart.GetLeaders(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("批量查询部门主管信息失败: %w", err)
