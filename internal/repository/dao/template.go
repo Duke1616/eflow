@@ -45,12 +45,10 @@ type TemplateGroup struct {
 	Utime    int64  `gorm:"column:utime;type:bigint;comment:'修改时间(毫秒)'"`
 }
 
-// TemplateGroupSummary 模板分组摘要查询结果
-type TemplateGroupSummary struct {
-	Id    int64  `gorm:"column:id"`
-	Name  string `gorm:"column:name"`
-	Icon  string `gorm:"column:icon"`
-	Total int64  `gorm:"column:total"`
+// TemplateGroupCount 模板分组数量查询结果
+type TemplateGroupCount struct {
+	GroupId int64 `gorm:"column:group_id"`
+	Total   int64 `gorm:"column:total"`
 }
 
 // TableName 指定物理表名
@@ -118,10 +116,12 @@ type ITemplateGroupDAO interface {
 	DeleteGroup(ctx context.Context, id int64) (int64, error)
 	// ListGroup 分页获取模板的分类分组列表（按创建时间逆序排列）
 	ListGroup(ctx context.Context, offset, limit int64) ([]TemplateGroup, error)
+	// ListAllGroup 获取当前租户空间下所有模板分类分组（按创建时间逆序排列）
+	ListAllGroup(ctx context.Context) ([]TemplateGroup, error)
 	// CountGroup 统计系统当前可用的模板分类分组总条数
 	CountGroup(ctx context.Context) (int64, error)
-	// ListGroupSummaries 获取模板分组摘要及每组模板数量
-	ListGroupSummaries(ctx context.Context) ([]TemplateGroupSummary, error)
+	// CountTemplateByGroup 统计当前租户空间下每个分组的模板数量
+	CountTemplateByGroup(ctx context.Context) ([]TemplateGroupCount, error)
 }
 
 // ITemplateFavoriteDAO 模板收藏物理数据访问接口
@@ -301,22 +301,28 @@ func (g *gormTemplateDAO) ListGroup(ctx context.Context, offset, limit int64) ([
 	return gs, err
 }
 
+func (g *gormTemplateDAO) ListAllGroup(ctx context.Context) ([]TemplateGroup, error) {
+	var gs []TemplateGroup
+	err := g.db.WithContext(ctx).
+		Order("ctime desc").
+		Find(&gs).Error
+	return gs, err
+}
+
 func (g *gormTemplateDAO) CountGroup(ctx context.Context) (int64, error) {
 	var total int64
 	err := g.db.WithContext(ctx).Model(&TemplateGroup{}).Count(&total).Error
 	return total, err
 }
 
-func (g *gormTemplateDAO) ListGroupSummaries(ctx context.Context) ([]TemplateGroupSummary, error) {
-	var summaries []TemplateGroupSummary
+func (g *gormTemplateDAO) CountTemplateByGroup(ctx context.Context) ([]TemplateGroupCount, error) {
+	var counts []TemplateGroupCount
 	err := g.db.WithContext(ctx).
-		Table("template_group AS tg").
-		Select("tg.id, tg.name, tg.icon, COUNT(t.id) AS total").
-		Joins("LEFT JOIN template AS t ON t.group_id = tg.id").
-		Group("tg.id, tg.name, tg.icon").
-		Order("tg.ctime desc").
-		Scan(&summaries).Error
-	return summaries, err
+		Model(&Template{}).
+		Select("group_id, COUNT(*) AS total").
+		Group("group_id").
+		Scan(&counts).Error
+	return counts, err
 }
 
 // --- Favorite 收藏物理访问实现 ---

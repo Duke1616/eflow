@@ -97,6 +97,7 @@ func InitApp() (*App, error) {
 	appointResolver := assignees.NewAppointResolver(userServiceClient)
 	founderResolver := assignees.NewFounderResolver(userServiceClient)
 	departmentServiceClient := eiamClient.DepartmentClient
+	departmentResolver := assignees.NewDepartmentResolver(departmentServiceClient)
 	leaderResolver := assignees.NewLeaderResolver(userServiceClient, departmentServiceClient)
 	mainLeaderResolver := assignees.NewMainLeaderResolver(userServiceClient, departmentServiceClient)
 	ealertConn := InitEALERTGrpcClient(registry)
@@ -106,7 +107,7 @@ func InitApp() (*App, error) {
 	teamServiceClient := ealertClient.TeamClient
 	teamResolver := assignees.NewTeamResolver(teamServiceClient, userServiceClient)
 	templateResolver := assignees.NewTemplateResolver(userServiceClient)
-	resolveEngine := InitResolveEngine(appointResolver, founderResolver, leaderResolver, mainLeaderResolver, onCallResolver, teamResolver, templateResolver)
+	resolveEngine := InitResolveEngine(appointResolver, founderResolver, departmentResolver, leaderResolver, mainLeaderResolver, onCallResolver, teamResolver, templateResolver)
 	strategyService := strategy.NewService(userServiceClient, service, taskService, ticketService, engineService, resolveEngine)
 	larkClient := InitLarkClient()
 	notificationServiceClient := ealertClient.NotificationClient

@@ -102,9 +102,10 @@ var (
 
 	// EventSet 流程事件模块的 Provider 集合
 	EventSet = wire.NewSet(
-		// 7个审批人解析器
+		// 8个审批人解析器
 		assignees.NewAppointResolver,
 		assignees.NewFounderResolver,
+		assignees.NewDepartmentResolver,
 		assignees.NewLeaderResolver,
 		assignees.NewMainLeaderResolver,
 		assignees.NewOnCallResolver,
@@ -213,10 +214,11 @@ func InitSendStrategy(
 	return strategy.NewDispatcher(user, auto, startSvc, chatSvc, carbonCopy, base)
 }
 
-// InitResolveEngine 并发规则解析引擎及七大审批解析器自动注册
+// InitResolveEngine 并发规则解析引擎及审批解析器自动注册
 func InitResolveEngine(
 	appoint *assignees.AppointResolver,
 	founder *assignees.FounderResolver,
+	department *assignees.DepartmentResolver,
 	leader *assignees.LeaderResolver,
 	mainLeader *assignees.MainLeaderResolver,
 	onCall *assignees.OnCallResolver,
@@ -227,6 +229,7 @@ func InitResolveEngine(
 	engine.Register(
 		appoint,
 		founder,
+		department,
 		leader,
 		mainLeader,
 		onCall,

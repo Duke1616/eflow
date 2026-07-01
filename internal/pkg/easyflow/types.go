@@ -165,6 +165,8 @@ const (
 	LEADER Rule = "leaders"
 	// MAIN_LEADER 分管领导
 	MAIN_LEADER Rule = "main_leader"
+	// DEPARTMENT 指定部门成员
+	DEPARTMENT Rule = "department"
 	// ON_CALL 值班排班人员
 	ON_CALL Rule = "on_call"
 	// TEAM 团队人员

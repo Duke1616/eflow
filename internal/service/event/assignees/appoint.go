@@ -46,6 +46,7 @@ func toDomainUsers(src []*userv1.User) []domain.User {
 		}
 		return domain.User{
 			Id:           u.Id,
+			DepartmentId: u.DepartmentId,
 			Username:     u.Username,
 			DisplayName:  u.DisplayName,
 			Email:        u.Email,

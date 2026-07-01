@@ -218,16 +218,26 @@ func (repo *templateRepository) TotalGroup(ctx context.Context) (int64, error) {
 }
 
 func (repo *templateRepository) ListGroupSummaries(ctx context.Context) ([]domain.TemplateGroupSummary, error) {
-	summaries, err := repo.dao.ListGroupSummaries(ctx)
+	groups, err := repo.dao.ListAllGroup(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(summaries, func(idx int, src dao.TemplateGroupSummary) domain.TemplateGroupSummary {
+	counts, err := repo.dao.CountTemplateByGroup(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	countByGroupId := make(map[int64]int64, len(counts))
+	for _, count := range counts {
+		countByGroupId[count.GroupId] = count.Total
+	}
+
+	return slice.Map(groups, func(idx int, src dao.TemplateGroup) domain.TemplateGroupSummary {
 		return domain.TemplateGroupSummary{
 			Id:    src.Id,
 			Name:  src.Name,
 			Icon:  src.Icon,
-			Total: src.Total,
+			Total: countByGroupId[src.Id],
 		}
 	}), nil
 }

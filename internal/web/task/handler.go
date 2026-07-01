@@ -149,6 +149,7 @@ func (h *Handler) toTaskVo(req domain.Task) Task {
 	return Task{
 		Id:              req.Id,
 		TicketID:        req.TicketID,
+		Ctime:           formatMilli(req.Ctime),
 		Language:        req.Language,
 		Code:            req.Code,
 		Kind:            string(req.Kind),

@@ -23,6 +23,7 @@ type ListTaskByInstanceIDReq struct {
 type Task struct {
 	Id              int64  `json:"id"`
 	TicketID        int64  `json:"ticket_id"`
+	Ctime           string `json:"ctime"`
 	Kind            string `json:"kind"`
 	CodebookID      int64  `json:"codebook_id"`
 	Target          string `json:"target"`
