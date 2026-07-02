@@ -76,7 +76,7 @@ type Task struct {
 	Args            sqlx.JsonField[domain.TaskArgs]    `gorm:"column:args;type:json;comment:'流程变量透传临时参数json'"`
 	Variables       sqlx.JsonField[[]domain.Variables] `gorm:"column:variables;type:json;comment:'输入的环境变量快照json'"`
 	Status          uint8                              `gorm:"column:status;type:tinyint unsigned;index;comment:'状态 1:SUCCESS 2:FAILED 3:RUNNING 4:WAITING 5:BLOCKED 6:SCHEDULED'"`
-	Result          string                             `gorm:"column:result;type:text;comment:'执行输出日志/返回结果'"`
+	Result          string                             `gorm:"column:result;type:mediumtext;comment:'执行输出日志/返回结果'"`
 	WantResult      string                             `gorm:"column:want_result;type:text;comment:'预期执行结果'"`
 	ExternalId      string                             `gorm:"column:external_id;type:varchar(128);index;comment:'外部分布式系统任务实例ID'"`
 	StartTime       int64                              `gorm:"column:start_time;type:bigint;comment:'任务实际开始时间(毫秒戳)'"`
@@ -123,7 +123,7 @@ func (g *gormTaskDAO) UpdateTask(ctx context.Context, req Task) (int64, error) {
 		"current_node_id":  req.CurrentNodeId,
 		"trigger_position": req.TriggerPosition,
 		"workflow_id":      req.WorkflowId,
-		"codebook_id":     req.CodebookId,
+		"codebook_id":      req.CodebookId,
 		"code":             req.Code,
 		"language":         req.Language,
 		"args":             req.Args,
