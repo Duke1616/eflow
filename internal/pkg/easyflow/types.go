@@ -289,6 +289,14 @@ type Assignee struct {
 	Values []string `json:"values"` // 规则的目标值列表（使用 string 兼容更多实体标识）
 }
 
+// Normalize 兼容历史数据中只有审批人列表、没有显式规则类型的配置。
+func (a Assignee) Normalize() Assignee {
+	if a.Rule == "" && len(a.Values) > 0 {
+		a.Rule = APPOINT
+	}
+	return a
+}
+
 type UserProperty struct {
 	Name          string     `json:"name"`           // 节点名称
 	Approved      []string   `json:"approved"`       // 审批人、抄送人
@@ -308,29 +316,27 @@ func (u *UserProperty) getRule() Rule {
 	return u.Type
 }
 
+func normalizeAssignees(assignees []Assignee) []Assignee {
+	res := make([]Assignee, 0, len(assignees))
+	for _, assignee := range assignees {
+		res = append(res, assignee.Normalize())
+	}
+	return res
+}
+
 // NormalizeAssignees 统一格式化获取人员分配规则，屏蔽新老版本数据差异
 func (u *UserProperty) NormalizeAssignees() []Assignee {
-	// 默认将使用新版本模式
 	if len(u.Assignees) > 0 {
-		return u.Assignees
+		return normalizeAssignees(u.Assignees)
 	}
 
-	// 兼容老版本情况
-	switch u.getRule() {
+	rule := u.getRule()
+	switch rule {
 	case TEMPLATE:
-		return []Assignee{
-			{
-				Rule:   u.Rule,
-				Values: []string{u.TemplateField},
-			},
-		}
+		return []Assignee{{Rule: rule, Values: []string{u.TemplateField}}}
 	default:
-		return []Assignee{
-			{
-				Rule:   u.Rule,
-				Values: u.Approved,
-			},
-		}
+		assignee := Assignee{Rule: rule, Values: u.Approved}
+		return []Assignee{assignee.Normalize()}
 	}
 }
 

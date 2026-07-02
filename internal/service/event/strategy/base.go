@@ -292,12 +292,13 @@ func (s *service) IsGlobalNotify(wf domain.Workflow) bool {
 
 func (s *service) EnrichTargets(info Info, assignees []easyflow.Assignee) []resolve.Target {
 	return slice.Map(assignees, func(idx int, src easyflow.Assignee) resolve.Target {
+		src = src.Normalize()
+		values := src.Values
 		if src.Rule == "" {
 			s.logger.Warn("发现未定义的审批规则类型",
 				elog.String("nodeId", info.CurrentNode.NodeID),
 				elog.Any("assignee", src))
 		}
-		values := src.Values
 		switch src.Rule {
 		case easyflow.LEADER, easyflow.MAIN_LEADER, easyflow.FOUNDER:
 			if len(values) == 0 {

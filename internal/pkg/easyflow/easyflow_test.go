@@ -142,6 +142,26 @@ func TestUserProperty_NormalizeAssignees(t *testing.T) {
 				{Rule: APPOINT, Values: []string{"user3"}},
 			},
 		},
+		{
+			name: "老版本模式-缺省规则但有审批人",
+			property: UserProperty{
+				Approved: []string{"user4", "user5"},
+			},
+			want: []Assignee{
+				{Rule: APPOINT, Values: []string{"user4", "user5"}},
+			},
+		},
+		{
+			name: "新版数据模式-缺省规则但有审批人",
+			property: UserProperty{
+				Assignees: []Assignee{
+					{Values: []string{"user6", "user7"}},
+				},
+			},
+			want: []Assignee{
+				{Rule: APPOINT, Values: []string{"user6", "user7"}},
+			},
+		},
 	}
 
 	for _, tc := range testCases {
