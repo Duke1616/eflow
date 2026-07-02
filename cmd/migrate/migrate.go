@@ -60,6 +60,16 @@ func runMigrate(force bool) {
 		SkipResetAutoIncrement: !cfg.ResetAutoIncrement,
 	}
 
+	var postHooks []migration.Hook
+	if cfg.ResetAutoIncrement {
+		postHooks = append(postHooks, migrations.SyncProcessInstanceAutoIncrement)
+	}
+	postHooks = append(postHooks,
+		migrations.ResolveTaskCodebookIDs,
+		migrations.ResolveWorkflowCodebookIDs,
+		migrations.ResolveWorkflowInstanceFlowCodebookIDs,
+	)
+
 	// NOTE: 构造 eiam 统一包的迁移器，并注入本地 eflow 特定的自动建表逻辑与默认租户覆盖选项
 	runner := migration.NewRunner(mCfg, migrations.All(),
 		migration.WithDefaultTenantID(migrations.DefaultTenantID),
@@ -70,11 +80,7 @@ func runMigrate(force bool) {
 			easyEngine.DB = db
 			return easyEngine.DatabaseInitialize()
 		}),
-		migration.WithPostHooks(
-			migrations.ResolveTaskCodebookIDs,
-			migrations.ResolveWorkflowCodebookIDs,
-			migrations.ResolveWorkflowInstanceFlowCodebookIDs,
-		),
+		migration.WithPostHooks(postHooks...),
 	)
 
 	if err = runner.Run(ctx); err != nil {

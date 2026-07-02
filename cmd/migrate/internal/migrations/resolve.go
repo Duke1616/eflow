@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"strings"
@@ -37,6 +38,84 @@ func loadCodebookLookup(ctx context.Context, env migration.MigrationEnv) (map[st
 	}
 
 	return lookup, cursor.Err()
+}
+
+// SyncProcessInstanceAutoIncrement 校准 easyflow 流程实例表的自增起点。
+//
+// proc_inst 只保存运行中的实例，结束后的实例会迁移到 hist_proc_inst 并从主表删除。
+// 因此 proc_inst 的 MAX(id)+1 不能代表下一个安全的流程实例 ID，必须综合所有引用过
+// proc_inst_id 的目标表；源库 information_schema 可读时，再优先参考源库真实自增值。
+func SyncProcessInstanceAutoIncrement(ctx context.Context, env migration.MigrationEnv) error {
+	if env.DryRun {
+		log.Printf("[dry-run] 跳过 proc_inst 自增值校准")
+		return nil
+	}
+
+	nextID, err := nextProcessInstanceIDFromTarget(ctx, env)
+	if err != nil {
+		return err
+	}
+
+	if srcNextID := readAutoIncrement(ctx, env.MySQLSrc, "源库", "proc_inst"); srcNextID > nextID {
+		nextID = srcNextID
+	}
+	if dstNextID := readAutoIncrement(ctx, env.MySQLDst, "目标库", "proc_inst"); dstNextID > nextID {
+		nextID = dstNextID
+	}
+
+	if nextID <= 1 {
+		return nil
+	}
+
+	if err = env.MySQLDst.WithContext(ctx).
+		Exec(fmt.Sprintf("ALTER TABLE `proc_inst` AUTO_INCREMENT = %d", nextID)).
+		Error; err != nil {
+		return fmt.Errorf("校准 proc_inst 自增值失败: %w", err)
+	}
+
+	log.Printf("proc_inst 自增值已校准为: %d", nextID)
+	return nil
+}
+
+func nextProcessInstanceIDFromTarget(ctx context.Context, env migration.MigrationEnv) (int64, error) {
+	var nextID int64
+	err := env.MySQLDst.WithContext(ctx).Raw(`
+SELECT GREATEST(
+    COALESCE((SELECT MAX(id) FROM proc_inst), 0),
+    COALESCE((SELECT MAX(proc_inst_id) FROM hist_proc_inst), 0),
+    COALESCE((SELECT MAX(proc_inst_id) FROM proc_task), 0),
+    COALESCE((SELECT MAX(proc_inst_id) FROM hist_proc_task), 0),
+    COALESCE((SELECT MAX(proc_inst_id) FROM proc_inst_variable), 0),
+    COALESCE((SELECT MAX(proc_inst_id) FROM hist_proc_inst_variable), 0),
+    COALESCE((SELECT MAX(process_instance_id) FROM ticket), 0),
+    COALESCE((SELECT MAX(process_inst_id) FROM task), 0)
+) + 1
+`).Scan(&nextID).Error
+	if err != nil {
+		return 0, fmt.Errorf("计算目标库 proc_inst 下一自增值失败: %w", err)
+	}
+	return nextID, nil
+}
+
+func readAutoIncrement(ctx context.Context, db *gorm.DB, name, table string) int64 {
+	if db == nil {
+		return 0
+	}
+
+	dbName := db.Migrator().CurrentDatabase()
+	var autoInc sql.NullInt64
+	err := db.WithContext(ctx).Raw(
+		"SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
+		dbName, table,
+	).Scan(&autoInc).Error
+	if err != nil {
+		log.Printf("%s读取 %s.AUTO_INCREMENT 失败，将使用目标引用表兜底: %v", name, table, err)
+		return 0
+	}
+	if !autoInc.Valid {
+		return 0
+	}
+	return autoInc.Int64
 }
 
 // ResolveTaskCodebookIDs 在 task 数据迁移完成后，回填 task.codebook_id
