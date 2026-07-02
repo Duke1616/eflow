@@ -500,6 +500,11 @@ func (s *taskService) retry(ctx context.Context, task domain.Task, auto bool) er
 		})
 		return nil
 	}
+	refreshed, err := s.refreshTaskSnapshot(ctx, task)
+	if err != nil {
+		return err
+	}
+	task = refreshed
 	res := domain.TaskResult{Id: task.Id, TriggerPosition: domain.TriggerPositionManualRetry.ToString(), Status: domain.SCHEDULED}
 	if auto {
 		res.TriggerPosition = domain.TriggerPositionAutoRetry.ToString()
@@ -507,6 +512,15 @@ func (s *taskService) retry(ctx context.Context, task domain.Task, auto bool) er
 	}
 	_, _ = s.UpdateTaskStatus(ctx, res)
 	return s.dispatchTask(ctx, task)
+}
+
+func (s *taskService) refreshTaskSnapshot(ctx context.Context, task domain.Task) (domain.Task, error) {
+	resp, err := s.ticketSvc.GetByID(ctx, task.TicketID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	ctx = ctxutil.WithTenantID(ctx, resp.TenantID)
+	return s.prepareTask(ctx, task, resp)
 }
 
 func (s *taskService) handleTaskError(ctx context.Context, taskID int64, triggerPosition string, status domain.TaskStatus, err error) error {
