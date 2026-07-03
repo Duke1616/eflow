@@ -14,7 +14,7 @@ import (
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
-	dispatch2 "github.com/Duke1616/eflow/internal/service/dispatch"
+	"github.com/Duke1616/eflow/internal/service/dispatch"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eflow/internal/service/event/assignees"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
@@ -24,7 +24,7 @@ import (
 	"github.com/Duke1616/eflow/internal/service/event/strategy/start"
 	"github.com/Duke1616/eflow/internal/service/event/strategy/user"
 	"github.com/Duke1616/eflow/internal/service/task"
-	"github.com/Duke1616/eflow/internal/service/task/dispatch"
+	dispatch2 "github.com/Duke1616/eflow/internal/service/task/dispatch"
 	"github.com/Duke1616/eflow/internal/service/task/scheduler"
 	"github.com/Duke1616/eflow/internal/service/template"
 	"github.com/Duke1616/eflow/internal/service/ticket"
@@ -75,18 +75,18 @@ func InitApp() (*App, error) {
 		return nil, err
 	}
 	ticketService := ticket.NewService(ticketRepository, service, engineService, workflowService, ticketEventProducer)
+	dispatchDAO := dao.NewDispatchDAO(db)
+	dispatchRepository := repository.NewDispatchRepository(dispatchDAO)
+	dispatchService := dispatch.NewService(dispatchRepository)
 	schedulerScheduler := scheduler.NewScheduler()
 	taskServiceClient := etaskClient.TaskClient
-	taskDispatcher := dispatch.NewTaskDispatcher(mq, taskServiceClient, taskRepository)
+	taskDispatcher := dispatch2.NewTaskDispatcher(mq, taskServiceClient, taskRepository)
 	eiamConn := InitEIAMGrpcClient(registry)
 	eiamClient := eiam.NewEIAMClient(eiamConn)
 	userServiceClient := eiamClient.UserClient
-	taskService := task.NewTaskService(taskRepository, workflowService, codebookServiceClient, runnerServiceClient, engineService, ticketService, schedulerScheduler, taskDispatcher, userServiceClient)
+	taskService := task.NewTaskService(taskRepository, workflowService, codebookServiceClient, runnerServiceClient, engineService, ticketService, dispatchService, schedulerScheduler, taskDispatcher, userServiceClient)
 	taskHandler := task2.NewHandler(taskService)
 	ticketHandler := ticket2.NewHandler(ticketService, engineService, userServiceClient, workflowService)
-	dispatchDAO := dao.NewDispatchDAO(db)
-	dispatchRepository := repository.NewDispatchRepository(dispatchDAO)
-	dispatchService := dispatch2.NewService(dispatchRepository)
 	dispatchHandler := dispatch3.NewHandler(dispatchService)
 	listener := InitListener()
 	component := InitGinWebServer(v, sdk, syncer, v2, handler, workflowHandler, taskHandler, ticketHandler, dispatchHandler, listener)

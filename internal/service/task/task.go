@@ -15,6 +15,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
+	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eflow/internal/service/task/dispatch"
 	"github.com/Duke1616/eflow/internal/service/task/scheduler"
@@ -84,6 +85,7 @@ type taskService struct {
 	codebookCli codebookv1.CodebookServiceClient
 	runnerCli   runnerv1.RunnerServiceClient
 	ticketSvc   ticket.Service
+	dispatchSvc dispatchSvc.Service
 	scheduler   scheduler.Scheduler
 	dispatcher  dispatch.TaskDispatcher
 	userClient  userv1.UserServiceClient
@@ -91,7 +93,8 @@ type taskService struct {
 }
 
 func NewTaskService(repo repository.TaskRepository, workflowSvc workflow.Service, codebookCli codebookv1.CodebookServiceClient,
-	runnerCli runnerv1.RunnerServiceClient, engineSvc engine.Service, ticketSvc ticket.Service, scheduler scheduler.Scheduler, dispatcher dispatch.TaskDispatcher,
+	runnerCli runnerv1.RunnerServiceClient, engineSvc engine.Service, ticketSvc ticket.Service, dispatchSvc dispatchSvc.Service,
+	scheduler scheduler.Scheduler, dispatcher dispatch.TaskDispatcher,
 	userClient userv1.UserServiceClient) Service {
 	return &taskService{
 		repo:        repo,
@@ -100,6 +103,7 @@ func NewTaskService(repo repository.TaskRepository, workflowSvc workflow.Service
 		codebookCli: codebookCli,
 		runnerCli:   runnerCli,
 		ticketSvc:   ticketSvc,
+		dispatchSvc: dispatchSvc,
 		scheduler:   scheduler,
 		dispatcher:  dispatcher,
 		userClient:  userClient,
@@ -334,7 +338,7 @@ type taskProcessContext struct {
 	codebook   *codebookv1.Codebook
 }
 
-func (s *taskService) buildTaskProcessContext(ctx context.Context, task domain.Task) (*taskProcessContext, error) {
+func (s *taskService) buildTaskProcessContext(ctx context.Context, task domain.Task, ticket domain.Ticket, args map[string]interface{}) (*taskProcessContext, error) {
 	// 1. 获取流程实例详情，拿到对应的业务流程定义 ID 和版本
 	inst, err := s.engineSvc.GetInstanceByID(ctx, task.ProcessInstId)
 	if err != nil {
@@ -370,30 +374,15 @@ func (s *taskService) buildTaskProcessContext(ctx context.Context, task domain.T
 		}
 	}
 
-	// 4. 动态匹配或静态查找执行节点 Runner 实体
-	s.logger.Info("准备匹配 Runner 执行器",
-		elog.Int64("taskId", task.Id),
-		elog.Int64("codebookId", automation.CodebookId),
-		elog.String("tag", automation.Tag),
-	)
-	runnerResp, err := s.runnerCli.FindRunnerByCodebookIdAndTag(ctx, &runnerv1.FindRunnerByCodebookIdAndTagRequest{
-		CodebookId: automation.CodebookId,
-		Tag:        automation.Tag,
-	})
+	// 4. 优先按模板自动派发规则匹配 Runner，未命中时回退到节点 tag 匹配
+	runner, err := s.resolveRunner(ctx, task, ticket.TemplateId, automation, args)
 	if err != nil {
-		s.logger.Error("获取执行器 Runner 失败",
-			elog.Int64("taskId", task.Id),
-			elog.Int64("codebookId", automation.CodebookId),
-			elog.String("tag", automation.Tag),
-			elog.FieldErr(err),
-		)
 		return nil, &taskPrepareError{
 			triggerPosition: domain.TriggerPositionErrorGetDispatcherNode.ToString(),
 			status:          domain.BLOCKED,
 			err:             err,
 		}
 	}
-	runner := runnerResp.GetRunner()
 
 	s.logger.Info("成功匹配 Runner 执行器",
 		elog.Int64("taskId", task.Id),
@@ -425,20 +414,114 @@ func (s *taskService) buildTaskProcessContext(ctx context.Context, task domain.T
 	}, nil
 }
 
+func (s *taskService) resolveRunner(ctx context.Context, task domain.Task, templateID int64, automation easyflow.AutomationProperty, args map[string]interface{}) (*runnerv1.Runner, error) {
+	s.logger.Info("准备匹配 Runner 执行器",
+		elog.Int64("taskId", task.Id),
+		elog.Int64("templateId", templateID),
+		elog.Int64("codebookId", automation.CodebookId),
+		elog.String("tag", automation.Tag),
+	)
+
+	if templateID > 0 && s.dispatchSvc != nil {
+		runner, ok := s.resolveRunnerByDispatch(ctx, task, templateID, automation, args)
+		if ok {
+			return runner, nil
+		}
+	}
+
+	runnerResp, err := s.runnerCli.FindRunnerByCodebookIdAndTag(ctx, &runnerv1.FindRunnerByCodebookIdAndTagRequest{
+		CodebookId: automation.CodebookId,
+		Tag:        automation.Tag,
+	})
+	if err != nil {
+		s.logger.Error("获取执行器 Runner 失败",
+			elog.Int64("taskId", task.Id),
+			elog.Int64("codebookId", automation.CodebookId),
+			elog.String("tag", automation.Tag),
+			elog.FieldErr(err),
+		)
+		return nil, err
+	}
+	return runnerResp.GetRunner(), nil
+}
+
+func (s *taskService) resolveRunnerByDispatch(ctx context.Context, task domain.Task, templateID int64, automation easyflow.AutomationProperty, args map[string]interface{}) (*runnerv1.Runner, bool) {
+	dispatches, _, err := s.dispatchSvc.ListByTemplateId(ctx, 0, 1000, templateID)
+	if err != nil {
+		s.logger.Warn("获取自动派发规则失败，回退到节点 tag 匹配",
+			elog.Int64("taskId", task.Id),
+			elog.Int64("templateId", templateID),
+			elog.FieldErr(err),
+		)
+		return nil, false
+	}
+
+	for _, d := range dispatches {
+		actual, exists := args[d.Field]
+		if !exists || d.RunnerId <= 0 || d.Field == "" || !dispatchValueMatches(actual, d.Value) {
+			continue
+		}
+
+		runnerResp, err := s.runnerCli.FindRunnerByID(ctx, &runnerv1.FindRunnerByIDRequest{Id: d.RunnerId})
+		if err != nil {
+			s.logger.Warn("自动派发规则命中但获取 Runner 失败，继续尝试下一条规则",
+				elog.Int64("taskId", task.Id),
+				elog.Int64("dispatchId", d.Id),
+				elog.Int64("runnerId", d.RunnerId),
+				elog.FieldErr(err),
+			)
+			continue
+		}
+
+		runner := runnerResp.GetRunner()
+		if runner.GetCodebookId() != automation.CodebookId {
+			s.logger.Warn("自动派发规则 Runner 与自动化节点 Codebook 不匹配，跳过",
+				elog.Int64("taskId", task.Id),
+				elog.Int64("dispatchId", d.Id),
+				elog.Int64("runnerId", runner.GetId()),
+				elog.Int64("runnerCodebookId", runner.GetCodebookId()),
+				elog.Int64("nodeCodebookId", automation.CodebookId),
+			)
+			continue
+		}
+
+		s.logger.Info("自动派发规则命中 Runner 执行器",
+			elog.Int64("taskId", task.Id),
+			elog.Int64("dispatchId", d.Id),
+			elog.String("field", d.Field),
+			elog.String("value", d.Value),
+			elog.Int64("runnerId", runner.GetId()),
+		)
+		return runner, true
+	}
+
+	return nil, false
+}
+
+func dispatchValueMatches(actual interface{}, expected string) bool {
+	if actual == nil {
+		return false
+	}
+	if val, ok := actual.(string); ok {
+		return val == expected
+	}
+	return fmt.Sprint(actual) == expected
+}
+
 func (s *taskService) prepareTask(ctx context.Context, task domain.Task, ticket domain.Ticket) (domain.Task, error) {
-	// 1. 获取并聚合所有前置运行依赖的上下文（流程定义、步骤参数、调度节点与脚本模版）
-	pCtx, err := s.buildTaskProcessContext(ctx, task)
+	// 1. 合成包含用户凭单上下文等在运行时的最终参数
+	args, err := s.assembleRuntimeArgs(ctx, ticket)
+	if err != nil {
+		return domain.Task{}, err
+	}
+
+	// 2. 获取并聚合所有前置运行依赖的上下文（流程定义、步骤参数、调度节点与脚本模版）
+	pCtx, err := s.buildTaskProcessContext(ctx, task, ticket, args)
 	if err != nil {
 		// 统一在此处处理前置数据拉取的异常状态记录
 		if prepErr, ok := errors.AsType[*taskPrepareError](err); ok {
 			_ = s.handleTaskError(ctx, task.Id, prepErr.triggerPosition, prepErr.status, prepErr.err)
 		}
-		return domain.Task{}, err
-	}
-
-	// 2. 合成包含用户凭单上下文等在运行时的最终参数
-	args, err := s.assembleRuntimeArgs(ctx, ticket)
-	if err != nil {
 		return domain.Task{}, err
 	}
 
