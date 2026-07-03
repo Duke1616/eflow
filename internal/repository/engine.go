@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository/dao"
@@ -14,7 +13,7 @@ import (
 // IEngineRepository 流程引擎仓储接口
 type IEngineRepository interface {
 	// TodoList 获取指定用户的待办任务列表，转换为领域对象
-	TodoList(userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, error)
+	TodoList(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, error)
 	// CountTodo 统计指定用户的待办任务总数
 	CountTodo(ctx context.Context, userId, processName string) (int64, error)
 	// CountStartUser 统计用户发起的流程实例总数
@@ -157,13 +156,13 @@ func (repo *engineRepository) ForceUpdateIsFinishedByNodeId(ctx context.Context,
 	return repo.engineDao.ForceUpdateIsFinishedByNodeId(ctx, processInstId, nodeId, status, comment)
 }
 
-func (repo *engineRepository) TodoList(userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, error) {
-	ts, err := engine.GetTaskToDoList(userId, processName, sortByAse, offset, limit)
+func (repo *engineRepository) TodoList(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, error) {
+	ts, err := repo.engineDao.ListTodo(ctx, userId, processName, sortByAse, offset, limit)
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(ts, func(idx int, src model.Task) domain.Instance {
-		return repo.toDomainByTask(src)
+	return slice.Map(ts, func(idx int, src dao.Instance) domain.Instance {
+		return repo.toDomainByInstance(src)
 	}), nil
 }
 

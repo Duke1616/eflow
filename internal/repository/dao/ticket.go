@@ -182,4 +182,3 @@ func (g *gormTicketDAO) MergeTicketData(ctx context.Context, id int64, data map[
 		"utime": t.Utime,
 	}).Error
 }
-

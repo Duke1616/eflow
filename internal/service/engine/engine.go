@@ -249,7 +249,7 @@ func (s *engineService) ListTodoTasks(ctx context.Context, userId, processName s
 	)
 	eg.Go(func() error {
 		var err error
-		ts, err = s.repo.TodoList(userId, processName, sortByAse, offset, limit)
+		ts, err = s.repo.TodoList(ctx, userId, processName, sortByAse, offset, limit)
 		return err
 	})
 

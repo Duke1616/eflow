@@ -9,12 +9,15 @@ import (
 
 	"github.com/Bunny3th/easy-workflow/workflow/database"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
+	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/ecodeclub/ekit/slice"
 	"gorm.io/gorm"
 )
 
 // IEngineDAO 流程引擎物理数据访问接口
 type IEngineDAO interface {
+	// ListTodo 获取当前租户下指定用户的待办任务列表
+	ListTodo(ctx context.Context, userId, processName string, sortByAsc bool, offset, limit int) ([]Instance, error)
 	// CountTodo 统计用户的待办任务总数
 	CountTodo(ctx context.Context, userId, processName string) (int64, error)
 	// CountStartUser 统计用户发起的流程实例总数
@@ -336,16 +339,60 @@ func (g *gormEngineDAO) CountTaskRecord(ctx context.Context, processInstId int) 
 
 func (g *gormEngineDAO) CountTodo(ctx context.Context, userId, processName string) (int64, error) {
 	var res int64
-	db := g.db.WithContext(ctx).Model(&model.Task{}).Table("proc_task")
-	if userId != "" {
-		db = db.Where("user_id = ?", userId)
-	}
-	if processName != "" {
-		db = db.Where("process_name = ?", processName)
+	tenantID := ctxutil.GetTenantID(ctx).Int64()
+	if tenantID <= 0 {
+		return 0, nil
 	}
 
-	db = db.Where("is_finished = ?", 0)
+	db := g.db.WithContext(ctx).Model(&model.Task{}).Table("proc_task as pt").
+		Joins("JOIN ticket t ON t.process_instance_id = pt.proc_inst_id").
+		Joins("JOIN proc_def pd ON pd.id = pt.proc_id").
+		Where("pt.is_finished = ?", 0).
+		Where("t.tenant_id = ?", tenantID)
+	if userId != "" {
+		db = db.Where("pt.user_id = ?", userId)
+	}
+	if processName != "" {
+		db = db.Where("pd.name = ?", processName)
+	}
+
 	err := db.Count(&res).Error
+	return res, err
+}
+
+func (g *gormEngineDAO) ListTodo(ctx context.Context, userId, processName string, sortByAsc bool, offset, limit int) ([]Instance, error) {
+	var res []Instance
+	tenantID := ctxutil.GetTenantID(ctx).Int64()
+	if tenantID <= 0 {
+		return res, nil
+	}
+
+	order := "pt.create_time desc"
+	if sortByAsc {
+		order = "pt.create_time asc"
+	}
+
+	db := g.db.WithContext(ctx).Table("proc_task as pt").
+		Select("pt.id as task_id, pt.proc_inst_id as id, pt.proc_id, pi.proc_version, "+
+			"pt.business_id, pt.starter, pt.node_id as current_node_id, pt.node_name as current_node_name, "+
+			"pt.create_time, pt.user_id, pt.status, pd.name").
+		Joins("JOIN ticket t ON t.process_instance_id = pt.proc_inst_id").
+		Joins("JOIN proc_def pd ON pd.id = pt.proc_id").
+		Joins("LEFT JOIN proc_inst pi ON pi.id = pt.proc_inst_id").
+		Where("pt.is_finished = ?", 0).
+		Where("t.tenant_id = ?", tenantID).
+		Order(order).
+		Limit(limit).
+		Offset(offset)
+
+	if userId != "" {
+		db = db.Where("pt.user_id = ?", userId)
+	}
+	if processName != "" {
+		db = db.Where("pd.name = ?", processName)
+	}
+
+	err := db.Scan(&res).Error
 	return res, err
 }
 
