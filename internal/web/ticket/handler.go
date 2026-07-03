@@ -63,6 +63,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.B[CreateTicketReq](h.CreateTicket)),
 	)
 	g.POST("/detail/process_inst_id", detail("工单详情", "get").
+		Needs("cmdb:tools:download").
 		Handle(ginx.B[DetailProcessInstIdReq](h.Detail)),
 	)
 	g.POST("/task/record", detail("流转记录", "record").
