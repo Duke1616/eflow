@@ -95,7 +95,7 @@ func (e *ProcessEvent) EventAutomation(instID int, node *model.Node, prevNode mo
 	}
 
 	orderID, _ := strconv.ParseInt(orderId, 10, 64)
-	_, err = e.taskSvc.CreateTask(ctx, orderID, instID, node.NodeID)
+	_, err = e.taskSvc.CreateTask(ctx, orderID, instID, node.NodeID, node.NodeName)
 	if err != nil {
 		e.logger.Error("创建自动化任务失败", elog.Int("instID", instID), elog.FieldErr(err))
 	}

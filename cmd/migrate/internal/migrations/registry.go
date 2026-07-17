@@ -12,10 +12,10 @@ func All() []migration.Migrator {
 		NewWorkflowMigrator(),
 		NewWorkflowInstanceFlowMigrator(),
 		NewTicketMigrator(),
-		NewTaskMigrator(),
 		NewTaskFormMigrator(),
 		NewDispatchMigrator(),
 	}
 	migrators = append(migrators, NewEasyflowMigrators()...)
+	migrators = append(migrators, NewLegacyTaskMigrator())
 	return migrators
 }

@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,20 +16,17 @@ type PassProcessTaskJob struct {
 	engineSvc engine.Service
 	limit     int64
 	interval  time.Duration
-	minutes   int64
-	seconds   int64
 	logger    *elog.Component
 }
 
 // NewPassProcessTaskJob 实例化通过任务自动向前流转后台任务
-func NewPassProcessTaskJob(svc Service, engineSvc engine.Service, limit int64, interval time.Duration, minutes, seconds int64) *PassProcessTaskJob {
+func NewPassProcessTaskJob(svc Service, engineSvc engine.Service,
+	limit int64, interval time.Duration) *PassProcessTaskJob {
 	return &PassProcessTaskJob{
 		svc:       svc,
 		engineSvc: engineSvc,
 		limit:     limit,
 		interval:  interval,
-		minutes:   minutes,
-		seconds:   seconds,
 		logger:    elog.DefaultLogger.With(elog.FieldComponentName("PassProcessTaskJob")),
 	}
 }
@@ -50,41 +48,44 @@ func (j *PassProcessTaskJob) Start(ctx context.Context) {
 }
 
 func (j *PassProcessTaskJob) run(ctx context.Context) error {
-	utime := time.Now().Add(time.Duration(-j.minutes)*time.Minute + time.Duration(-j.seconds)*time.Second).UnixMilli()
-	offset := int64(0)
+	var afterID int64
+	var runErr error
 	for {
-		tasks, total, err := j.svc.ListSuccessTasksByUtime(ctx, offset, j.limit, utime)
+		tasks, err := j.svc.ListUnadvancedSuccessTasks(ctx, j.limit, afterID)
 		if err != nil {
 			return fmt.Errorf("查询成功执行任务失败: %w", err)
 		}
 
 		for _, task := range tasks {
-			j.logger.Info("任务开启自动通过逻辑", elog.Int64("id", task.Id))
-			mt, err1 := j.engineSvc.GetAutomationTask(ctx, task.CurrentNodeId, task.ProcessInstId)
+			afterID = task.ID
+			taskCtx := tenantContext(ctx, task.TenantID)
+			j.logger.Info("任务开启自动通过逻辑", elog.Int64("id", task.ID))
+			mt, err1 := j.engineSvc.GetAutomationTask(taskCtx, task.NodeID, task.ProcessInstanceID)
 			if err1 != nil {
+				runErr = errors.Join(runErr,
+					fmt.Errorf("查询流程自动化节点任务失败: task_id=%d: %w", task.ID, err1))
 				continue
 			}
 
 			if mt.TaskID != 0 {
-				err = j.engineSvc.Pass(ctx, mt.TaskID, "任务执行完成")
+				err = j.engineSvc.Pass(taskCtx, mt.TaskID, "任务执行完成")
 				if err != nil {
-					return fmt.Errorf("通过自动化节点失败: %w", err)
+					runErr = errors.Join(runErr,
+						fmt.Errorf("通过自动化节点失败: task_id=%d: %w", task.ID, err))
+					continue
 				}
 			}
 
-			err = j.svc.MarkTaskAsAutoPassed(ctx, task.Id)
+			err = j.svc.MarkTaskAsAutoPassed(taskCtx, task.ID)
 			if err != nil {
-				j.logger.Error("数据标记失败", elog.FieldErr(err))
+				runErr = errors.Join(runErr,
+					fmt.Errorf("标记自动化任务已推进失败: task_id=%d: %w", task.ID, err))
 			}
 		}
 
 		if int64(len(tasks)) < j.limit {
 			break
 		}
-		offset += j.limit
-		if offset >= total {
-			break
-		}
 	}
-	return nil
+	return runErr
 }

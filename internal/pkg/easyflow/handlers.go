@@ -1,6 +1,8 @@
 package easyflow
 
 import (
+	"fmt"
+
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 )
 
@@ -196,7 +198,10 @@ type AutomationNodeHandler struct{}
 
 func (h *AutomationNodeHandler) Type() string { return NodeTypeAuto }
 func (h *AutomationNodeHandler) Handle(ctx *Context, node Node) ([]model.Node, error) {
-	property, _ := ToNodeProperty[AutomationProperty](node)
+	property, err := ToNodeProperty[AutomationProperty](node)
+	if err != nil {
+		return nil, fmt.Errorf("解析自动化节点 %s 属性失败: %w", node.ID, err)
+	}
 	n := model.Node{
 		NodeID:          node.ID,
 		NodeName:        property.Name,

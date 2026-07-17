@@ -1,59 +1,71 @@
 package task
 
-type Status uint8
-
-func (s Status) ToUint8() uint8 {
-	return uint8(s)
-}
+import "github.com/Duke1616/eflow/internal/domain"
 
 type Page struct {
-	Offset int64 `json:"offset,omitempty"`
-	Limit  int64 `json:"limit,omitempty"`
+	Offset int64 `json:"offset"`
+	Limit  int64 `json:"limit"`
 }
 
-type ListTaskReq struct {
-	Page
-}
+type ListTaskReq struct{ Page }
 
 type ListTaskByInstanceIDReq struct {
 	InstanceID int `json:"instance_id"`
 	Page
 }
 
-type Task struct {
-	Id              int64  `json:"id"`
-	TicketID        int64  `json:"ticket_id"`
-	Ctime           string `json:"ctime"`
-	Kind            string `json:"kind"`
-	CodebookID      int64  `json:"codebook_id"`
-	Target          string `json:"target"`
-	Handler         string `json:"handler"`
-	Status          Status `json:"status"`
-	IsTiming        bool   `json:"is_timing"`
-	ScheduledTime   string `json:"scheduled_time"`
-	StartTime       string `json:"start_time"`
-	EndTime         string `json:"end_time"`
-	RetryCount      int    `json:"retry_count"`
-	Code            string `json:"code"`
-	Language        string `json:"language"`
-	Args            string `json:"args"`
-	Variables       string `json:"variables"`
-	Result          string `json:"result"`
-	TriggerPosition string `json:"trigger_position"`
-}
-
 type RetryReq struct {
-	Id int64 `json:"id"`
+	ID int64 `json:"id"`
 }
 
-type UpdateArgsReq struct {
-	Id   int64                  `json:"id"`
-	Args map[string]interface{} `json:"args"`
+type ListAttemptsReq struct {
+	TaskID int64 `json:"task_id"`
 }
 
-type UpdateVariablesReq struct {
-	Id        int64  `json:"id"`
-	Variables string `json:"variables"`
+type LogsReq struct {
+	AttemptID int64 `json:"attempt_id"`
+	MinID     int64 `json:"min_id"`
+	Limit     int   `json:"limit"`
+}
+
+type Task struct {
+	ID                int64  `json:"id"`
+	TicketID          int64  `json:"ticket_id"`
+	ProcessInstanceID int    `json:"process_instance_id"`
+	NodeID            string `json:"node_id"`
+	NodeName          string `json:"node_name"`
+	ProcessVersion    int    `json:"process_version"`
+	Status            uint8  `json:"status"`
+	Phase             string `json:"phase"`
+	ScheduledAt       int64  `json:"scheduled_at"`
+	CurrentAttemptID  int64  `json:"current_attempt_id"`
+	AdvancedAt        int64  `json:"advanced_at"`
+	LastError         string `json:"last_error"`
+	CTime             int64  `json:"ctime"`
+	UTime             int64  `json:"utime"`
+}
+
+type Attempt struct {
+	ID          int64           `json:"id"`
+	TaskID      int64           `json:"task_id"`
+	AttemptNo   int             `json:"attempt_no"`
+	RequestID   string          `json:"request_id"`
+	RunnerID    int64           `json:"runner_id"`
+	ExecutionID int64           `json:"execution_id"`
+	Status      string          `json:"status"`
+	Input       domain.TaskArgs `json:"input"`
+	Output      string          `json:"output"`
+	Error       string          `json:"error"`
+	SubmittedAt int64           `json:"submitted_at"`
+	CompletedAt int64           `json:"completed_at"`
+	CTime       int64           `json:"ctime"`
+	UTime       int64           `json:"utime"`
+}
+
+type ExecutionLog struct {
+	ID      int64  `json:"id"`
+	Time    int64  `json:"time"`
+	Content string `json:"content"`
 }
 
 type RetrieveTasks struct {
@@ -61,12 +73,11 @@ type RetrieveTasks struct {
 	Tasks []Task `json:"tasks"`
 }
 
-type UpdateStatusToSuccessReq struct {
-	Id int64 `json:"id"`
+type ListAttemptsResp struct {
+	Attempts []Attempt `json:"attempts"`
 }
 
-type Variables struct {
-	Key    string `json:"key"`
-	Value  string `json:"value"`
-	Secret bool   `json:"secret"`
+type LogsResp struct {
+	Logs  []ExecutionLog `json:"logs"`
+	MaxID int64          `json:"max_id"`
 }

@@ -61,11 +61,14 @@ func runMigrate(force bool) {
 	}
 
 	var postHooks []migration.Hook
+	var preHooks []migration.Hook
+	if cfg.Truncate {
+		preHooks = append(preHooks, migrations.TruncateLegacyTaskAttempts)
+	}
 	if cfg.ResetAutoIncrement {
 		postHooks = append(postHooks, migrations.SyncProcessInstanceAutoIncrement)
 	}
 	postHooks = append(postHooks,
-		migrations.ResolveTaskCodebookIDs,
 		migrations.ResolveWorkflowCodebookIDs,
 		migrations.ResolveWorkflowInstanceFlowCodebookIDs,
 	)
@@ -73,6 +76,7 @@ func runMigrate(force bool) {
 	// NOTE: 构造 eiam 统一包的迁移器，并注入本地 eflow 特定的自动建表逻辑与默认租户覆盖选项
 	runner := migration.NewRunner(mCfg, migrations.All(),
 		migration.WithDefaultTenantID(migrations.DefaultTenantID),
+		migration.WithPreHooks(preHooks...),
 		migration.WithAutoMigrateFunc(func(db *gorm.DB) error {
 			if err = dao.InitTables(db); err != nil {
 				return err

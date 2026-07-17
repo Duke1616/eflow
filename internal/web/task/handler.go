@@ -1,202 +1,151 @@
 package task
 
 import (
-	"encoding/json"
-	"errors"
-	"time"
+	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	"github.com/Duke1616/eiam/pkg/web/capability"
-	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/ginx"
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	defaultPageSize = 20
+	maxPageSize     = 100
+	maxLogPageSize  = 1000
+)
+
+// Handler 提供流程自动化任务和执行尝试查询接口。
 type Handler struct {
 	capability.IRegistry
 	svc taskSvc.Service
 }
 
+// NewHandler 创建自动化任务 HTTP Handler。
 func NewHandler(svc taskSvc.Service) *Handler {
-	return &Handler{
-		svc:       svc,
-		IRegistry: capability.NewRegistry("ticket", "task", "工单中心/任务记录"),
-	}
+	return &Handler{svc: svc,
+		IRegistry: capability.NewRegistry("ticket", "task", "工单中心/自动化任务")}
 }
 
+// PrivateRoutes 注册自动化任务私有接口。
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
-	g := server.Group("/api/task")
-	g.POST("/list", h.Capability("任务列表", "view").
-		Handle(ginx.B[ListTaskReq](h.ListTask)),
-	)
-	g.POST("/list/by_instance_id", h.Capability("关联自动化任务", "view_tasks").
-		Module("center").
-		Group("工单中心/工单详情").
-		Handle(ginx.B[ListTaskByInstanceIDReq](h.ListTaskByInstanceID)),
-	)
-	g.POST("/update/args", h.Capability("修改任务参数", "update_args").
-		Handle(ginx.B[UpdateArgsReq](h.UpdateArgs)),
-	)
-	g.POST("/update/variables", h.Capability("修改任务变量", "update_variables").
-		Handle(ginx.B[UpdateVariablesReq](h.UpdateVariableReq)),
-	)
-	g.POST("/retry", h.Capability("重试任务", "retry").
-		Handle(ginx.B[RetryReq](h.Retry)),
-	)
-	//g.POST("/success", h.Capability("手动置为成功", "success").
-	//	Handle(ginx.B[UpdateStatusToSuccessReq](h.UpdateStatusToSuccess)),
-	//)
-	g.GET("/logs/:task_id", h.Capability("任务日志", "logs").
-		Handle(ginx.W(h.Logs)),
-	)
+	group := server.Group("/api/task")
+	group.POST("/list", h.Capability("自动化任务列表", "view").Handle(ginx.B[ListTaskReq](h.ListTask)))
+	group.POST("/list/by_instance_id", h.Capability("关联自动化任务", "view_tasks").
+		Module("center").Group("工单中心/工单详情").Handle(ginx.B[ListTaskByInstanceIDReq](h.ListTaskByInstanceID)))
+	group.POST("/retry", h.Capability("重试自动化任务", "retry").Handle(ginx.B[RetryReq](h.Retry)))
+	group.POST("/attempt/list", h.Capability("执行尝试列表", "view").Handle(ginx.B[ListAttemptsReq](h.ListAttempts)))
+	group.POST("/attempt/logs", h.Capability("执行尝试日志", "logs").Handle(ginx.B[LogsReq](h.Logs)))
 }
 
 func (h *Handler) ListTask(ctx *ginx.Context, req ListTaskReq) (ginx.Result, error) {
-	ws, total, err := h.svc.ListTask(ctx.Context, req.Offset, req.Limit)
+	if err := normalizePage(&req.Page); err != nil {
+		return invalidParameterResult(err), nil
+	}
+	tasks, total, err := h.svc.ListTask(ctx, req.Offset, req.Limit)
 	if err != nil {
 		return systemErrorResult, err
 	}
-	return ginx.Result{
-		Msg: "查询 task 列表成功",
-		Data: RetrieveTasks{
-			Total: total,
-			Tasks: slice.Map(ws, func(idx int, src domain.Task) Task {
-				return h.toTaskVo(src)
-			}),
-		},
-	}, nil
+	return ginx.Result{Msg: "success", Data: RetrieveTasks{Total: total, Tasks: mapTasks(tasks)}}, nil
 }
 
-func (h *Handler) ListTaskByInstanceID(ctx *ginx.Context, req ListTaskByInstanceIDReq) (ginx.Result, error) {
-	ws, total, err := h.svc.ListTaskByInstanceID(ctx.Context, req.Offset, req.Limit, req.InstanceID)
+func (h *Handler) ListTaskByInstanceID(ctx *ginx.Context,
+	req ListTaskByInstanceIDReq) (ginx.Result, error) {
+	if req.InstanceID <= 0 {
+		return invalidParameterResult(fmt.Errorf("流程实例 ID 非法")), nil
+	}
+	if err := normalizePage(&req.Page); err != nil {
+		return invalidParameterResult(err), nil
+	}
+	tasks, total, err := h.svc.ListTaskByInstanceID(ctx, req.Offset, req.Limit, req.InstanceID)
 	if err != nil {
 		return systemErrorResult, err
 	}
-	return ginx.Result{
-		Msg: "查询 task 列表成功",
-		Data: RetrieveTasks{
-			Total: total,
-			Tasks: slice.Map(ws, func(idx int, src domain.Task) Task {
-				return h.toTaskVo(src)
-			}),
-		},
-	}, nil
-}
-
-func (h *Handler) UpdateStatusToSuccess(ctx *ginx.Context, req UpdateStatusToSuccessReq) (ginx.Result, error) {
-	count, err := h.svc.UpdateTaskStatus(ctx.Context, domain.TaskResult{
-		Id:              req.Id,
-		TriggerPosition: domain.TriggerPositionManualSuccess.ToString(),
-		Status:          domain.SUCCESS,
-	})
-	if err != nil {
-		return systemErrorResult, err
-	}
-	return ginx.Result{Data: count, Msg: "消息状态修改为成功"}, nil
-}
-
-func (h *Handler) Logs(ctx *ginx.Context) (ginx.Result, error) {
-	id, err := ctx.Param("task_id").AsInt64()
-	if err != nil {
-		return systemErrorResult, err
-	}
-	tInfo, err := h.svc.FindTaskByID(ctx.Context, id)
-	if err != nil {
-		return systemErrorResult, err
-	}
-	return ginx.Result{Code: 0, Msg: "获取日志成功", Data: tInfo.Result}, nil
-}
-
-func (h *Handler) UpdateArgs(ctx *ginx.Context, req UpdateArgsReq) (ginx.Result, error) {
-	count, err := h.svc.UpdateArgs(ctx.Context, req.Id, req.Args)
-	if err != nil {
-		return systemErrorResult, err
-	}
-	return ginx.Result{Data: count, Msg: "修改Args成功"}, nil
-}
-
-func (h *Handler) UpdateVariableReq(ctx *ginx.Context, req UpdateVariablesReq) (ginx.Result, error) {
-	variables, err := h.toVariablesDomain(req.Variables)
-	if err != nil {
-		return systemErrorResult, err
-	}
-	count, err := h.svc.UpdateVariables(ctx.Context, req.Id, variables)
-	if err != nil {
-		if errors.Is(err, taskSvc.ErrSecretVariableManagedByEtask) {
-			return invalidParameterResult(err), err
-		}
-		return systemErrorResult, err
-	}
-	return ginx.Result{Data: count, Msg: "修改Variables成功"}, nil
+	return ginx.Result{Msg: "success", Data: RetrieveTasks{Total: total, Tasks: mapTasks(tasks)}}, nil
 }
 
 func (h *Handler) Retry(ctx *ginx.Context, req RetryReq) (ginx.Result, error) {
-	if err := h.svc.RetryTask(ctx.Context, req.Id); err != nil {
+	if req.ID <= 0 {
+		return invalidParameterResult(fmt.Errorf("自动化任务 ID 非法")), nil
+	}
+	if err := h.svc.RetryTask(ctx, req.ID); err != nil {
 		return systemErrorResult, err
 	}
-	return ginx.Result{Msg: "重试任务成功"}, nil
+	return ginx.Result{Msg: "success"}, nil
 }
 
-func (h *Handler) toTaskVo(req domain.Task) Task {
-	args, _ := json.Marshal(req.Args)
-	scheduledTime := ""
-	if req.ScheduledTime > 0 {
-		scheduledTime = time.UnixMilli(req.ScheduledTime).Format("2006-01-02 15:04:05")
-	} else if req.Utime > 0 {
-		scheduledTime = time.UnixMilli(req.Utime).Format("2006-01-02 15:04:05")
+func (h *Handler) ListAttempts(ctx *ginx.Context, req ListAttemptsReq) (ginx.Result, error) {
+	if req.TaskID <= 0 {
+		return invalidParameterResult(fmt.Errorf("自动化任务 ID 非法")), nil
 	}
-	return Task{
-		Id:              req.Id,
-		TicketID:        req.TicketID,
-		Ctime:           formatMilli(req.Ctime),
-		Language:        req.Language,
-		Code:            req.Code,
-		Kind:            string(req.Kind),
-		CodebookID:      req.CodebookId,
-		Target:          req.Target,
-		Handler:         req.Handler,
-		Status:          Status(req.Status),
-		Result:          req.Result,
-		Args:            string(args),
-		IsTiming:        req.IsTiming,
-		ScheduledTime:   scheduledTime,
-		StartTime:       formatMilli(req.StartTime),
-		EndTime:         formatMilli(req.EndTime),
-		RetryCount:      req.RetryCount,
-		TriggerPosition: req.TriggerPosition,
-		Variables:       desensitization(req.Variables),
-	}
-}
-
-func formatMilli(ts int64) string {
-	if ts <= 0 {
-		return ""
-	}
-	return time.UnixMilli(ts).Format("2006-01-02 15:04:05")
-}
-
-func desensitization(req []domain.Variables) string {
-	variablesJson := slice.Map(req, func(idx int, src domain.Variables) Variables {
-		if src.Secret {
-			return Variables{Key: src.Key, Value: "********", Secret: src.Secret}
-		}
-		return Variables{Key: src.Key, Value: src.Value, Secret: src.Secret}
-	})
-	vars, _ := json.Marshal(variablesJson)
-	return string(vars)
-}
-
-func (h *Handler) toVariablesDomain(variables string) ([]domain.Variables, error) {
-	var vars []Variables
-	if variables == "" {
-		return nil, nil
-	}
-	err := json.Unmarshal([]byte(variables), &vars)
+	attempts, err := h.svc.ListAttempts(ctx, req.TaskID)
 	if err != nil {
-		return nil, err
+		return systemErrorResult, err
 	}
-	return slice.Map(vars, func(idx int, src Variables) domain.Variables {
-		return domain.Variables{Key: src.Key, Value: src.Value, Secret: src.Secret}
-	}), nil
+	result := make([]Attempt, 0, len(attempts))
+	for _, attempt := range attempts {
+		result = append(result, toAttemptVO(attempt))
+	}
+	return ginx.Result{Msg: "success", Data: ListAttemptsResp{Attempts: result}}, nil
+}
+
+func (h *Handler) Logs(ctx *ginx.Context, req LogsReq) (ginx.Result, error) {
+	if req.AttemptID <= 0 || req.MinID < 0 {
+		return invalidParameterResult(fmt.Errorf("执行尝试日志查询参数非法")), nil
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > maxLogPageSize {
+		limit = maxLogPageSize
+	}
+	logs, maxID, err := h.svc.Logs(ctx, req.AttemptID, req.MinID, limit)
+	if err != nil {
+		return systemErrorResult, err
+	}
+	result := make([]ExecutionLog, 0, len(logs))
+	for _, log := range logs {
+		result = append(result, ExecutionLog{ID: log.ID, Time: log.Time, Content: log.Content})
+	}
+	return ginx.Result{Msg: "success", Data: LogsResp{Logs: result, MaxID: maxID}}, nil
+}
+
+func normalizePage(page *Page) error {
+	if page.Offset < 0 {
+		return fmt.Errorf("分页偏移量不能小于 0")
+	}
+	if page.Limit <= 0 {
+		page.Limit = defaultPageSize
+	}
+	if page.Limit > maxPageSize {
+		page.Limit = maxPageSize
+	}
+	return nil
+}
+
+func mapTasks(tasks []domain.Task) []Task {
+	result := make([]Task, 0, len(tasks))
+	for _, task := range tasks {
+		result = append(result, Task{
+			ID: task.ID, TicketID: task.TicketID, ProcessInstanceID: task.ProcessInstanceID,
+			NodeID: task.NodeID, NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
+			Status: task.Status.ToUint8(), Phase: string(task.Phase),
+			ScheduledAt: task.ScheduledAt, CurrentAttemptID: task.CurrentAttemptID,
+			AdvancedAt: task.AdvancedAt, LastError: task.LastError,
+			CTime: task.CTime, UTime: task.UTime,
+		})
+	}
+	return result
+}
+
+func toAttemptVO(attempt domain.TaskAttempt) Attempt {
+	return Attempt{
+		ID: attempt.ID, TaskID: attempt.TaskID, AttemptNo: attempt.AttemptNo,
+		RequestID: attempt.RequestID, RunnerID: attempt.RunnerID, ExecutionID: attempt.ExecutionID,
+		Status: string(attempt.Status), Input: attempt.Input, Output: attempt.Output, Error: attempt.Error,
+		SubmittedAt: attempt.SubmittedAt, CompletedAt: attempt.CompletedAt,
+		CTime: attempt.CTime, UTime: attempt.UTime,
+	}
 }

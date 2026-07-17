@@ -1,7 +1,7 @@
 package event
 
 const (
-	ExecuteResultEventName     = "result_execute_events"
+	ExecuteResultEventName     = "complete_topic"
 	CreateProcessEventName     = "create_process_events"
 	OrderStatusModifyEventName = "order_status_modify_events"
 )
@@ -18,10 +18,12 @@ const (
 )
 
 type ExecuteResultEvent struct {
-	TaskId     int64  `json:"task_id"`
-	Result     string `json:"result"`
-	WantResult string `json:"want_result"`
-	Status     Status `json:"status"`
+	TaskId     int64  `json:"taskId"`     // Etask 的任务 ID (若有)
+	ExecID     int64  `json:"execId"`     // etask 执行实例 ID
+	ExecStatus string `json:"execStatus"` // 执行状态，例如 SUCCESS / FAILED 等
+	TaskResult string `json:"taskResult"` // 执行输出或日志结果
+	Source     string `json:"source"`
+	RequestID  string `json:"requestId"`
 }
 
 type Variables struct {

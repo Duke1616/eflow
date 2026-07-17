@@ -105,6 +105,16 @@ func findNode(nodes []model.Node, id string) (model.Node, bool) {
 	return model.Node{}, false
 }
 
+func TestAutomationNodeHandlerRejectsInvalidProperty(t *testing.T) {
+	handler := &AutomationNodeHandler{}
+	_, err := handler.Handle(&Context{}, Node{
+		ID: "automation-1", Type: NodeTypeAuto,
+		Properties: map[string]interface{}{"name": "部署", "codebook_id": "legacy-name"},
+	})
+
+	require.ErrorContains(t, err, "解析自动化节点 automation-1 属性失败")
+}
+
 func TestUserProperty_NormalizeAssignees(t *testing.T) {
 	testCases := []struct {
 		name     string

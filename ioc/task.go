@@ -4,7 +4,6 @@ import (
 	"time"
 
 	templatev1 "github.com/Duke1616/eflow/api/proto/gen/ealert/template/v1"
-	executorv1 "github.com/Duke1616/eflow/api/proto/gen/etask/executor/v1"
 	processConsumer "github.com/Duke1616/eflow/internal/event/process"
 	taskConsumer "github.com/Duke1616/eflow/internal/event/task"
 	templateConsumer "github.com/Duke1616/eflow/internal/event/template"
@@ -19,7 +18,6 @@ import (
 func InitTasks(
 	taskSvc serviceTask.Service,
 	engineSvc engine.Service,
-	executorSvc executorv1.TaskExecutionServiceClient,
 	executeResultConsumer *taskConsumer.ExecuteResultConsumer,
 	processConsumer *processConsumer.ProcessEventConsumer,
 	wechatConsumer *ticketConsumer.WechatTicketConsumer,
@@ -29,10 +27,9 @@ func InitTasks(
 ) []Task {
 	return []Task{
 		executeResultConsumer,
-		serviceTask.NewStartTaskJob(taskSvc, 100, 10*time.Second),
-		serviceTask.NewTaskRecoveryJob(taskSvc, 100, time.Minute),
-		serviceTask.NewPassProcessTaskJob(taskSvc, engineSvc, 100, 10*time.Second, 10, 0),
-		serviceTask.NewTaskExecutionSyncJob(taskSvc, executorSvc, 100, 10*time.Second),
+		serviceTask.NewStartTaskJob(taskSvc, 100, 8, 10*time.Second, 30*time.Second),
+		serviceTask.NewTaskRecoveryJob(taskSvc, 100, time.Minute, time.Minute),
+		serviceTask.NewPassProcessTaskJob(taskSvc, engineSvc, 100, 10*time.Second),
 		processConsumer,
 		wechatConsumer,
 		larkWsServer,

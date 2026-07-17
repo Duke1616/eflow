@@ -201,6 +201,7 @@ migration:
 迁移会执行：
 
 - 旧数据复制和结构转换
+- 将当前目标 MySQL 中持续运行过的旧 `task` 表安全拆分为 `automation_tasks` 和 `automation_task_attempts`
 - 自动建表
 - easy-workflow 引擎表初始化
 - process instance 自增 ID 同步
@@ -208,15 +209,29 @@ migration:
 
 建议先设置 `dry_run: true` 验证迁移流程，再对目标库执行正式迁移。
 
+旧 `task` 表是早期 Mongo 迁移的落库结果，并且旧版本运行期间仍会持续写入。二次拆表迁移直接读取
+当前 `mysql.dsn`，不会重新从 Mongo 或 `migration.source.mysql.dsn` 生成任务。
+该步骤使用独立迁移记录 `automation_task_v2_mysql`，不会受到早期 Mongo Task 迁移记录影响。
+
+旧自动化任务迁移遵循安全模式：成功任务保留结果并标记为已推进，其他状态统一迁移为阻塞，
+不会在新服务启动后自动续跑。旧 `external_id` 是 etask Task ID，不会被错误地当作新 execution ID。
+历史节点名称统一显示为“自动化任务”，不再跨表追溯流程快照。缺少工单、流程实例或节点 ID 的脏数据
+会保留在旧表并跳过，迁移汇总会输出数量和样例；重复业务键只保留已迁移的一条，不会覆盖已有记录。
+正式迁移前应停止仍会写入旧 `task` 表的 eflow 服务。迁移器会检查任务 ID 和更新时间水位，
+检测到迁移期间仍有新增或更新时不会写入完成记录；停服后可直接幂等重跑。
+对已经运行并产生新数据的 MySQL 执行二次拆表时，必须保持 `truncate: false`，避免清空其他已迁移业务表。
+迁移完成后请保留旧 `task` 表至少一个发布周期。
+
 ## 自动化任务变量
 
-eflow 创建或重试自动化任务时，会从 etask runner 拉取变量快照，写入 eflow 的 task 记录，并在下发任务时传给 etask。
+eflow 创建或重试自动化任务时，只在 Attempt 中保存业务输入快照。Runner 默认变量和敏感变量由
+etask 在正式提交时统一合并，eflow 不再保存脚本源码、执行目标或变量明文。
 
 相关链路：
 
-- `internal/service/task/task.go`：创建、刷新和重试任务快照
-- `internal/service/task/dispatch/execute.go`：通过 gRPC 下发 etask 任务
-- `internal/service/task/dispatch/kafka.go`：通过 Kafka 下发任务
+- `internal/service/task/preparation.go`：组装业务输入并选择 Runner
+- `internal/client/etask/submission.go`：通过统一 Scheduler 协议幂等提交执行
+- `internal/repository/dao/task_attempt.go`：保存每次执行输入和外部 execution 引用
 
 敏感变量由 etask 管理，eflow 不允许通过任务变量接口新增或覆盖敏感变量明文。
 

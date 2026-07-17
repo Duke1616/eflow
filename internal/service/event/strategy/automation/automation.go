@@ -67,7 +67,7 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 	}
 
 	// 4. 发送消息
-	fields := strategy.BuildWantResultFields(data.WantResult)
+	fields := strategy.BuildAutomationOutputFields(data.AutomationOutput)
 
 	// 每两个字段插入一个空行（保持原有格式）
 	formattedFields := make([]notification.Field, 0, len(fields)*2)

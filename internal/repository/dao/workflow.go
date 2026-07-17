@@ -7,6 +7,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/pkg/sqlx"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Workflow 工作流流程定义实体
@@ -205,7 +206,10 @@ func (g *gormWorkflowDAO) CountByKeyword(ctx context.Context, keyword string) (i
 
 func (g *gormWorkflowDAO) CreateSnapshot(ctx context.Context, snapshot Snapshot) error {
 	snapshot.Ctime = time.Now().UnixMilli()
-	return g.db.WithContext(ctx).Create(&snapshot).Error
+	return g.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "workflow_id"}, {Name: "process_id"}, {Name: "process_version"}},
+		DoUpdates: clause.AssignmentColumns([]string{"name", "flow_data", "ctime"}),
+	}).Create(&snapshot).Error
 }
 
 func (g *gormWorkflowDAO) FindSnapshotByProcess(ctx context.Context, processID, version int) (Snapshot, error) {

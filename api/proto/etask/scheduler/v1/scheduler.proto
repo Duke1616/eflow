@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package etask.scheduler.v1;
+
+option go_package = "etask/scheduler/v1;scheduler";
+
+message RunRunnerRequest {
+  string request_id = 1;
+  int64 runner_id = 2;
+  map<string, string> params = 3;
+  map<string, string> variables = 4;
+}
+
+message RunRunnerResponse {
+  int64 execution_id = 1;
+  bool created = 2;
+}
+
+service SchedulerService {
+  rpc RunRunner(RunRunnerRequest) returns (RunRunnerResponse);
+}

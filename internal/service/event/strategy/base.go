@@ -133,10 +133,10 @@ func (s *service) Logger() *elog.Component {
 }
 
 type NotificationData struct {
-	WantResult map[string]interface{}
-	Rules      []rule.Rule
-	StartUser  domain.User
-	TName      string
+	AutomationOutput map[string]interface{}
+	Rules            []rule.Rule
+	StartUser        domain.User
+	TName            string
 }
 
 func (s *service) FetchRequiredData(ctx context.Context, info Info, nodes []easyflow.Node) (*NotificationData, error) {
@@ -145,7 +145,7 @@ func (s *service) FetchRequiredData(ctx context.Context, info Info, nodes []easy
 
 	errGroup.Go(func() error {
 		var err error
-		data.WantResult, err = s.wantAllResult(ctx, info.InstID, nodes)
+		data.AutomationOutput, err = s.automationOutput(ctx, info.InstID, nodes)
 		return err
 	})
 
@@ -231,7 +231,7 @@ func (s *service) getRules(ctx context.Context, oInfo domain.Ticket) ([]rule.Rul
 	return rules, t.Name, nil
 }
 
-func (s *service) wantAllResult(ctx context.Context, instanceId int, nodes []easyflow.Node) (map[string]interface{}, error) {
+func (s *service) automationOutput(ctx context.Context, instanceId int, nodes []easyflow.Node) (map[string]interface{}, error) {
 	mergedResult := make(map[string]interface{})
 	for _, node := range nodes {
 		if node.Type != "automation" {
@@ -252,12 +252,12 @@ func (s *service) fetchResult(ctx context.Context, instanceID int, nodeID string
 		return nil, err
 	}
 
-	if result.WantResult == "" {
+	if result.Output == "" {
 		return nil, fmt.Errorf("返回值为空, 不做任何数据处理")
 	}
 
 	var data map[string]interface{}
-	if err = json.Unmarshal([]byte(result.WantResult), &data); err != nil {
+	if err = json.Unmarshal([]byte(result.Output), &data); err != nil {
 		return nil, err
 	}
 	return data, nil
@@ -400,10 +400,10 @@ func ConvertRuleFields(fields []rule.Field) []notification.Field {
 	})
 }
 
-// BuildWantResultFields 构建自动化任务结果字段
-func BuildWantResultFields(wantResult map[string]interface{}) []notification.Field {
-	keys := make([]string, 0, len(wantResult))
-	for k := range wantResult {
+// BuildAutomationOutputFields 构建自动化任务输出字段。
+func BuildAutomationOutputFields(output map[string]interface{}) []notification.Field {
+	keys := make([]string, 0, len(output))
+	for k := range output {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -413,7 +413,7 @@ func BuildWantResultFields(wantResult map[string]interface{}) []notification.Fie
 		fields = append(fields, notification.Field{
 			IsShort: true,
 			Tag:     "lark_md",
-			Content: fmt.Sprintf("**%s:**\n%v", k, wantResult[k]),
+			Content: fmt.Sprintf("**%s:**\n%v", k, output[k]),
 		})
 	}
 	return notification.AddRowSpacers(fields)
@@ -430,7 +430,7 @@ func (s *service) PrepareCommonFields(info Info, data *NotificationData) []notif
 		}
 	})
 
-	for field, value := range data.WantResult {
+	for field, value := range data.AutomationOutput {
 		fields = append(fields, notification.Field{
 			IsShort: true,
 			Tag:     "lark_md",

@@ -22,7 +22,6 @@ const (
 	ExecutorService_Execute_FullMethodName   = "/etask.executor.v1.ExecutorService/Execute"
 	ExecutorService_Interrupt_FullMethodName = "/etask.executor.v1.ExecutorService/Interrupt"
 	ExecutorService_Query_FullMethodName     = "/etask.executor.v1.ExecutorService/Query"
-	ExecutorService_Prepare_FullMethodName   = "/etask.executor.v1.ExecutorService/Prepare"
 )
 
 // ExecutorServiceClient is the client API for ExecutorService service.
@@ -37,8 +36,6 @@ type ExecutorServiceClient interface {
 	Interrupt(ctx context.Context, in *InterruptRequest, opts ...grpc.CallOption) (*InterruptResponse, error)
 	// 查询一个任务的状态（用于轮询模式）
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*QueryResponse, error)
-	// 查询业务方任务总数量
-	Prepare(ctx context.Context, in *PrepareRequest, opts ...grpc.CallOption) (*PrepareResponse, error)
 }
 
 type executorServiceClient struct {
@@ -79,16 +76,6 @@ func (c *executorServiceClient) Query(ctx context.Context, in *QueryRequest, opt
 	return out, nil
 }
 
-func (c *executorServiceClient) Prepare(ctx context.Context, in *PrepareRequest, opts ...grpc.CallOption) (*PrepareResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(PrepareResponse)
-	err := c.cc.Invoke(ctx, ExecutorService_Prepare_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // ExecutorServiceServer is the server API for ExecutorService service.
 // All implementations must embed UnimplementedExecutorServiceServer
 // for forward compatibility.
@@ -101,8 +88,6 @@ type ExecutorServiceServer interface {
 	Interrupt(context.Context, *InterruptRequest) (*InterruptResponse, error)
 	// 查询一个任务的状态（用于轮询模式）
 	Query(context.Context, *QueryRequest) (*QueryResponse, error)
-	// 查询业务方任务总数量
-	Prepare(context.Context, *PrepareRequest) (*PrepareResponse, error)
 	mustEmbedUnimplementedExecutorServiceServer()
 }
 
@@ -121,9 +106,6 @@ func (UnimplementedExecutorServiceServer) Interrupt(context.Context, *InterruptR
 }
 func (UnimplementedExecutorServiceServer) Query(context.Context, *QueryRequest) (*QueryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Query not implemented")
-}
-func (UnimplementedExecutorServiceServer) Prepare(context.Context, *PrepareRequest) (*PrepareResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Prepare not implemented")
 }
 func (UnimplementedExecutorServiceServer) mustEmbedUnimplementedExecutorServiceServer() {}
 func (UnimplementedExecutorServiceServer) testEmbeddedByValue()                         {}
@@ -200,24 +182,6 @@ func _ExecutorService_Query_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ExecutorService_Prepare_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PrepareRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ExecutorServiceServer).Prepare(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ExecutorService_Prepare_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExecutorServiceServer).Prepare(ctx, req.(*PrepareRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // ExecutorService_ServiceDesc is the grpc.ServiceDesc for ExecutorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -236,10 +200,6 @@ var ExecutorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Query",
 			Handler:    _ExecutorService_Query_Handler,
-		},
-		{
-			MethodName: "Prepare",
-			Handler:    _ExecutorService_Prepare_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -353,6 +313,7 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	TaskExecutionService_GetTaskExecution_FullMethodName        = "/etask.executor.v1.TaskExecutionService/GetTaskExecution"
 	TaskExecutionService_ListTaskExecutions_FullMethodName      = "/etask.executor.v1.TaskExecutionService/ListTaskExecutions"
 	TaskExecutionService_GetExecutionLogs_FullMethodName        = "/etask.executor.v1.TaskExecutionService/GetExecutionLogs"
 	TaskExecutionService_BatchListTaskExecutions_FullMethodName = "/etask.executor.v1.TaskExecutionService/BatchListTaskExecutions"
@@ -362,6 +323,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TaskExecutionServiceClient interface {
+	// 根据执行 ID 获取执行记录
+	GetTaskExecution(ctx context.Context, in *GetTaskExecutionRequest, opts ...grpc.CallOption) (*GetTaskExecutionResponse, error)
 	// 列出任务执行记录
 	ListTaskExecutions(ctx context.Context, in *ListTaskExecutionsRequest, opts ...grpc.CallOption) (*ListTaskExecutionsResponse, error)
 	// 获取执行日志
@@ -376,6 +339,16 @@ type taskExecutionServiceClient struct {
 
 func NewTaskExecutionServiceClient(cc grpc.ClientConnInterface) TaskExecutionServiceClient {
 	return &taskExecutionServiceClient{cc}
+}
+
+func (c *taskExecutionServiceClient) GetTaskExecution(ctx context.Context, in *GetTaskExecutionRequest, opts ...grpc.CallOption) (*GetTaskExecutionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTaskExecutionResponse)
+	err := c.cc.Invoke(ctx, TaskExecutionService_GetTaskExecution_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *taskExecutionServiceClient) ListTaskExecutions(ctx context.Context, in *ListTaskExecutionsRequest, opts ...grpc.CallOption) (*ListTaskExecutionsResponse, error) {
@@ -412,6 +385,8 @@ func (c *taskExecutionServiceClient) BatchListTaskExecutions(ctx context.Context
 // All implementations must embed UnimplementedTaskExecutionServiceServer
 // for forward compatibility.
 type TaskExecutionServiceServer interface {
+	// 根据执行 ID 获取执行记录
+	GetTaskExecution(context.Context, *GetTaskExecutionRequest) (*GetTaskExecutionResponse, error)
 	// 列出任务执行记录
 	ListTaskExecutions(context.Context, *ListTaskExecutionsRequest) (*ListTaskExecutionsResponse, error)
 	// 获取执行日志
@@ -428,6 +403,9 @@ type TaskExecutionServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedTaskExecutionServiceServer struct{}
 
+func (UnimplementedTaskExecutionServiceServer) GetTaskExecution(context.Context, *GetTaskExecutionRequest) (*GetTaskExecutionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTaskExecution not implemented")
+}
 func (UnimplementedTaskExecutionServiceServer) ListTaskExecutions(context.Context, *ListTaskExecutionsRequest) (*ListTaskExecutionsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListTaskExecutions not implemented")
 }
@@ -456,6 +434,24 @@ func RegisterTaskExecutionServiceServer(s grpc.ServiceRegistrar, srv TaskExecuti
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&TaskExecutionService_ServiceDesc, srv)
+}
+
+func _TaskExecutionService_GetTaskExecution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTaskExecutionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskExecutionServiceServer).GetTaskExecution(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskExecutionService_GetTaskExecution_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskExecutionServiceServer).GetTaskExecution(ctx, req.(*GetTaskExecutionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _TaskExecutionService_ListTaskExecutions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -519,6 +515,10 @@ var TaskExecutionService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "etask.executor.v1.TaskExecutionService",
 	HandlerType: (*TaskExecutionServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetTaskExecution",
+			Handler:    _TaskExecutionService_GetTaskExecution_Handler,
+		},
 		{
 			MethodName: "ListTaskExecutions",
 			Handler:    _TaskExecutionService_ListTaskExecutions_Handler,

@@ -25,8 +25,6 @@ import (
 	"github.com/Duke1616/eflow/internal/service/event/strategy/start"
 	userstrategy "github.com/Duke1616/eflow/internal/service/event/strategy/user"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
-	"github.com/Duke1616/eflow/internal/service/task/dispatch"
-	"github.com/Duke1616/eflow/internal/service/task/scheduler"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
@@ -76,11 +74,12 @@ var (
 	// TaskSet 自动化任务模块 Provider 集合
 	TaskSet = wire.NewSet(
 		dao.NewTaskDAO,
+		dao.NewTaskAttemptDAO,
 		repository.NewTaskRepository,
+		repository.NewTaskAttemptRepository,
 		taskSvc.NewTaskService,
 		task.NewHandler,
-		scheduler.NewScheduler,
-		dispatch.NewTaskDispatcher,
+		etask.NewTaskDispatcher,
 	)
 
 	// TicketSet 工单核心模块的 Provider 集合
@@ -154,10 +153,11 @@ var (
 		eiam.NewEIAMClient,
 		ealert.NewEALERTClient,
 		etask.NewETASKClient,
+		etask.NewExecutionReader,
+		etask.NewRunnerCatalog,
 
 		// 导出具体的 Client，直接满足底层 Service 的注入需求！
 		wire.FieldsOf(new(*eiam.EIAMClient), "UserClient", "DepartmentClient"),
-		wire.FieldsOf(new(*etask.ETASKClient), "TaskClient", "ExecutorClient", "CodebookClient", "RunnerClient"),
 		wire.FieldsOf(new(*ealert.EALERTClient), "TeamClient", "NotificationClient", "TemplateClient", "OnCallClient"),
 	)
 	// WebSet Web 服务 Provider 集合

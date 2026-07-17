@@ -42,7 +42,7 @@ func NewNotification(base strategy.Service, sender sender.NotificationSender,
 
 // chatContext 封装发送所需的所有元数据
 type chatContext struct {
-	*strategy.NotificationData                            // 基础元数据 (Rules, StartUser, TName, WantResult)
+	*strategy.NotificationData                            // 基础元数据和自动化输出
 	property                   easyflow.ChatGroupProperty // 节点配置属性
 	members                    []domain.User              // 运行解析出的成员
 	userInputs                 []domain.FormValue         // 动态加载的用户输入
@@ -478,7 +478,7 @@ func (n *Notification) resolveFields(info strategy.Info, data *chatContext) []no
 
 	// 3. 执行结果（对应 OutputAutoTask）
 	if modeSet[easyflow.OutputAutoTask] {
-		modeFields := strategy.BuildWantResultFields(data.WantResult)
+		modeFields := strategy.BuildAutomationOutputFields(data.AutomationOutput)
 		if len(modeFields) > 0 {
 			fields = append(fields, sectionHeader("⚙️ 执行结果"))
 			fields = append(fields, modeFields...)

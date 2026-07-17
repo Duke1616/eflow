@@ -34,7 +34,7 @@ func TestLogicFlow_Deploy_Benchmark(t *testing.T) {
 						{"id": "6e483548-8445-4af7-8dce-b778600514ac", "type": "parallel"},
 						{"id": "efb34b56-8fe3-4385-b06c-363a51cbc91c", "type": "user", "properties": map[string]interface{}{"name": "产品", "approved": []string{"langtt"}, "rule": "appoint"}},
 						{"id": "8fa6f6b2-b9ca-4415-bcdc-cc227e21b9ee", "type": "user", "properties": map[string]interface{}{"name": "领导", "approved": []string{"chenggs"}, "rule": "appoint"}},
-						{"id": "b4845f3c-43f6-4040-81f8-5f96309c0490", "type": "automation", "properties": map[string]interface{}{"name": "自动化-部署", "codebook_id": "deploy", "is_notify": false}},
+						{"id": "b4845f3c-43f6-4040-81f8-5f96309c0490", "type": "automation", "properties": map[string]interface{}{"name": "自动化-部署", "codebook_id": int64(1001), "is_notify": false}},
 						{"id": "80852ea2-0de3-421f-8c75-0527f9999067", "type": "user", "properties": map[string]interface{}{"name": "123", "is_cc": true, "rule": "founder"}},
 						{"id": "f9f1fe1e-6882-4c2d-942b-24bf9f3fa039", "type": "chat", "properties": map[string]interface{}{"name": "群通知", "title": "发版执行结果", "mode": "existing"}},
 					},

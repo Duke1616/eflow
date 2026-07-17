@@ -28,7 +28,7 @@ func loadCodebookLookup(ctx context.Context, env migration.MigrationEnv) (map[st
 			ID         int64  `bson:"id"`
 			Identifier string `bson:"identifier"`
 		}
-		if err := cursor.Decode(&src); err != nil {
+		if err = cursor.Decode(&src); err != nil {
 			return nil, fmt.Errorf("解码源 c_codebook 失败: %w", err)
 		}
 
@@ -88,7 +88,7 @@ SELECT GREATEST(
     COALESCE((SELECT MAX(proc_inst_id) FROM proc_inst_variable), 0),
     COALESCE((SELECT MAX(proc_inst_id) FROM hist_proc_inst_variable), 0),
     COALESCE((SELECT MAX(process_instance_id) FROM ticket), 0),
-    COALESCE((SELECT MAX(process_inst_id) FROM task), 0)
+    COALESCE((SELECT MAX(process_instance_id) FROM automation_tasks), 0)
 ) + 1
 `).Scan(&nextID).Error
 	if err != nil {
@@ -116,54 +116,6 @@ func readAutoIncrement(ctx context.Context, db *gorm.DB, name, table string) int
 		return 0
 	}
 	return autoInc.Int64
-}
-
-// ResolveTaskCodebookIDs 在 task 数据迁移完成后，回填 task.codebook_id
-func ResolveTaskCodebookIDs(ctx context.Context, env migration.MigrationEnv) error {
-	if env.DryRun {
-		log.Printf("[dry-run] 跳过 task 数据回填")
-		return nil
-	}
-
-	lookup, err := loadCodebookLookup(ctx, env)
-	if err != nil {
-		return err
-	}
-
-	cursor, err := env.MongoDB.Collection("c_task").Find(ctx, bson.M{})
-	if err != nil {
-		return fmt.Errorf("查询源 c_task 失败: %w", err)
-	}
-	defer cursor.Close(ctx)
-
-	err = env.MySQLDst.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for cursor.Next(ctx) {
-			var src struct {
-				ID          int64  `bson:"id"`
-				CodebookUID string `bson:"codebook_uid"`
-			}
-			if err := cursor.Decode(&src); err != nil {
-				return fmt.Errorf("解码源 c_task 失败: %w", err)
-			}
-
-			cbID, ok := lookup[strings.TrimSpace(src.CodebookUID)]
-			if !ok {
-				continue
-			}
-
-			if err := tx.Model(&dao.Task{}).
-				Where("id = ?", src.ID).
-				Update("codebook_id", cbID).Error; err != nil {
-				return fmt.Errorf("更新 task codebook_id 失败: %w", err)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	return cursor.Err()
 }
 
 // updateFlowNodesCodebookIDs 将节点列表 properties 中的 codebook_uid 修改为 codebook_id，就地修改并返回是否发生变更
