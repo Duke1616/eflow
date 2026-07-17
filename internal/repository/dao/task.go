@@ -99,12 +99,12 @@ func (g *gormTaskDAO) Block(ctx context.Context, id int64, reason string) error 
 
 func (g *gormTaskDAO) PrepareRetry(ctx context.Context, id int64) error {
 	result := g.db.WithContext(ctx).Model(&Task{}).
-		Where("id = ? AND status IN ?", id, []uint8{
-			domain.TaskStatusFailed.ToUint8(), domain.TaskStatusBlocked.ToUint8(),
-		}).Updates(map[string]any{
-		"status": domain.TaskStatusWaiting.ToUint8(), "phase": domain.TaskPhaseRetrying,
-		"last_error": "", "utime": time.Now().UnixMilli(),
-	})
+		Where("id = ? AND status IN (?, ?)", id,
+			domain.TaskStatusFailed.ToUint8(), domain.TaskStatusBlocked.ToUint8()).
+		Updates(map[string]any{
+			"status": domain.TaskStatusWaiting.ToUint8(), "phase": domain.TaskPhaseRetrying,
+			"last_error": "", "utime": time.Now().UnixMilli(),
+		})
 	if result.Error != nil {
 		return result.Error
 	}
