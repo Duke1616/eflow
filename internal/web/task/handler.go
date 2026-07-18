@@ -31,14 +31,20 @@ func NewHandler(svc taskSvc.Service) *Handler {
 // PrivateRoutes 注册自动化任务私有接口。
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	group := server.Group("/api/task")
-	group.POST("/list", h.Capability("自动化任务列表", "view").Handle(ginx.B[ListTaskReq](h.ListTask)))
+	group.POST("/list", h.Capability("自动化任务列表", "view").
+		Handle(ginx.B[ListTaskReq](h.ListTask)))
 	group.POST("/list/by_instance_id", h.Capability("关联自动化任务", "view_tasks").
-		Module("center").Group("工单中心/工单详情").Handle(ginx.B[ListTaskByInstanceIDReq](h.ListTaskByInstanceID)))
-	group.POST("/retry", h.Capability("重试自动化任务", "retry").Handle(ginx.B[RetryReq](h.Retry)))
-	group.POST("/attempt/list", h.Capability("执行尝试列表", "view").Handle(ginx.B[ListAttemptsReq](h.ListAttempts)))
-	group.POST("/attempt/logs", h.Capability("执行尝试日志", "logs").Handle(ginx.B[LogsReq](h.Logs)))
+		Module("center").Group("工单中心/工单详情").
+		Handle(ginx.B[ListTaskByInstanceIDReq](h.ListTaskByInstanceID)))
+	group.POST("/retry", h.Capability("重试自动化任务", "retry").
+		Handle(ginx.B[RetryReq](h.Retry)))
+	group.POST("/attempt/list", h.Capability("执行尝试列表", "view_attempts").
+		Needs("ticket:task:logs").
+		Handle(ginx.B[ListAttemptsReq](h.ListAttempts)))
+	group.POST("/attempt/logs", h.Capability("执行尝试日志", "logs").
+		NoSync().
+		Handle(ginx.B[LogsReq](h.Logs)))
 }
-
 func (h *Handler) ListTask(ctx *ginx.Context, req ListTaskReq) (ginx.Result, error) {
 	if err := normalizePage(&req.Page); err != nil {
 		return invalidParameterResult(err), nil
