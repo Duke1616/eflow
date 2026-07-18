@@ -34,7 +34,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	group.POST("/list", h.Capability("自动化任务列表", "view").
 		Handle(ginx.B[ListTaskReq](h.ListTask)))
 	group.POST("/list/by_instance_id", h.Capability("关联自动化任务", "view_tasks").
-		Module("center").Group("工单中心/工单详情").
+		Module("manager").Group("工单中心/工单详情").
 		Handle(ginx.B[ListTaskByInstanceIDReq](h.ListTaskByInstanceID)))
 	group.POST("/retry", h.Capability("重试自动化任务", "retry").
 		Handle(ginx.B[RetryReq](h.Retry)))
