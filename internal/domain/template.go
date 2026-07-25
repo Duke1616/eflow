@@ -25,6 +25,17 @@ type Rule map[string]interface{}
 // TemplateOptions 工单模板附加选项参数
 type TemplateOptions map[string]interface{}
 
+// ScheduleOverride 描述当前模板为某个流程节点提供的调度策略覆盖。
+type ScheduleOverride struct {
+	Type      string `json:"type"`
+	Field     string `json:"field"`
+	TimeField string `json:"time_field,omitempty"`
+	Unit      string `json:"unit,omitempty"`
+}
+
+// ScheduleOverrides 按流程节点 ID 保存当前模板的调度覆盖。
+type ScheduleOverrides map[string]ScheduleOverride
+
 // Template 工单页面表单渲染与控件模板领域模型
 type Template struct {
 	Id                 int64                     // 模板主键 ID
@@ -38,6 +49,7 @@ type Template struct {
 	WechatOAControls   workwx.OATemplateControls // 企业微信 OA 模板控制属性字段映射
 	Rules              []Rule                    // 前端页面的控件校验和渲染规则属性
 	Options            TemplateOptions           // 额外的模板选项配置数据
+	ScheduleOverrides  ScheduleOverrides         // 当前模板按流程节点配置的调度覆盖
 	Desc               string                    // 模板详细说明
 }
 

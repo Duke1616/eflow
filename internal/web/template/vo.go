@@ -7,13 +7,22 @@ type ToggleFavoriteReq struct {
 
 // CreateTemplateReq 创建模板请求
 type CreateTemplateReq struct {
-	Name       string `json:"name"`
-	WorkflowId int64  `json:"workflow_id"`
-	GroupId    int64  `json:"group_id"`
-	Icon       string `json:"icon"`
-	Rules      string `json:"rules"`
-	Options    string `json:"options"`
-	Desc       string `json:"desc"`
+	Name              string                        `json:"name"`
+	WorkflowId        int64                         `json:"workflow_id"`
+	GroupId           int64                         `json:"group_id"`
+	Icon              string                        `json:"icon"`
+	Rules             string                        `json:"rules"`
+	Options           string                        `json:"options"`
+	ScheduleOverrides map[string]ScheduleOverrideVO `json:"schedule_overrides"`
+	Desc              string                        `json:"desc"`
+}
+
+// ScheduleOverrideVO 描述模板针对流程节点提交的调度覆盖。
+type ScheduleOverrideVO struct {
+	Type      string `json:"type"`
+	Field     string `json:"field"`
+	TimeField string `json:"time_field,omitempty"`
+	Unit      string `json:"unit,omitempty"`
 }
 
 // DetailTemplateReq 获取模板详情请求
@@ -49,28 +58,30 @@ type CreateType uint8
 
 // Template 模板通用响应模型 (规则为字符串)
 type Template struct {
-	Id         int64      `json:"id"`
-	Name       string     `json:"name"`
-	WorkflowId int64      `json:"workflow_id"`
-	Icon       string     `json:"icon"`
-	GroupId    int64      `json:"group_id"`
-	CreateType CreateType `json:"create_type"`
-	Rules      string     `json:"rules"`
-	Options    string     `json:"options"`
-	Desc       string     `json:"desc"`
+	Id                int64                         `json:"id"`
+	Name              string                        `json:"name"`
+	WorkflowId        int64                         `json:"workflow_id"`
+	Icon              string                        `json:"icon"`
+	GroupId           int64                         `json:"group_id"`
+	CreateType        CreateType                    `json:"create_type"`
+	Rules             string                        `json:"rules"`
+	Options           string                        `json:"options"`
+	ScheduleOverrides map[string]ScheduleOverrideVO `json:"schedule_overrides"`
+	Desc              string                        `json:"desc"`
 }
 
 // TemplateJson 模板通用 JSON 响应模型 (规则为原生 Map)
 type TemplateJson struct {
-	Id         int64                    `json:"id"`
-	Name       string                   `json:"name"`
-	WorkflowId int64                    `json:"workflow_id"`
-	Icon       string                   `json:"icon"`
-	GroupId    int64                    `json:"group_id"`
-	CreateType CreateType               `json:"create_type"`
-	Rules      []map[string]interface{} `json:"rules"`
-	Options    map[string]interface{}   `json:"options"`
-	Desc       string                   `json:"desc"`
+	Id                int64                         `json:"id"`
+	Name              string                        `json:"name"`
+	WorkflowId        int64                         `json:"workflow_id"`
+	Icon              string                        `json:"icon"`
+	GroupId           int64                         `json:"group_id"`
+	CreateType        CreateType                    `json:"create_type"`
+	Rules             []map[string]interface{}      `json:"rules"`
+	Options           map[string]interface{}        `json:"options"`
+	ScheduleOverrides map[string]ScheduleOverrideVO `json:"schedule_overrides"`
+	Desc              string                        `json:"desc"`
 }
 
 // TemplateListItem 模板列表响应模型
@@ -103,9 +114,10 @@ type GetRulesByWorkFlowIdReq struct {
 
 // Rule 单个解析出来的规则模型
 type Rule struct {
-	Type  string `json:"type"`
-	Field string `json:"field"`
-	Title string `json:"title"`
+	Type  string                 `json:"type"`
+	Field string                 `json:"field"`
+	Title string                 `json:"title"`
+	Props map[string]interface{} `json:"props,omitempty"`
 }
 
 // TemplateRules 模板关联规则模型
@@ -122,14 +134,15 @@ type RetrieveTemplateRules struct {
 
 // UpdateTemplateReq 模板更新请求
 type UpdateTemplateReq struct {
-	Id         int64  `json:"id"`
-	GroupId    int64  `json:"group_id"`
-	Icon       string `json:"icon"`
-	WorkflowId int64  `json:"workflow_id"`
-	Name       string `json:"name"`
-	Desc       string `json:"desc"`
-	Rules      string `json:"rules"`
-	Options    string `json:"options"`
+	Id                int64                         `json:"id"`
+	GroupId           int64                         `json:"group_id"`
+	Icon              string                        `json:"icon"`
+	WorkflowId        int64                         `json:"workflow_id"`
+	Name              string                        `json:"name"`
+	Desc              string                        `json:"desc"`
+	Rules             string                        `json:"rules"`
+	Options           string                        `json:"options"`
+	ScheduleOverrides map[string]ScheduleOverrideVO `json:"schedule_overrides"`
 }
 
 // GetTemplatesByWorkFlowIdReq 关联工作流模板详情请求

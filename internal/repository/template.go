@@ -261,6 +261,7 @@ func (repo *templateRepository) toEntity(req domain.Template) dao.Template {
 		Desc:               req.Desc,
 		Rules:              sqlx.JsonField[[]dao.Rule]{Val: rules, Valid: true},
 		Options:            sqlx.JsonField[dao.TemplateOptions]{Val: dao.TemplateOptions(req.Options), Valid: true},
+		ScheduleOverrides:  sqlx.JsonField[dao.ScheduleOverrides]{Val: toDAOScheduleOverrides(req.ScheduleOverrides), Valid: true},
 		WechatOAControls:   sqlx.JsonField[workwx.OATemplateControls]{Val: req.WechatOAControls, Valid: true},
 	}
 }
@@ -282,8 +283,35 @@ func (repo *templateRepository) toDomain(req dao.Template) domain.Template {
 		Desc:               req.Desc,
 		Rules:              rules,
 		Options:            domain.TemplateOptions(req.Options.Val),
+		ScheduleOverrides:  toDomainScheduleOverrides(req.ScheduleOverrides.Val),
 		WechatOAControls:   req.WechatOAControls.Val,
 	}
+}
+
+func toDAOScheduleOverrides(overrides domain.ScheduleOverrides) dao.ScheduleOverrides {
+	result := make(dao.ScheduleOverrides, len(overrides))
+	for nodeID, override := range overrides {
+		result[nodeID] = dao.ScheduleOverride{
+			Type:      override.Type,
+			Field:     override.Field,
+			TimeField: override.TimeField,
+			Unit:      override.Unit,
+		}
+	}
+	return result
+}
+
+func toDomainScheduleOverrides(overrides dao.ScheduleOverrides) domain.ScheduleOverrides {
+	result := make(domain.ScheduleOverrides, len(overrides))
+	for nodeID, override := range overrides {
+		result[nodeID] = domain.ScheduleOverride{
+			Type:      override.Type,
+			Field:     override.Field,
+			TimeField: override.TimeField,
+			Unit:      override.Unit,
+		}
+	}
+	return result
 }
 
 func (repo *templateRepository) toGroupEntity(req domain.TemplateGroup) dao.TemplateGroup {

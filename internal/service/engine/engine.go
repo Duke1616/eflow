@@ -18,10 +18,14 @@ import (
 type Service interface {
 	// ListTodoTasks 查看指定用户的待办任务列表，支持按时间排序和分页检索
 	ListTodoTasks(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, int64, error)
+	// ListAllTodoTasks 分页查询经过 PBAC AccessScope 约束的待办任务，并返回使用相同条件计算的总数。
+	ListAllTodoTasks(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, int64, error)
 	// ListByStartUser 获取我发起的流程实例历史列表，支持分页
 	ListByStartUser(ctx context.Context, userId, processName string, offset, limit int) ([]domain.Instance, int64, error)
 	// TaskRecord 获取工单流转的任务节点变更和审批历史全量记录
 	TaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, int64, error)
+	// AccessibleTaskRecord 获取经过工单 AccessScope 约束的流转记录。
+	AccessibleTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, int64, error)
 	// IsReject 判断指定任务是否在先前被驳回过
 	IsReject(ctx context.Context, taskId int) (bool, error)
 	// GetTasksByCurrentNodeId 获取指定流程实例及当前活动节点下的所有挂起任务
@@ -231,6 +235,28 @@ func (s *engineService) TaskRecord(ctx context.Context, processInstId, offset, l
 	return records, total, nil
 }
 
+func (s *engineService) AccessibleTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, int64, error) {
+	var (
+		records []model.Task
+		total   int64
+		eg      errgroup.Group
+	)
+	eg.Go(func() error {
+		var err error
+		records, err = s.repo.ListAccessibleTaskRecord(ctx, processInstId, offset, limit)
+		return err
+	})
+	eg.Go(func() error {
+		var err error
+		total, err = s.repo.CountAccessibleTaskRecord(ctx, processInstId)
+		return err
+	})
+	if err := eg.Wait(); err != nil {
+		return records, total, err
+	}
+	return records, total, nil
+}
+
 func (s *engineService) ProcessSave(ctx context.Context, process *model.Process) (int, error) {
 	bs, err := json.Marshal(process)
 	if err != nil {
@@ -242,6 +268,21 @@ func (s *engineService) ProcessSave(ctx context.Context, process *model.Process)
 
 func (s *engineService) ListTodoTasks(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) (
 	[]domain.Instance, int64, error) {
+	return s.listTodoTasks(ctx, userId, processName, sortByAse, offset, limit, false)
+}
+
+// ListAllTodoTasks 分页返回当前租户全部待办中经 PBAC 决策允许访问的任务及总数。
+func (s *engineService) ListAllTodoTasks(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, int64, error) {
+	return s.listTodoTasks(ctx, userId, processName, sortByAse, offset, limit, true)
+}
+
+func (s *engineService) listTodoTasks(
+	ctx context.Context,
+	userId, processName string,
+	sortByAse bool,
+	offset, limit int,
+	applyAccessScope bool,
+) ([]domain.Instance, int64, error) {
 	var (
 		eg    errgroup.Group
 		ts    []domain.Instance
@@ -249,13 +290,21 @@ func (s *engineService) ListTodoTasks(ctx context.Context, userId, processName s
 	)
 	eg.Go(func() error {
 		var err error
-		ts, err = s.repo.TodoList(ctx, userId, processName, sortByAse, offset, limit)
+		if applyAccessScope {
+			ts, err = s.repo.TodoAllList(ctx, userId, processName, sortByAse, offset, limit)
+		} else {
+			ts, err = s.repo.TodoList(ctx, userId, processName, sortByAse, offset, limit)
+		}
 		return err
 	})
 
 	eg.Go(func() error {
 		var err error
-		total, err = s.repo.CountTodo(ctx, userId, processName)
+		if applyAccessScope {
+			total, err = s.repo.CountAllTodo(ctx, userId, processName)
+		} else {
+			total, err = s.repo.CountTodo(ctx, userId, processName)
+		}
 		return err
 	})
 	if err := eg.Wait(); err != nil {

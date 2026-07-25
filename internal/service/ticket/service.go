@@ -163,7 +163,7 @@ func (s *ticketService) CreateTicket(ctx context.Context, req domain.Ticket) err
 }
 
 func (s *ticketService) GetByProcessInstanceID(ctx context.Context, instanceId int) (domain.Ticket, error) {
-	return s.repo.DetailByProcessInstId(ctx, instanceId)
+	return s.repo.AccessibleDetailByProcessInstId(ctx, instanceId)
 }
 
 func (s *ticketService) GetByID(ctx context.Context, id int64) (domain.Ticket, error) {
@@ -190,13 +190,13 @@ func (s *ticketService) ListHistory(ctx context.Context, userId string, offset, 
 	)
 	eg.Go(func() error {
 		var err error
-		ts, err = s.repo.ListTicket(ctx, userId, []int{domain.END.ToInt(), domain.WITHDRAW.ToInt()}, offset, limit)
+		ts, err = s.repo.ListHistory(ctx, userId, []int{domain.END.ToInt(), domain.WITHDRAW.ToInt()}, offset, limit)
 		return err
 	})
 
 	eg.Go(func() error {
 		var err error
-		total, err = s.repo.CountTicket(ctx, userId, []int{domain.END.ToInt(), domain.WITHDRAW.ToInt()})
+		total, err = s.repo.CountHistory(ctx, userId, []int{domain.END.ToInt(), domain.WITHDRAW.ToInt()})
 		return err
 	})
 	if err := eg.Wait(); err != nil {

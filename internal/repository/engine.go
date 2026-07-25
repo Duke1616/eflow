@@ -16,6 +16,10 @@ type IEngineRepository interface {
 	TodoList(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, error)
 	// CountTodo 统计指定用户的待办任务总数
 	CountTodo(ctx context.Context, userId, processName string) (int64, error)
+	// TodoAllList 获取经过 PBAC AccessScope 约束的待办任务列表，userId 仅作为附加收窄条件。
+	TodoAllList(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, error)
+	// CountAllTodo 使用与 TodoAllList 相同的 PBAC 和查询条件统计待办任务总数。
+	CountAllTodo(ctx context.Context, userId, processName string) (int64, error)
 	// CountStartUser 统计用户发起的流程实例总数
 	CountStartUser(ctx context.Context, userId, processName string) (int64, error)
 	// GetTasksByCurrentNodeId 根据当前进行节点获取其对应未完成的任务
@@ -26,6 +30,10 @@ type IEngineRepository interface {
 	ListTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, error)
 	// CountTaskRecord 统计指定流程实例的流转任务总条数
 	CountTaskRecord(ctx context.Context, processInstId int) (int64, error)
+	// ListAccessibleTaskRecord 查询经过工单 AccessScope 约束的流转记录。
+	ListAccessibleTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, error)
+	// CountAccessibleTaskRecord 使用与列表相同的 AccessScope 统计流转记录。
+	CountAccessibleTaskRecord(ctx context.Context, processInstId int) (int64, error)
 	// UpdateIsFinishedByPreNodeId 系统自动流转前置代理节点任务为已完结
 	UpdateIsFinishedByPreNodeId(ctx context.Context, processInstId int, nodeId string, status int, comment string) error
 	// ForceUpdateIsFinishedByPreNodeId 强制归档清理指定前置节点下挂载的所有流转任务（包含已完成）
@@ -181,6 +189,20 @@ func (repo *engineRepository) CountTodo(ctx context.Context, userId, processName
 	return repo.engineDao.CountTodo(ctx, userId, processName)
 }
 
+// TodoAllList 查询当前租户全部待办中经 PBAC 决策允许访问的任务。
+func (repo *engineRepository) TodoAllList(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, error) {
+	ts, err := repo.engineDao.ListAllTodo(ctx, userId, processName, sortByAse, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	return slice.Map(ts, func(idx int, src dao.Instance) domain.Instance { return repo.toDomainByInstance(src) }), nil
+}
+
+// CountAllTodo 统计经 PBAC 决策允许访问的全部待办任务。
+func (repo *engineRepository) CountAllTodo(ctx context.Context, userId, processName string) (int64, error) {
+	return repo.engineDao.CountAllTodo(ctx, userId, processName)
+}
+
 func (repo *engineRepository) CountStartUser(ctx context.Context, userId, processName string) (int64, error) {
 	return repo.engineDao.CountStartUser(ctx, userId, processName)
 }
@@ -191,6 +213,14 @@ func (repo *engineRepository) ListTaskRecord(ctx context.Context, processInstId,
 
 func (repo *engineRepository) CountTaskRecord(ctx context.Context, processInstId int) (int64, error) {
 	return repo.engineDao.CountTaskRecord(ctx, processInstId)
+}
+
+func (repo *engineRepository) ListAccessibleTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, error) {
+	return repo.engineDao.ListAccessibleTaskRecord(ctx, processInstId, offset, limit)
+}
+
+func (repo *engineRepository) CountAccessibleTaskRecord(ctx context.Context, processInstId int) (int64, error) {
+	return repo.engineDao.CountAccessibleTaskRecord(ctx, processInstId)
 }
 
 func (repo *engineRepository) toDomainByInstance(req dao.Instance) domain.Instance {

@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/Bunny3th/easy-workflow v1.0.0
 	github.com/Duke1616/ecmdb v1.11.0
-	github.com/Duke1616/eiam v0.0.19
+	github.com/Duke1616/eiam v0.0.21
 	github.com/Duke1616/enotify v0.1.25-0.20260311115016-f762700e83e9
 	github.com/Duke1616/etask v0.0.7
 	github.com/chromedp/chromedp v0.15.1
@@ -36,6 +36,8 @@ require (
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.1
 )
+
+
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect

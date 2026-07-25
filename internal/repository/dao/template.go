@@ -17,6 +17,17 @@ type Rule map[string]interface{}
 // TemplateOptions 局部定义，用于物理层表单扩展选项的无损映射
 type TemplateOptions map[string]interface{}
 
+// ScheduleOverride 是模板调度覆盖的 JSON 持久化结构。
+type ScheduleOverride struct {
+	Type      string `json:"type"`
+	Field     string `json:"field"`
+	TimeField string `json:"time_field,omitempty"`
+	Unit      string `json:"unit,omitempty"`
+}
+
+// ScheduleOverrides 按流程节点 ID 保存模板调度覆盖。
+type ScheduleOverrides map[string]ScheduleOverride
+
 // ErrTemplateGroupNotEmpty 删除分组前发现分组内仍存在模板
 var ErrTemplateGroupNotEmpty = errors.New("请先删除分组下的模板后再删除分组")
 
@@ -67,6 +78,7 @@ type Template struct {
 	CreateType         uint8                                     `gorm:"column:create_type;type:tinyint unsigned;not null;comment:'工单创建方式 1:直接创建 2:审批流触发'"`
 	Rules              sqlx.JsonField[[]Rule]                    `gorm:"column:rules;type:json;comment:'表单校验与规则控制链json'"`
 	Options            sqlx.JsonField[TemplateOptions]           `gorm:"column:options;type:json;comment:'工单扩展选项配置json'"`
+	ScheduleOverrides  sqlx.JsonField[ScheduleOverrides]         `gorm:"column:schedule_overrides;type:json;comment:'模板按流程节点配置的调度覆盖json'"`
 	ExternalTemplateId string                                    `gorm:"column:external_template_id;type:varchar(128);index;comment:'外部对接系统模版ID'"`
 	UniqueHash         string                                    `gorm:"column:unique_hash;type:varchar(128);index;comment:'内容唯一摘要哈希值'"`
 	WechatOAControls   sqlx.JsonField[workwx.OATemplateControls] `gorm:"column:wechat_oa_controls;type:json;comment:'企微审批流程表单控件快照json'"`
@@ -191,14 +203,15 @@ func (g *gormTemplateDAO) DeleteTemplate(ctx context.Context, id int64) (int64, 
 
 func (g *gormTemplateDAO) UpdateTemplate(ctx context.Context, t Template) (int64, error) {
 	updates := map[string]interface{}{
-		"name":        t.Name,
-		"workflow_id": t.WorkflowId,
-		"group_id":    t.GroupId,
-		"icon":        t.Icon,
-		"desc":        t.Desc,
-		"rules":       t.Rules,
-		"options":     t.Options,
-		"utime":       time.Now().UnixMilli(),
+		"name":               t.Name,
+		"workflow_id":        t.WorkflowId,
+		"group_id":           t.GroupId,
+		"icon":               t.Icon,
+		"desc":               t.Desc,
+		"rules":              t.Rules,
+		"options":            t.Options,
+		"schedule_overrides": t.ScheduleOverrides,
+		"utime":              time.Now().UnixMilli(),
 	}
 	result := g.db.WithContext(ctx).Model(&Template{}).Where("id = ?", t.Id).Updates(updates)
 	return result.RowsAffected, result.Error

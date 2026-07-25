@@ -99,6 +99,9 @@ type Ticket struct {
 // ErrInvalidParameter 统一的校验失败错误定义
 var ErrInvalidParameter = errors.New("参数校验错误")
 
+// ErrTicketNotAccessible 隐藏工单不存在与无权访问之间的差异。
+var ErrTicketNotAccessible = errors.New("工单不存在或无权访问")
+
 // Validate 校验工单创建/更新请求的合法性，防止脏数据入库
 func (o *Ticket) Validate() error {
 	if o.TemplateId <= 0 {

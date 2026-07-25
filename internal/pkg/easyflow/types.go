@@ -186,6 +186,57 @@ const (
 	HAND ExecMethod = "hand"
 )
 
+// ScheduleType 表示自动化节点在当前流程实例中的执行时间语义。
+type ScheduleType string
+
+const (
+	// ScheduleImmediate 节点到达后立即执行。
+	ScheduleImmediate ScheduleType = "immediate"
+	// ScheduleDelay 节点到达后延迟一段时间执行。
+	ScheduleDelay ScheduleType = "delay"
+	// ScheduleAt 在模板字段指定的日期时间执行。
+	ScheduleAt ScheduleType = "at"
+)
+
+// ScheduleSourceType 表示调度值的来源。
+type ScheduleSourceType string
+
+const (
+	// ScheduleSourceFixed 使用节点中配置的固定值。
+	ScheduleSourceFixed ScheduleSourceType = "fixed"
+	// ScheduleSourceTemplateField 从当前工单模板字段读取值。
+	ScheduleSourceTemplateField ScheduleSourceType = "template_field"
+)
+
+// ScheduleUnit 表示相对延迟使用的时间单位。
+type ScheduleUnit string
+
+const (
+	// ScheduleUnitMinute 表示分钟。
+	ScheduleUnitMinute ScheduleUnit = "minute"
+	// ScheduleUnitHour 表示小时。
+	ScheduleUnitHour ScheduleUnit = "hour"
+	// ScheduleUnitDay 表示自然日对应的 24 小时。
+	ScheduleUnitDay ScheduleUnit = "day"
+)
+
+// ScheduleSource 描述固定值或模板字段引用；TemplateID 仅用于校验历史字段配置。
+type ScheduleSource struct {
+	Type       ScheduleSourceType `json:"type"`
+	Value      int64              `json:"value,omitempty"`
+	TemplateID int64              `json:"template_id,omitempty"`
+	Field      string             `json:"field,omitempty"`
+	TimeField  string             `json:"time_field,omitempty"` // Field 为纯日期时配套的时间字段
+}
+
+// ScheduleConfig 描述自动化节点在一个流程实例中的单次执行计划。
+type ScheduleConfig struct {
+	Type     ScheduleType   `json:"type"`
+	Source   ScheduleSource `json:"source,omitempty"`
+	Unit     ScheduleUnit   `json:"unit,omitempty"`
+	Timezone string         `json:"timezone,omitempty"`
+}
+
 type Workflow struct {
 	Id       int64
 	Name     string
@@ -386,15 +437,17 @@ type ConditionProperty struct {
 }
 
 type AutomationProperty struct {
-	Name          string  `json:"name"`
-	CodebookId    int64   `json:"codebook_id"`    // 代码库ID
-	Tag           string  `json:"tag"`            // runner tags
-	IsNotify      bool    `json:"is_notify"`      // 是否开始消息通知
-	Unit          uint8   `json:"unit"`           // 定时执行：单位
-	Quantity      int64   `json:"quantity"`       // 定时执行：数量
-	ExecMethod    string  `json:"exec_method"`    // 执行方式, template 模版获取，hand 手动指定
-	TemplateId    int64   `json:"template_id"`    // 模版ID
-	TemplateField string  `json:"template_field"` // 模版字段
-	IsTiming      bool    `json:"is_timing"`      // 是否开始定时执行
-	NotifyMethod  []int64 `json:"notify_method"`  // 消息通知模式
+	Name         string          `json:"name"`
+	CodebookId   int64           `json:"codebook_id"`        // 代码库ID
+	Tag          string          `json:"tag"`                // runner tags
+	NotifyMethod []int64         `json:"notify_method"`      // 消息通知模式
+	IsNotify     bool            `json:"is_notify"`          // 是否开始消息通知
+	Schedule     *ScheduleConfig `json:"schedule,omitempty"` // 单次执行计划；为空时读取下方历史字段
+	// Deprecated: 以下定时字段仅用于兼容历史流程配置。
+	Unit          uint8  `json:"unit"`           // 定时执行：单位
+	Quantity      int64  `json:"quantity"`       // 定时执行：数量
+	ExecMethod    string `json:"exec_method"`    // 执行方式, template 模版获取，hand 手动指定
+	TemplateId    int64  `json:"template_id"`    // 模版ID
+	TemplateField string `json:"template_field"` // 模版字段
+	IsTiming      bool   `json:"is_timing"`      // 是否开始定时执行
 }

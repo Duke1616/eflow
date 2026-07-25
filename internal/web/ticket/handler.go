@@ -2,6 +2,7 @@ package ticket
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/ticketpbac"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
@@ -21,6 +23,7 @@ import (
 )
 
 var systemErrorResult = ginx.Result{Code: 500, Msg: "系统内部错误"}
+var ticketNotAccessibleResult = ginx.Result{Code: 403, Msg: "工单不存在或无权访问"}
 
 type Handler struct {
 	capability.IRegistry
@@ -64,13 +67,16 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	)
 	g.POST("/detail/process_inst_id", detail("工单详情", "get").
 		Needs("cmdb:tools:download").
+		AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
 		Handle(ginx.B[DetailProcessInstIdReq](h.Detail)),
 	)
 	g.POST("/task/record", detail("流转记录", "record").
+		AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
 		Handle(ginx.B[RecordTaskReq](h.TaskRecord)),
 	)
 	g.POST("/todo", list("所有待办工单", "todo").
 		Needs("ticket:template:view_by_ids").
+		AccessScope(ticketpbac.TodoProfile, ticketpbac.TodoPresets...).
 		Handle(ginx.B[Todo](h.TodoAll)),
 	)
 	g.POST("/todo/user", list("我的待办工单", "my_todo").
@@ -79,6 +85,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	)
 	g.POST("/history", list("历史工单", "history").
 		Needs("ticket:template:view_by_ids").
+		AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
 		Handle(ginx.B[HistoryReq](h.History)),
 	)
 	g.POST("/start/user", list("我发起的工单", "my_start").
@@ -170,7 +177,7 @@ func (h *Handler) CreateTicket(ctx *ginx.Context, req CreateTicketReq) (ginx.Res
 }
 
 func (h *Handler) TodoAll(ctx *ginx.Context, req Todo) (ginx.Result, error) {
-	instances, total, err := h.engineSvc.ListTodoTasks(ctx.Context, req.UserId, req.ProcessName, req.SortByAsc, int(req.Offset), int(req.Limit))
+	instances, total, err := h.engineSvc.ListAllTodoTasks(ctx.Context, req.UserId, req.ProcessName, req.SortByAsc, int(req.Offset), int(req.Limit))
 	if err != nil {
 		return systemErrorResult, err
 	}
@@ -316,6 +323,9 @@ func (h *Handler) StartUser(ctx *ginx.Context, req StartUserReq) (ginx.Result, e
 func (h *Handler) Detail(ctx *ginx.Context, req DetailProcessInstIdReq) (ginx.Result, error) {
 	ticket, err := h.svc.GetByProcessInstanceID(ctx.Context, req.ProcessInstanceId)
 	if err != nil {
+		if errors.Is(err, domain.ErrTicketNotAccessible) {
+			return ticketNotAccessibleResult, nil
+		}
 		return systemErrorResult, err
 	}
 
@@ -325,7 +335,7 @@ func (h *Handler) Detail(ctx *ginx.Context, req DetailProcessInstIdReq) (ginx.Re
 }
 
 func (h *Handler) TaskRecord(ctx *ginx.Context, req RecordTaskReq) (ginx.Result, error) {
-	ts, total, err := h.engineSvc.TaskRecord(ctx.Context, req.ProcessInstId, int(req.Offset), int(req.Limit))
+	ts, total, err := h.engineSvc.AccessibleTaskRecord(ctx.Context, req.ProcessInstId, int(req.Offset), int(req.Limit))
 	if err != nil {
 		return systemErrorResult, err
 	}

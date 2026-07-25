@@ -9,7 +9,9 @@ import (
 
 	"github.com/Bunny3th/easy-workflow/workflow/database"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
+	"github.com/Duke1616/eflow/internal/pkg/ticketpbac"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
+	pbacgorm "github.com/Duke1616/eiam/pkg/pbac/gormx"
 	"github.com/ecodeclub/ekit/slice"
 	"gorm.io/gorm"
 )
@@ -20,6 +22,10 @@ type IEngineDAO interface {
 	ListTodo(ctx context.Context, userId, processName string, sortByAsc bool, offset, limit int) ([]Instance, error)
 	// CountTodo 统计用户的待办任务总数
 	CountTodo(ctx context.Context, userId, processName string) (int64, error)
+	// ListAllTodo 分页查询待办任务并应用上下文中的 PBAC AccessScope，userId 仅作为附加收窄条件。
+	ListAllTodo(ctx context.Context, userId, processName string, sortByAsc bool, offset, limit int) ([]Instance, error)
+	// CountAllTodo 使用与 ListAllTodo 相同的 PBAC 和查询条件统计待办任务总数。
+	CountAllTodo(ctx context.Context, userId, processName string) (int64, error)
 	// CountStartUser 统计用户发起的流程实例总数
 	CountStartUser(ctx context.Context, userId, processName string) (int64, error)
 	// ListHistory 获取审批历史记录列表
@@ -32,6 +38,10 @@ type IEngineDAO interface {
 	ListTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, error)
 	// CountTaskRecord 统计指定流程实例的任务记录总数
 	CountTaskRecord(ctx context.Context, processInstId int) (int64, error)
+	// ListAccessibleTaskRecord 查询经过工单 AccessScope 约束的流转记录。
+	ListAccessibleTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, error)
+	// CountAccessibleTaskRecord 使用与列表相同的 AccessScope 统计流转记录。
+	CountAccessibleTaskRecord(ctx context.Context, processInstId int) (int64, error)
 	// SearchStartByProcessInstIds 批量检索指定的流程实例列表
 	SearchStartByProcessInstIds(ctx context.Context, processInstIds []int) ([]Instance, error)
 	// UpdateIsFinishedByPreNodeId 自动更新当前节点的前置代理流转任务为完成状态
@@ -337,14 +347,102 @@ func (g *gormEngineDAO) CountTaskRecord(ctx context.Context, processInstId int) 
 	return res, err
 }
 
-func (g *gormEngineDAO) CountTodo(ctx context.Context, userId, processName string) (int64, error) {
-	var res int64
+func (g *gormEngineDAO) ListAccessibleTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, error) {
+	db, err := g.accessibleTaskRecordQuery(ctx, processInstId)
+	if err != nil {
+		return nil, err
+	}
+	var result []model.Task
+	err = db.Offset(offset).Limit(limit).Scan(&result).Error
+	return result, err
+}
+
+func (g *gormEngineDAO) CountAccessibleTaskRecord(ctx context.Context, processInstId int) (int64, error) {
+	db, err := g.accessibleTaskRecordQuery(ctx, processInstId)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	err = db.Count(&total).Error
+	return total, err
+}
+
+func (g *gormEngineDAO) accessibleTaskRecordQuery(ctx context.Context, processInstId int) (*gorm.DB, error) {
 	tenantID := ctxutil.GetTenantID(ctx).Int64()
 	if tenantID <= 0 {
+		return nil, errors.New("tenant context is missing")
+	}
+	procInstDB := g.db.WithContext(ctx).Model(&model.Task{}).Table("proc_task").
+		Select("id, proc_id, proc_inst_id, business_id,starter,node_id,node_name,"+
+			"prev_node_id,is_cosigned,batch_code,user_id,status,is_finished,comment,proc_inst_create_time,"+
+			"create_time,finished_time").
+		Where("proc_inst_id = ?", processInstId)
+	procHistInstDB := g.db.WithContext(ctx).Model(&model.Task{}).Table("hist_proc_task").
+		Select("task_id,proc_id, proc_inst_id,business_id,starter,node_id,node_name,"+
+			"prev_node_id,is_cosigned,batch_code,user_id,status,is_finished,comment,proc_inst_create_time,"+
+			"create_time,finished_time").
+		Where("proc_inst_id = ?", processInstId)
+
+	union := g.db.Raw("? UNION ALL ?", procInstDB, procHistInstDB)
+	db := g.db.WithContext(ctx).Table("(?) as a", union).
+		Select("a.id,a.proc_id,b.name,a.proc_inst_id,"+
+			"a.business_id,a.starter,a.node_id,a.node_name,a.prev_node_id,a.is_cosigned,a.batch_code,a.user_id,a.status,"+
+			"a.is_finished,a.comment,a.proc_inst_create_time,a.create_time,a.finished_time").
+		Joins("JOIN proc_def b ON a.proc_id = b.id").
+		Joins("JOIN ticket ON ticket.process_instance_id = a.proc_inst_id").
+		Where("ticket.tenant_id = ?", tenantID)
+	return pbacgorm.Apply(ctx, db, ticketpbac.History)
+}
+
+func (g *gormEngineDAO) CountTodo(ctx context.Context, userId, processName string) (int64, error) {
+	db, ok := g.todoQuery(ctx, userId, processName)
+	if !ok {
 		return 0, nil
 	}
+	return countTodo(db)
+}
 
-	db := g.db.WithContext(ctx).Model(&model.Task{}).Table("proc_task as pt").
+func (g *gormEngineDAO) ListTodo(ctx context.Context, userId, processName string, sortByAsc bool, offset, limit int) ([]Instance, error) {
+	db, ok := g.todoQuery(ctx, userId, processName)
+	if !ok {
+		return []Instance{}, nil
+	}
+	return listTodo(db, sortByAsc, offset, limit)
+}
+
+// CountAllTodo 使用待办 profile 应用 PBAC 决策后统计可见任务数。
+func (g *gormEngineDAO) CountAllTodo(ctx context.Context, userId, processName string) (int64, error) {
+	db, ok := g.todoQuery(ctx, userId, processName)
+	if !ok {
+		return 0, nil
+	}
+	db, err := pbacgorm.Apply(ctx, db, ticketpbac.Todo)
+	if err != nil {
+		return 0, err
+	}
+	return countTodo(db)
+}
+
+// ListAllTodo 使用待办 profile 应用 PBAC 决策后查询可见任务。
+func (g *gormEngineDAO) ListAllTodo(ctx context.Context, userId, processName string, sortByAsc bool, offset, limit int) ([]Instance, error) {
+	db, ok := g.todoQuery(ctx, userId, processName)
+	if !ok {
+		return []Instance{}, nil
+	}
+	db, err := pbacgorm.Apply(ctx, db, ticketpbac.Todo)
+	if err != nil {
+		return nil, err
+	}
+	return listTodo(db, sortByAsc, offset, limit)
+}
+
+func (g *gormEngineDAO) todoQuery(ctx context.Context, userId, processName string) (*gorm.DB, bool) {
+	tenantID := ctxutil.GetTenantID(ctx).Int64()
+	if tenantID <= 0 {
+		return nil, false
+	}
+	db := g.db.WithContext(ctx).
+		Table("proc_task as pt").
 		Joins("JOIN ticket t ON t.process_instance_id = pt.proc_inst_id").
 		Joins("JOIN proc_def pd ON pd.id = pt.proc_id").
 		Where("pt.is_finished = ?", 0).
@@ -355,45 +453,30 @@ func (g *gormEngineDAO) CountTodo(ctx context.Context, userId, processName strin
 	if processName != "" {
 		db = db.Where("pd.name = ?", processName)
 	}
-
-	err := db.Count(&res).Error
-	return res, err
+	return db, true
 }
 
-func (g *gormEngineDAO) ListTodo(ctx context.Context, userId, processName string, sortByAsc bool, offset, limit int) ([]Instance, error) {
-	var res []Instance
-	tenantID := ctxutil.GetTenantID(ctx).Int64()
-	if tenantID <= 0 {
-		return res, nil
-	}
+func countTodo(db *gorm.DB) (int64, error) {
+	var total int64
+	err := db.Count(&total).Error
+	return total, err
+}
 
+func listTodo(db *gorm.DB, sortByAsc bool, offset, limit int) ([]Instance, error) {
+	var result []Instance
 	order := "pt.create_time desc"
 	if sortByAsc {
 		order = "pt.create_time asc"
 	}
-
-	db := g.db.WithContext(ctx).Table("proc_task as pt").
-		Select("pt.id as task_id, pt.proc_inst_id as id, pt.proc_id, pi.proc_version, "+
-			"pt.business_id, pt.starter, pt.node_id as current_node_id, pt.node_name as current_node_name, "+
-			"pt.create_time, pt.user_id, pt.status, pd.name").
-		Joins("JOIN ticket t ON t.process_instance_id = pt.proc_inst_id").
-		Joins("JOIN proc_def pd ON pd.id = pt.proc_id").
+	err := db.Select("pt.id as task_id, pt.proc_inst_id as id, pt.proc_id, pi.proc_version, " +
+		"pt.business_id, pt.starter, pt.node_id as current_node_id, pt.node_name as current_node_name, " +
+		"pt.create_time, pt.user_id, pt.status, pd.name").
 		Joins("LEFT JOIN proc_inst pi ON pi.id = pt.proc_inst_id").
-		Where("pt.is_finished = ?", 0).
-		Where("t.tenant_id = ?", tenantID).
 		Order(order).
 		Limit(limit).
-		Offset(offset)
-
-	if userId != "" {
-		db = db.Where("pt.user_id = ?", userId)
-	}
-	if processName != "" {
-		db = db.Where("pd.name = ?", processName)
-	}
-
-	err := db.Scan(&res).Error
-	return res, err
+		Offset(offset).
+		Scan(&result).Error
+	return result, err
 }
 
 func (g *gormEngineDAO) SearchStartByProcessInstIds(ctx context.Context, processInstIds []int) ([]Instance, error) {

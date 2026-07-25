@@ -82,7 +82,7 @@ func InitApp() (*App, error) {
 	eiamConn := InitEIAMGrpcClient(registry)
 	eiamClient := eiam.NewEIAMClient(eiamConn)
 	userServiceClient := eiamClient.UserClient
-	taskService := task.NewTaskService(taskRepository, taskAttemptRepository, workflowService, runnerCatalog, engineService, ticketService, dispatchService, taskDispatcher, executionReader, userServiceClient)
+	taskService := task.NewTaskService(taskRepository, taskAttemptRepository, workflowService, runnerCatalog, engineService, ticketService, dispatchService, taskDispatcher, executionReader, userServiceClient, service)
 	taskHandler := task2.NewHandler(taskService)
 	ticketHandler := ticket2.NewHandler(ticketService, engineService, userServiceClient, workflowService)
 	dispatchHandler := dispatch3.NewHandler(dispatchService)

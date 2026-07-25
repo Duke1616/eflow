@@ -9,6 +9,7 @@ type Rule struct {
 	Field    string                 `json:"field"`
 	Title    string                 `json:"title"`
 	Style    map[string]interface{} `json:"style"`
+	Props    map[string]interface{} `json:"props"`
 	Children []Rule                 `json:"children"`
 	Options  []Options              `json:"options"`
 }
@@ -41,6 +42,7 @@ func flatten(rules []Rule, res *[]Rule) {
 			Field:   rule.Field,
 			Title:   rule.Title,
 			Style:   rule.Style,
+			Props:   rule.Props,
 			Options: rule.Options,
 		})
 

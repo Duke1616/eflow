@@ -13,6 +13,7 @@ import (
 	"github.com/Duke1616/eflow/internal/repository"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	"github.com/Duke1616/eflow/internal/service/engine"
+	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	"github.com/Duke1616/eflow/internal/service/ticket"
 	"github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
@@ -65,6 +66,7 @@ type taskService struct {
 	runners    etaskclient.RunnerCatalog
 	tickets    ticket.Service
 	dispatches dispatchSvc.Service
+	templates  templateSvc.Service
 	executions etaskclient.TaskDispatcher
 	reader     etaskclient.ExecutionReader
 	users      userv1.UserServiceClient
@@ -75,10 +77,11 @@ type taskService struct {
 func NewTaskService(tasks repository.TaskRepository, attempts repository.TaskAttemptRepository,
 	workflows workflow.Service, runners etaskclient.RunnerCatalog, engineService engine.Service,
 	tickets ticket.Service, dispatches dispatchSvc.Service, executions etaskclient.TaskDispatcher,
-	reader etaskclient.ExecutionReader, users userv1.UserServiceClient) Service {
+	reader etaskclient.ExecutionReader, users userv1.UserServiceClient, templates templateSvc.Service) Service {
 	return &taskService{
 		tasks: tasks, attempts: attempts, workflows: workflows, runners: runners,
 		engine: engineService, tickets: tickets, dispatches: dispatches,
+		templates:  templates,
 		executions: executions, reader: reader, users: users,
 		logger: elog.DefaultLogger.With(elog.FieldComponentName("service.automation")),
 	}

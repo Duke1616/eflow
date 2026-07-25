@@ -210,3 +210,22 @@ func TestUpdateEdgeProperties(t *testing.T) {
 		assert.True(t, props["is_pass"].(bool))
 	})
 }
+
+func TestToNodePropertyParsesSchedule(t *testing.T) {
+	property, err := ToNodeProperty[AutomationProperty](Node{Properties: map[string]interface{}{
+		"schedule": map[string]interface{}{
+			"type": "at",
+			"source": map[string]interface{}{
+				"type": "template_field", "template_id": 12, "field": "execute_date", "time_field": "execute_time",
+			},
+			"timezone": "Asia/Shanghai",
+		},
+	}})
+
+	require.NoError(t, err)
+	require.NotNil(t, property.Schedule)
+	assert.Equal(t, ScheduleAt, property.Schedule.Type)
+	assert.Equal(t, int64(12), property.Schedule.Source.TemplateID)
+	assert.Equal(t, "execute_date", property.Schedule.Source.Field)
+	assert.Equal(t, "execute_time", property.Schedule.Source.TimeField)
+}

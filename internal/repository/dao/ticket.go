@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/pkg/ticketpbac"
 	"github.com/Duke1616/eflow/pkg/sqlx"
+	pbacgorm "github.com/Duke1616/eiam/pkg/pbac/gormx"
 	"gorm.io/gorm"
 )
 
@@ -36,7 +38,6 @@ type NotificationConf struct {
 	Channel        string                    `json:"channel"`
 }
 
-
 // TicketDAO 工单物理数据访问接口
 type TicketDAO interface {
 	// CreateBizTicket 在 DB 中物理持久化一条带有外部场景属性和唯一键值的工单记录
@@ -45,6 +46,8 @@ type TicketDAO interface {
 	CreateTicket(ctx context.Context, req Ticket) (int64, error)
 	// DetailByProcessInstId 依据绑定的工作流引擎流程实例 ID 从物理表获取单据
 	DetailByProcessInstId(ctx context.Context, instanceId int) (Ticket, error)
+	// AccessibleDetailByProcessInstId 获取经过 PBAC AccessScope 约束的单条工单。
+	AccessibleDetailByProcessInstId(ctx context.Context, instanceId int) (Ticket, error)
 	// Detail 依据物理主键 ID 获取单条工单详情
 	Detail(ctx context.Context, id int64) (Ticket, error)
 	// RegisterProcessInstanceId 为指定工单登记绑定的引擎实例 ID 并且同步置为流转状态
@@ -57,6 +60,10 @@ type TicketDAO interface {
 	ListTicket(ctx context.Context, userId string, status []int, offset, limit int64) ([]Ticket, error)
 	// CountTicket 统计与指定用户相关且在指定状态集合内的工单物理记录总条数
 	CountTicket(ctx context.Context, userId string, status []int) (int64, error)
+	// ListHistory 分页查询历史工单并应用上下文中的 PBAC AccessScope，userId 仅作为附加收窄条件。
+	ListHistory(ctx context.Context, userId string, status []int, offset, limit int64) ([]Ticket, error)
+	// CountHistory 使用与 ListHistory 相同的 PBAC 和查询条件统计历史工单总数。
+	CountHistory(ctx context.Context, userId string, status []int) (int64, error)
 	// FindByBizIdAndKey 依据场景 ID、单据号和允许的状态列表查找满足条件的唯一活跃工单记录
 	FindByBizIdAndKey(ctx context.Context, bizId int64, key string, status []uint8) (Ticket, error)
 	// MergeTicketData 高效利用原子更新将新表单属性合并至已持久化的 JSON 列中
@@ -93,6 +100,20 @@ func (g *gormTicketDAO) DetailByProcessInstId(ctx context.Context, instanceId in
 	return res, err
 }
 
+func (g *gormTicketDAO) AccessibleDetailByProcessInstId(ctx context.Context, instanceId int) (Ticket, error) {
+	var result Ticket
+	query, err := pbacgorm.Apply(
+		ctx,
+		g.db.WithContext(ctx).Model(&Ticket{}).Where("process_instance_id = ?", instanceId),
+		ticketpbac.History,
+	)
+	if err != nil {
+		return Ticket{}, err
+	}
+	err = query.First(&result).Error
+	return result, err
+}
+
 func (g *gormTicketDAO) Detail(ctx context.Context, id int64) (Ticket, error) {
 	var res Ticket
 	err := g.db.WithContext(ctx).Where("id = ?", id).First(&res).Error
@@ -127,19 +148,41 @@ func (g *gormTicketDAO) UpdateStatusByInstanceId(ctx context.Context, instanceId
 
 func (g *gormTicketDAO) ListTicket(ctx context.Context, userId string, status []int, offset, limit int64) ([]Ticket, error) {
 	var res []Ticket
-	query := g.db.WithContext(ctx)
-	if userId != "" {
-		query = query.Where("create_by = ?", userId)
-	}
-	if len(status) > 0 {
-		query = query.Where("status IN ?", status)
-	}
+	query := g.ticketQuery(ctx, userId, status)
 	err := query.Order("ctime desc").Limit(int(limit)).Offset(int(offset)).Find(&res).Error
 	return res, err
 }
 
 func (g *gormTicketDAO) CountTicket(ctx context.Context, userId string, status []int) (int64, error) {
 	var total int64
+	query := g.ticketQuery(ctx, userId, status)
+	err := query.Count(&total).Error
+	return total, err
+}
+
+// ListHistory 使用历史工单 profile 应用 PBAC 决策后查询可见工单。
+func (g *gormTicketDAO) ListHistory(ctx context.Context, userId string, status []int, offset, limit int64) ([]Ticket, error) {
+	var result []Ticket
+	query, err := pbacgorm.Apply(ctx, g.ticketQuery(ctx, userId, status), ticketpbac.History)
+	if err != nil {
+		return nil, err
+	}
+	err = query.Order("ctime desc").Limit(int(limit)).Offset(int(offset)).Find(&result).Error
+	return result, err
+}
+
+// CountHistory 使用历史工单 profile 应用 PBAC 决策后统计可见工单数。
+func (g *gormTicketDAO) CountHistory(ctx context.Context, userId string, status []int) (int64, error) {
+	var total int64
+	query, err := pbacgorm.Apply(ctx, g.ticketQuery(ctx, userId, status), ticketpbac.History)
+	if err != nil {
+		return 0, err
+	}
+	err = query.Count(&total).Error
+	return total, err
+}
+
+func (g *gormTicketDAO) ticketQuery(ctx context.Context, userId string, status []int) *gorm.DB {
 	query := g.db.WithContext(ctx).Model(&Ticket{})
 	if userId != "" {
 		query = query.Where("create_by = ?", userId)
@@ -147,8 +190,7 @@ func (g *gormTicketDAO) CountTicket(ctx context.Context, userId string, status [
 	if len(status) > 0 {
 		query = query.Where("status IN ?", status)
 	}
-	err := query.Count(&total).Error
-	return total, err
+	return query
 }
 
 func (g *gormTicketDAO) FindByBizIdAndKey(ctx context.Context, bizId int64, key string, status []uint8) (Ticket, error) {

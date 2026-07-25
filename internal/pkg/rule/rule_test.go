@@ -48,3 +48,15 @@ func TestField(t *testing.T) {
 
 	print(card)
 }
+
+func TestParseRulesPreservesProps(t *testing.T) {
+	rules := []map[string]interface{}{{
+		"type": "datePicker", "field": "execute_at", "title": "执行时间",
+		"props": map[string]interface{}{"type": "datetime"},
+	}}
+
+	result, err := ParseRules(rules)
+	assert.NoError(t, err)
+	assert.Len(t, result, 1)
+	assert.Equal(t, "datetime", result[0].Props["type"])
+}

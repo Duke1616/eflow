@@ -169,6 +169,7 @@ func (h *Handler) GetRulesByWorkFlowId(ctx *ginx.Context, req GetRulesByWorkFlow
 						Type:  src.Type,
 						Field: src.Field,
 						Title: src.Title,
+						Props: src.Props,
 					}
 				})
 
@@ -438,14 +439,15 @@ func (h *Handler) toDomain(req CreateTemplateReq) (domain.Template, error) {
 	})
 
 	return domain.Template{
-		Name:       req.Name,
-		WorkflowId: req.WorkflowId,
-		GroupId:    req.GroupId,
-		Icon:       req.Icon,
-		CreateType: domain.SystemCreate,
-		Rules:      rules,
-		Options:    domain.TemplateOptions(optionsData),
-		Desc:       req.Desc,
+		Name:              req.Name,
+		WorkflowId:        req.WorkflowId,
+		GroupId:           req.GroupId,
+		Icon:              req.Icon,
+		CreateType:        domain.SystemCreate,
+		Rules:             rules,
+		Options:           domain.TemplateOptions(optionsData),
+		ScheduleOverrides: toDomainScheduleOverrides(req.ScheduleOverrides),
+		Desc:              req.Desc,
 	}, nil
 }
 
@@ -453,15 +455,16 @@ func (h *Handler) toTemplateVo(req domain.Template) Template {
 	rules, _ := json.Marshal(req.Rules)
 	options, _ := json.Marshal(req.Options)
 	return Template{
-		Id:         req.Id,
-		Name:       req.Name,
-		WorkflowId: req.WorkflowId,
-		GroupId:    req.GroupId,
-		Icon:       req.Icon,
-		Rules:      string(rules),
-		Options:    string(options),
-		CreateType: CreateType(req.CreateType),
-		Desc:       req.Desc,
+		Id:                req.Id,
+		Name:              req.Name,
+		WorkflowId:        req.WorkflowId,
+		GroupId:           req.GroupId,
+		Icon:              req.Icon,
+		Rules:             string(rules),
+		Options:           string(options),
+		ScheduleOverrides: toScheduleOverridesVO(req.ScheduleOverrides),
+		CreateType:        CreateType(req.CreateType),
+		Desc:              req.Desc,
 	}
 }
 
@@ -471,15 +474,16 @@ func (h *Handler) toTemplateJsonVo(req domain.Template) TemplateJson {
 	})
 
 	return TemplateJson{
-		Id:         req.Id,
-		Name:       req.Name,
-		WorkflowId: req.WorkflowId,
-		GroupId:    req.GroupId,
-		Icon:       req.Icon,
-		CreateType: CreateType(req.CreateType),
-		Rules:      rules,
-		Options:    req.Options,
-		Desc:       req.Desc,
+		Id:                req.Id,
+		Name:              req.Name,
+		WorkflowId:        req.WorkflowId,
+		GroupId:           req.GroupId,
+		Icon:              req.Icon,
+		CreateType:        CreateType(req.CreateType),
+		Rules:             rules,
+		Options:           req.Options,
+		ScheduleOverrides: toScheduleOverridesVO(req.ScheduleOverrides),
+		Desc:              req.Desc,
 	}
 }
 
@@ -514,13 +518,40 @@ func (h *Handler) toUpdateDomain(req UpdateTemplateReq) (domain.Template, error)
 	})
 
 	return domain.Template{
-		Id:         req.Id,
-		Name:       req.Name,
-		Desc:       req.Desc,
-		Icon:       req.Icon,
-		GroupId:    req.GroupId,
-		WorkflowId: req.WorkflowId,
-		Rules:      rules,
-		Options:    optionsData,
+		Id:                req.Id,
+		Name:              req.Name,
+		Desc:              req.Desc,
+		Icon:              req.Icon,
+		GroupId:           req.GroupId,
+		WorkflowId:        req.WorkflowId,
+		Rules:             rules,
+		Options:           optionsData,
+		ScheduleOverrides: toDomainScheduleOverrides(req.ScheduleOverrides),
 	}, nil
+}
+
+func toDomainScheduleOverrides(overrides map[string]ScheduleOverrideVO) domain.ScheduleOverrides {
+	result := make(domain.ScheduleOverrides, len(overrides))
+	for nodeID, override := range overrides {
+		result[nodeID] = domain.ScheduleOverride{
+			Type:      override.Type,
+			Field:     override.Field,
+			TimeField: override.TimeField,
+			Unit:      override.Unit,
+		}
+	}
+	return result
+}
+
+func toScheduleOverridesVO(overrides domain.ScheduleOverrides) map[string]ScheduleOverrideVO {
+	result := make(map[string]ScheduleOverrideVO, len(overrides))
+	for nodeID, override := range overrides {
+		result[nodeID] = ScheduleOverrideVO{
+			Type:      override.Type,
+			Field:     override.Field,
+			TimeField: override.TimeField,
+			Unit:      override.Unit,
+		}
+	}
+	return result
 }

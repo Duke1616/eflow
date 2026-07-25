@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
-	"time"
 
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
@@ -26,7 +24,10 @@ func (s *taskService) prepareSchedule(ctx context.Context, task domain.Task,
 	if err != nil {
 		return 0, err
 	}
-	return s.calculateScheduledAt(prepared.automation, prepared.input)
+	if err = s.applyTemplateScheduleOverride(ctx, task.NodeID, ticket.TemplateId, &prepared.automation); err != nil {
+		return 0, s.taskError(task.ID, taskPreparationOperation, err)
+	}
+	return s.calculateScheduledAt(prepared.automation, prepared.input, ticket.TemplateId)
 }
 
 func (s *taskService) prepareAttempt(ctx context.Context,
@@ -129,65 +130,6 @@ func (s *taskService) assembleRuntimeArgs(ctx context.Context, ticket domain.Tic
 		}
 	}
 	return input, nil
-}
-
-func (s *taskService) calculateScheduledAt(automation easyflow.AutomationProperty,
-	input domain.TaskArgs) (int64, error) {
-	if !automation.IsTiming {
-		return time.Now().UnixMilli(), nil
-	}
-	var quantity int64
-	unit := uint8(2)
-	switch automation.ExecMethod {
-	case "template":
-		if automation.TemplateField == "" {
-			return 0, fmt.Errorf("动态定时配置缺少模版字段")
-		}
-		var err error
-		quantity, err = parseQuantity(input[automation.TemplateField])
-		if err != nil {
-			return 0, fmt.Errorf("动态定时字段 %s 非法: %w", automation.TemplateField, err)
-		}
-	case "hand":
-		quantity = automation.Quantity
-		unit = automation.Unit
-	default:
-		return 0, fmt.Errorf("不支持的定时配置方式: %s", automation.ExecMethod)
-	}
-	if quantity <= 0 {
-		return 0, fmt.Errorf("定时间隔必须大于 0")
-	}
-	duration := time.Duration(quantity) * time.Hour
-	switch unit {
-	case 1:
-		duration = time.Duration(quantity) * time.Minute
-	case 2:
-	case 3:
-		duration = time.Duration(quantity) * 24 * time.Hour
-	default:
-		return 0, fmt.Errorf("不支持的定时时间单位: %d", unit)
-	}
-	return time.Now().Add(duration).UnixMilli(), nil
-}
-
-func parseQuantity(value any) (int64, error) {
-	switch current := value.(type) {
-	case int:
-		return int64(current), nil
-	case int64:
-		return current, nil
-	case float64:
-		if current != float64(int64(current)) {
-			return 0, fmt.Errorf("必须是整数")
-		}
-		return int64(current), nil
-	case string:
-		parsed, err := strconv.ParseInt(current, 10, 64)
-		if err == nil {
-			return parsed, nil
-		}
-	}
-	return 0, fmt.Errorf("必须是有效整数")
 }
 
 func toEasyWorkflow(workflow domain.Workflow) easyflow.Workflow {
