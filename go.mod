@@ -21,7 +21,6 @@ require (
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.3
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/pressly/goose/v3 v3.27.0
-	github.com/robfig/cron/v3 v3.0.1
 	github.com/samber/lo v1.53.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
@@ -36,8 +35,6 @@ require (
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.1
 )
-
-
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
@@ -111,6 +108,7 @@ require (
 	github.com/prometheus/procfs v0.19.2 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.0 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
 	github.com/savsgio/gotils v0.0.0-20230208104028-c358bd845dee // indirect
 	github.com/segmentio/kafka-go v0.4.44 // indirect
