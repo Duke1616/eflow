@@ -105,7 +105,8 @@ func dateRuleKind(item formrule.Rule) string {
 	if typeName != "datepicker" {
 		return ""
 	}
-	pickerType := strings.ToLower(fmt.Sprint(item.Props["type"]))
+	pickerType, _ := item.Props["type"].(string)
+	pickerType = strings.ToLower(strings.TrimSpace(pickerType))
 	if pickerType == "datetime" {
 		return "datetime"
 	}

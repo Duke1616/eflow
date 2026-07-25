@@ -263,6 +263,36 @@ func TestResolveTemplateScheduleOverrideRejectsIncompleteCurrentModel(t *testing
 	require.ErrorContains(t, err, "不支持的延迟时间单位")
 }
 
+func TestResolveTemplateScheduleOverrideAcceptsDefaultDatePicker(t *testing.T) {
+	rules := []domain.Rule{{
+		"type": "fcRow",
+		"children": []any{
+			map[string]any{
+				"type": "col",
+				"children": []any{
+					map[string]any{"type": "datePicker", "field": "schedule_date"},
+				},
+			},
+			map[string]any{
+				"type": "col",
+				"children": []any{
+					map[string]any{"type": "timePicker", "field": "schedule_time"},
+				},
+			},
+		},
+	}}
+
+	schedule, err := resolveTemplateScheduleOverride(domain.ScheduleOverride{
+		Type: "at", Field: "schedule_date", TimeField: "schedule_time",
+	}, rules)
+
+	require.NoError(t, err)
+	require.Equal(t, easyflow.ScheduleAt, schedule.Type)
+	require.Equal(t, easyflow.ScheduleSourceTemplateField, schedule.Source.Type)
+	require.Equal(t, "schedule_date", schedule.Source.Field)
+	require.Equal(t, "schedule_time", schedule.Source.TimeField)
+}
+
 type dispatchServiceStub struct {
 	dispatchSvc.Service
 	dispatches []domain.Dispatch
