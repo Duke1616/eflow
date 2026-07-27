@@ -29,9 +29,15 @@ func TestResolveRunnerByDispatch(t *testing.T) {
 			Field: "environment", Value: "prod", RunnerId: 10,
 		}}},
 		{name: "规则查询失败阻断执行", listErr: errors.New("database unavailable"), wantErr: "查询自动派发规则失败"},
-		{name: "匹配规则缺少执行单元", dispatches: []domain.Dispatch{{
+		{name: "匹配规则缺少执行单元允许回退", dispatches: []domain.Dispatch{{
 			Field: "environment", Value: "test",
-		}}, wantErr: "缺少执行单元"},
+		}}},
+		{name: "跳过缺少执行单元后选择有效规则", dispatches: []domain.Dispatch{
+			{Field: "environment", Value: "test"},
+			{Field: "environment", Value: "test", RunnerId: 11},
+		}, runners: map[int64]etaskclient.Runner{
+			11: {ID: 11, CodebookID: 20},
+		}, wantMatch: true, wantRunnerID: 11},
 		{name: "其他 Codebook 的匹配规则允许回退", dispatches: []domain.Dispatch{{
 			Field: "environment", Value: "test", RunnerId: 10,
 		}}, runner: etaskclient.Runner{ID: 10, CodebookID: 99}},

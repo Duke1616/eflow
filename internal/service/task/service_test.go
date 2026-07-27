@@ -99,6 +99,20 @@ func TestStartTaskResumesCurrentAttempt(t *testing.T) {
 	}
 }
 
+func TestRetryTaskResumesSubmittingAttempt(t *testing.T) {
+	tasks := &taskRepositoryStub{task: activeTask(domain.TaskStatusSubmitting)}
+	attempts := &attemptRepositoryStub{attempt: currentAttempt(0)}
+	dispatcher := &dispatcherStub{executionID: 9001}
+	svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+
+	err := svc.RetryTask(context.Background(), 1)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, dispatcher.calls)
+	require.Equal(t, "eflow:1:1", dispatcher.received.RequestID)
+	require.Equal(t, int64(9001), attempts.boundExecutionID)
+}
+
 func TestCompleteAttemptValidatesTerminalIdentity(t *testing.T) {
 	testCases := []struct {
 		name      string

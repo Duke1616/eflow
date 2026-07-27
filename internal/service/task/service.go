@@ -206,6 +206,10 @@ func (s *taskService) retry(ctx context.Context, id int64, automatic bool) error
 		return err
 	}
 	ctx = tenantContext(ctx, task.TenantID)
+	if task.Status == domain.TaskStatusSubmitting {
+		// 提交阶段使用 request ID 幂等恢复当前尝试，不创建新的 attempt。
+		return s.StartTask(ctx, id)
+	}
 	if !task.Status.CanRetry() {
 		return fmt.Errorf("只有失败或阻塞的自动化任务可以重试")
 	}

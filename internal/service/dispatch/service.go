@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
@@ -40,6 +41,11 @@ func (s *service) Sync(ctx context.Context, templateId, syncTemplateId int64) (i
 	if err != nil {
 		return 0, total, err
 	}
+	for _, dispatch := range ds {
+		if err = validateRunnerID(dispatch.RunnerId); err != nil {
+			return 0, total, fmt.Errorf("来源模板包含无效派发规则 %d: %w", dispatch.Id, err)
+		}
+	}
 	count, err := s.repo.Sync(ctx, templateId, ds)
 	return count, total, err
 }
@@ -51,12 +57,25 @@ func (s *service) Delete(ctx context.Context, id int64) (int64, error) {
 
 // Create 创建自动派发规则
 func (s *service) Create(ctx context.Context, req domain.Dispatch) (int64, error) {
+	if err := validateRunnerID(req.RunnerId); err != nil {
+		return 0, err
+	}
 	return s.repo.Create(ctx, req)
 }
 
 // Update 修改自动派发规则
 func (s *service) Update(ctx context.Context, req domain.Dispatch) (int64, error) {
+	if err := validateRunnerID(req.RunnerId); err != nil {
+		return 0, err
+	}
 	return s.repo.Update(ctx, req)
+}
+
+func validateRunnerID(runnerID int64) error {
+	if runnerID <= 0 {
+		return fmt.Errorf("派发规则必须选择有效的执行单元")
+	}
+	return nil
 }
 
 // ListByTemplateId 分页获取并统计派发规则条数，利用 errgroup 异步加速

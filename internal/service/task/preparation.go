@@ -97,7 +97,13 @@ func (s *taskService) resolveRunnerByDispatch(ctx context.Context, templateID in
 			continue
 		}
 		if dispatch.RunnerId <= 0 {
-			return etaskclient.Runner{}, false, fmt.Errorf("匹配的自动派发规则缺少执行单元")
+			// 兼容存量脏数据：无效规则不能阻断同一模板下后续有效规则，
+			// 新增和修改入口会拒绝 runner_id <= 0。
+			if s.logger != nil {
+				s.logger.Warn("忽略缺少执行单元的派发规则",
+					elog.Int64("dispatchID", dispatch.Id))
+			}
+			continue
 		}
 		runner, findErr := s.runners.FindByID(ctx, dispatch.RunnerId)
 		if findErr != nil {
@@ -107,7 +113,7 @@ func (s *taskService) resolveRunnerByDispatch(ctx context.Context, templateID in
 			// 派发规则在模板范围内共享，命中的字段规则可能属于同一模板的其他自动化节点。
 			// 此时继续寻找当前 Codebook 的规则；若没有兼容规则，上层会按节点 Codebook 和 Tag 回退选择。
 			if s.logger != nil {
-				s.logger.Warn("忽略与自动化节点 Codebook 不匹配的派发规则",
+				s.logger.Debug("忽略与自动化节点 Codebook 不匹配的派发规则",
 					elog.Int64("dispatchID", dispatch.Id), elog.Int64("runnerID", runner.ID),
 					elog.Int64("runnerCodebookID", runner.CodebookID),
 					elog.Int64("automationCodebookID", automation.CodebookId))
