@@ -9,6 +9,7 @@ import (
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/gotomicro/ego/core/elog"
 )
 
 const taskPreparationOperation = "准备"
@@ -40,7 +41,7 @@ func (s *taskService) prepareAttempt(ctx context.Context,
 	if err != nil {
 		return 0, nil, err
 	}
-	runner, err := s.resolveRunner(ctx, task, ticket.TemplateId, prepared.automation, prepared.input)
+	runner, err := s.resolveRunner(ctx, ticket.TemplateId, prepared.automation, prepared.input)
 	if err != nil {
 		return 0, nil, s.taskError(task.ID, taskPreparationOperation, err)
 	}
@@ -70,12 +71,12 @@ func (s *taskService) resolvePreparation(ctx context.Context, task domain.Task,
 	return preparation{automation: automation, input: input}, nil
 }
 
-func (s *taskService) resolveRunner(ctx context.Context, task domain.Task, templateID int64,
+func (s *taskService) resolveRunner(ctx context.Context, templateID int64,
 	automation easyflow.AutomationProperty, input domain.TaskArgs) (etaskclient.Runner, error) {
 	if templateID > 0 && s.dispatches != nil {
 		runner, matched, err := s.resolveRunnerByDispatch(ctx, templateID, automation, input)
 		if err != nil {
-			return etaskclient.Runner{}, s.taskError(task.ID, taskPreparationOperation, err)
+			return etaskclient.Runner{}, err
 		}
 		if matched {
 			return runner, nil
@@ -103,7 +104,15 @@ func (s *taskService) resolveRunnerByDispatch(ctx context.Context, templateID in
 			return etaskclient.Runner{}, false, fmt.Errorf("查询派发规则执行单元失败: %w", findErr)
 		}
 		if runner.CodebookID != automation.CodebookId {
-			return etaskclient.Runner{}, false, fmt.Errorf("派发规则执行单元与自动化节点 Codebook 不匹配")
+			// 派发规则在模板范围内共享，命中的字段规则可能属于同一模板的其他自动化节点。
+			// 此时继续寻找当前 Codebook 的规则；若没有兼容规则，上层会按节点 Codebook 和 Tag 回退选择。
+			if s.logger != nil {
+				s.logger.Warn("忽略与自动化节点 Codebook 不匹配的派发规则",
+					elog.Int64("dispatchID", dispatch.Id), elog.Int64("runnerID", runner.ID),
+					elog.Int64("runnerCodebookID", runner.CodebookID),
+					elog.Int64("automationCodebookID", automation.CodebookId))
+			}
+			continue
 		}
 		return runner, true, nil
 	}

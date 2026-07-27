@@ -14,14 +14,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResolveRunnerByDispatchFailsClosed(t *testing.T) {
+func TestResolveRunnerByDispatch(t *testing.T) {
 	testCases := []struct {
-		name       string
-		dispatches []domain.Dispatch
-		listErr    error
-		runner     etaskclient.Runner
-		wantMatch  bool
-		wantErr    string
+		name         string
+		dispatches   []domain.Dispatch
+		listErr      error
+		runner       etaskclient.Runner
+		runners      map[int64]etaskclient.Runner
+		wantMatch    bool
+		wantRunnerID int64
+		wantErr      string
 	}{
 		{name: "没有匹配规则允许回退", dispatches: []domain.Dispatch{{
 			Field: "environment", Value: "prod", RunnerId: 10,
@@ -30,21 +32,28 @@ func TestResolveRunnerByDispatchFailsClosed(t *testing.T) {
 		{name: "匹配规则缺少执行单元", dispatches: []domain.Dispatch{{
 			Field: "environment", Value: "test",
 		}}, wantErr: "缺少执行单元"},
-		{name: "匹配规则 Codebook 不一致", dispatches: []domain.Dispatch{{
+		{name: "其他 Codebook 的匹配规则允许回退", dispatches: []domain.Dispatch{{
 			Field: "environment", Value: "test", RunnerId: 10,
-		}}, runner: etaskclient.Runner{ID: 10, CodebookID: 99}, wantErr: "Codebook 不匹配"},
+		}}, runner: etaskclient.Runner{ID: 10, CodebookID: 99}},
+		{name: "跳过其他 Codebook 后选择兼容规则", dispatches: []domain.Dispatch{
+			{Field: "environment", Value: "test", RunnerId: 10},
+			{Field: "environment", Value: "test", RunnerId: 11},
+		}, runners: map[int64]etaskclient.Runner{
+			10: {ID: 10, CodebookID: 99},
+			11: {ID: 11, CodebookID: 20},
+		}, wantMatch: true, wantRunnerID: 11},
 		{name: "有效匹配返回执行单元", dispatches: []domain.Dispatch{{
 			Field: "environment", Value: "test", RunnerId: 10,
-		}}, runner: etaskclient.Runner{ID: 10, CodebookID: 20}, wantMatch: true},
+		}}, runner: etaskclient.Runner{ID: 10, CodebookID: 20}, wantMatch: true, wantRunnerID: 10},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			svc := &taskService{
 				dispatches: &dispatchServiceStub{dispatches: testCase.dispatches, err: testCase.listErr},
-				runners:    &runnerCatalogStub{runner: testCase.runner},
+				runners:    &runnerCatalogStub{runner: testCase.runner, runners: testCase.runners},
 			}
-			_, matched, err := svc.resolveRunnerByDispatch(context.Background(), 1,
+			runner, matched, err := svc.resolveRunnerByDispatch(context.Background(), 1,
 				easyflow.AutomationProperty{CodebookId: 20}, domain.TaskArgs{"environment": "test"})
 			if testCase.wantErr != "" {
 				require.ErrorContains(t, err, testCase.wantErr)
@@ -52,8 +61,32 @@ func TestResolveRunnerByDispatchFailsClosed(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, testCase.wantMatch, matched)
+			require.Equal(t, testCase.wantRunnerID, runner.ID)
 		})
 	}
+}
+
+func TestResolveRunnerFallsBackAfterSkippingOtherCodebook(t *testing.T) {
+	runners := &runnerCatalogStub{
+		runner:   etaskclient.Runner{ID: 10, CodebookID: 99},
+		fallback: etaskclient.Runner{ID: 20, CodebookID: 20},
+	}
+	svc := &taskService{
+		dispatches: &dispatchServiceStub{dispatches: []domain.Dispatch{{
+			Field: "environment", Value: "test", RunnerId: 10,
+		}}},
+		runners: runners,
+	}
+
+	runner, err := svc.resolveRunner(context.Background(), 1,
+		easyflow.AutomationProperty{CodebookId: 20, Tag: "grant"},
+		domain.TaskArgs{"environment": "test"})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(20), runner.ID)
+	require.Equal(t, 1, runners.fallbackCalls)
+	require.Equal(t, int64(20), runners.fallbackCodebookID)
+	require.Equal(t, "grant", runners.fallbackTag)
 }
 
 func TestCalculateScheduledAt(t *testing.T) {
@@ -315,9 +348,25 @@ func (s *dispatchServiceStub) ListByTemplateId(context.Context, int64, int64,
 
 type runnerCatalogStub struct {
 	etaskclient.RunnerCatalog
-	runner etaskclient.Runner
+	runner             etaskclient.Runner
+	runners            map[int64]etaskclient.Runner
+	fallback           etaskclient.Runner
+	fallbackCalls      int
+	fallbackCodebookID int64
+	fallbackTag        string
 }
 
-func (s *runnerCatalogStub) FindByID(context.Context, int64) (etaskclient.Runner, error) {
+func (s *runnerCatalogStub) FindByID(_ context.Context, id int64) (etaskclient.Runner, error) {
+	if runner, ok := s.runners[id]; ok {
+		return runner, nil
+	}
 	return s.runner, nil
+}
+
+func (s *runnerCatalogStub) FindByCodebookAndTag(_ context.Context, codebookID int64,
+	tag string) (etaskclient.Runner, error) {
+	s.fallbackCalls++
+	s.fallbackCodebookID = codebookID
+	s.fallbackTag = tag
+	return s.fallback, nil
 }
