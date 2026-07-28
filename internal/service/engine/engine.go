@@ -26,6 +26,8 @@ type Service interface {
 	TaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, int64, error)
 	// AccessibleTaskRecord 获取经过工单 AccessScope 约束的流转记录。
 	AccessibleTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, int64, error)
+	// AccessibleTaskTimeline 将同一节点执行批次的任务聚合为单条时间线事件。
+	AccessibleTaskTimeline(ctx context.Context, processInstId, offset, limit int) ([]TaskTimelineGroup, int64, error)
 	// IsReject 判断指定任务是否在先前被驳回过
 	IsReject(ctx context.Context, taskId int) (bool, error)
 	// GetTasksByCurrentNodeId 获取指定流程实例及当前活动节点下的所有挂起任务
@@ -78,6 +80,12 @@ type Service interface {
 
 type engineService struct {
 	repo repository.IEngineRepository
+}
+
+// TaskTimelineGroup 是时间线展示单元，保留 Members 用于前端按需展开人员处理明细。
+type TaskTimelineGroup struct {
+	domain.TaskTimelineGroup
+	Members []model.Task
 }
 
 // NewEngineService 初始化流程引擎服务层
@@ -255,6 +263,55 @@ func (s *engineService) AccessibleTaskRecord(ctx context.Context, processInstId,
 		return records, total, err
 	}
 	return records, total, nil
+}
+
+func (s *engineService) AccessibleTaskTimeline(ctx context.Context, processInstId, offset, limit int) ([]TaskTimelineGroup, int64, error) {
+	var (
+		eg     errgroup.Group
+		groups []domain.TaskTimelineGroup
+		total  int64
+	)
+	eg.Go(func() error {
+		var err error
+		groups, err = s.repo.ListAccessibleTaskTimelineGroups(ctx, processInstId, offset, limit)
+		return err
+	})
+	eg.Go(func() error {
+		var err error
+		total, err = s.repo.CountAccessibleTaskTimelineGroups(ctx, processInstId)
+		return err
+	})
+	if err := eg.Wait(); err != nil {
+		return nil, 0, err
+	}
+
+	members, err := s.repo.ListAccessibleTaskTimelineMembers(ctx, processInstId, groups)
+	if err != nil {
+		return nil, 0, err
+	}
+	return attachTimelineMembers(groups, members), total, nil
+}
+
+func attachTimelineMembers(groups []domain.TaskTimelineGroup, members []model.Task) []TaskTimelineGroup {
+	byKey := make(map[string][]model.Task, len(groups))
+	for _, member := range members {
+		key := timelineGroupKey(member.NodeID, member.BatchCode)
+		byKey[key] = append(byKey[key], member)
+	}
+
+	res := make([]TaskTimelineGroup, 0, len(groups))
+	for _, group := range groups {
+		key := timelineGroupKey(group.NodeID, group.BatchCode)
+		res = append(res, TaskTimelineGroup{
+			TaskTimelineGroup: group,
+			Members:           byKey[key],
+		})
+	}
+	return res
+}
+
+func timelineGroupKey(nodeID, batchCode string) string {
+	return nodeID + ":batch:" + batchCode
 }
 
 func (s *engineService) ProcessSave(ctx context.Context, process *model.Process) (int, error) {

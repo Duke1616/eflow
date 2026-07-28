@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Bunny3th/easy-workflow/workflow/database"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
+	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/ticketpbac"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	pbacgorm "github.com/Duke1616/eiam/pkg/pbac/gormx"
@@ -42,6 +44,12 @@ type IEngineDAO interface {
 	ListAccessibleTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, error)
 	// CountAccessibleTaskRecord 使用与列表相同的 AccessScope 统计流转记录。
 	CountAccessibleTaskRecord(ctx context.Context, processInstId int) (int64, error)
+	// ListAccessibleTaskTimelineGroups 按节点执行批次聚合可见任务，供时间线分页展示。
+	ListAccessibleTaskTimelineGroups(ctx context.Context, processInstId, offset, limit int) ([]domain.TaskTimelineGroup, error)
+	// CountAccessibleTaskTimelineGroups 统计可见的节点执行批次数。
+	CountAccessibleTaskTimelineGroups(ctx context.Context, processInstId int) (int64, error)
+	// ListAccessibleTaskTimelineMembers 查询指定时间线分组下的原始任务明细。
+	ListAccessibleTaskTimelineMembers(ctx context.Context, processInstId int, groups []domain.TaskTimelineGroup) ([]model.Task, error)
 	// SearchStartByProcessInstIds 批量检索指定的流程实例列表
 	SearchStartByProcessInstIds(ctx context.Context, processInstIds []int) ([]Instance, error)
 	// UpdateIsFinishedByPreNodeId 自动更新当前节点的前置代理流转任务为完成状态
@@ -365,6 +373,74 @@ func (g *gormEngineDAO) CountAccessibleTaskRecord(ctx context.Context, processIn
 	var total int64
 	err = db.Count(&total).Error
 	return total, err
+}
+
+func (g *gormEngineDAO) ListAccessibleTaskTimelineGroups(ctx context.Context, processInstId, offset, limit int) ([]domain.TaskTimelineGroup, error) {
+	db, err := g.accessibleTaskTimelineGroupQuery(ctx, processInstId)
+	if err != nil {
+		return nil, err
+	}
+
+	var groups []domain.TaskTimelineGroup
+	err = db.Order("occurred_at DESC, latest_task_id DESC").
+		Offset(offset).
+		Limit(limit).
+		Scan(&groups).Error
+	return groups, err
+}
+
+func (g *gormEngineDAO) CountAccessibleTaskTimelineGroups(ctx context.Context, processInstId int) (int64, error) {
+	db, err := g.accessibleTaskTimelineGroupQuery(ctx, processInstId)
+	if err != nil {
+		return 0, err
+	}
+
+	var total int64
+	err = g.db.WithContext(ctx).Table("(?) AS timeline_groups", db).Count(&total).Error
+	return total, err
+}
+
+func (g *gormEngineDAO) ListAccessibleTaskTimelineMembers(ctx context.Context, processInstId int, groups []domain.TaskTimelineGroup) ([]model.Task, error) {
+	if len(groups) == 0 {
+		return []model.Task{}, nil
+	}
+
+	db, err := g.accessibleTaskRecordQuery(ctx, processInstId)
+	if err != nil {
+		return nil, err
+	}
+
+	conditions := make([]string, 0, len(groups))
+	args := make([]interface{}, 0, len(groups)*2)
+	for _, group := range groups {
+		conditions = append(conditions, "(a.node_id = ? AND a.batch_code = ?)")
+		args = append(args, group.NodeID, group.BatchCode)
+	}
+
+	var tasks []model.Task
+	err = db.Where("("+strings.Join(conditions, " OR ")+")", args...).
+		Order("a.create_time ASC, a.id ASC").
+		Scan(&tasks).Error
+	return tasks, err
+}
+
+func (g *gormEngineDAO) accessibleTaskTimelineGroupQuery(ctx context.Context, processInstId int) (*gorm.DB, error) {
+	db, err := g.accessibleTaskRecordQuery(ctx, processInstId)
+	if err != nil {
+		return nil, err
+	}
+
+	return db.Select("a.node_id, MAX(a.node_name) AS node_name, MAX(a.batch_code) AS batch_code, " +
+		"MAX(a.is_cosigned) AS is_cosigned, COUNT(*) AS task_count, " +
+		"SUM(CASE WHEN a.status = 1 THEN 1 ELSE 0 END) AS passed_count, " +
+		"SUM(CASE WHEN a.status = 2 THEN 1 ELSE 0 END) AS rejected_count, " +
+		"SUM(CASE WHEN a.status = 3 THEN 1 ELSE 0 END) AS system_passed_count, " +
+		"SUM(CASE WHEN a.status = 4 THEN 1 ELSE 0 END) AS system_rejected_count, " +
+		"SUM(CASE WHEN a.status = 5 THEN 1 ELSE 0 END) AS skipped_count, " +
+		"SUM(CASE WHEN a.status = 0 AND a.is_finished = 1 THEN 1 ELSE 0 END) AS linked_count, " +
+		"SUM(CASE WHEN a.is_finished = 0 THEN 1 ELSE 0 END) AS pending_count, " +
+		"MAX(COALESCE(a.finished_time, a.create_time)) AS occurred_at, MAX(a.id) AS latest_task_id").
+		Group("a.node_id, a.batch_code"), nil
 }
 
 func (g *gormEngineDAO) accessibleTaskRecordQuery(ctx context.Context, processInstId int) (*gorm.DB, error) {

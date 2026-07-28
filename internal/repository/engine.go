@@ -34,6 +34,12 @@ type IEngineRepository interface {
 	ListAccessibleTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, error)
 	// CountAccessibleTaskRecord 使用与列表相同的 AccessScope 统计流转记录。
 	CountAccessibleTaskRecord(ctx context.Context, processInstId int) (int64, error)
+	// ListAccessibleTaskTimelineGroups 按节点执行批次聚合可见任务，供时间线分页展示。
+	ListAccessibleTaskTimelineGroups(ctx context.Context, processInstId, offset, limit int) ([]domain.TaskTimelineGroup, error)
+	// CountAccessibleTaskTimelineGroups 统计可见的节点执行批次数。
+	CountAccessibleTaskTimelineGroups(ctx context.Context, processInstId int) (int64, error)
+	// ListAccessibleTaskTimelineMembers 查询指定时间线分组下的原始任务明细。
+	ListAccessibleTaskTimelineMembers(ctx context.Context, processInstId int, groups []domain.TaskTimelineGroup) ([]model.Task, error)
 	// UpdateIsFinishedByPreNodeId 系统自动流转前置代理节点任务为已完结
 	UpdateIsFinishedByPreNodeId(ctx context.Context, processInstId int, nodeId string, status int, comment string) error
 	// ForceUpdateIsFinishedByPreNodeId 强制归档清理指定前置节点下挂载的所有流转任务（包含已完成）
@@ -221,6 +227,18 @@ func (repo *engineRepository) ListAccessibleTaskRecord(ctx context.Context, proc
 
 func (repo *engineRepository) CountAccessibleTaskRecord(ctx context.Context, processInstId int) (int64, error) {
 	return repo.engineDao.CountAccessibleTaskRecord(ctx, processInstId)
+}
+
+func (repo *engineRepository) ListAccessibleTaskTimelineGroups(ctx context.Context, processInstId, offset, limit int) ([]domain.TaskTimelineGroup, error) {
+	return repo.engineDao.ListAccessibleTaskTimelineGroups(ctx, processInstId, offset, limit)
+}
+
+func (repo *engineRepository) CountAccessibleTaskTimelineGroups(ctx context.Context, processInstId int) (int64, error) {
+	return repo.engineDao.CountAccessibleTaskTimelineGroups(ctx, processInstId)
+}
+
+func (repo *engineRepository) ListAccessibleTaskTimelineMembers(ctx context.Context, processInstId int, groups []domain.TaskTimelineGroup) ([]model.Task, error) {
+	return repo.engineDao.ListAccessibleTaskTimelineMembers(ctx, processInstId, groups)
 }
 
 func (repo *engineRepository) toDomainByInstance(req dao.Instance) domain.Instance {

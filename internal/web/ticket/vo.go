@@ -17,6 +17,13 @@ type RecordTaskReq struct {
 	Limit         int64 `json:"limit"`
 }
 
+// TaskTimelineReq 按节点执行批次分页查询工单流转时间线。
+type TaskTimelineReq struct {
+	ProcessInstId int   `json:"process_inst_id"`
+	Offset        int64 `json:"offset"`
+	Limit         int64 `json:"limit"`
+}
+
 type Todo struct {
 	UserId      string `json:"user_id" validate:"required"`
 	ProcessName string `json:"process_name"`
@@ -77,6 +84,37 @@ type RetrieveTickets struct {
 type RetrieveTaskRecords struct {
 	TaskRecords []TaskRecord `json:"task_records"`
 	Total       int64        `json:"total"`
+}
+
+// RetrieveTaskTimeline 是面向时间线展示的聚合结果；Total 统计节点执行批次数，而非任务数。
+type RetrieveTaskTimeline struct {
+	Events []TaskTimelineEvent `json:"events"`
+	Total  int64               `json:"total"`
+}
+
+// TaskTimelineEvent 将同一节点、同一批次的多人任务合并为一个顶层时间线事件。
+type TaskTimelineEvent struct {
+	ID         string              `json:"id"`
+	NodeID     string              `json:"node_id"`
+	NodeName   string              `json:"node_name"`
+	BatchCode  string              `json:"batch_code,omitempty"`
+	IsCosigned int                 `json:"is_cosigned"`
+	OccurredAt string              `json:"occurred_at"`
+	Actors     []string            `json:"actors"`
+	Summary    TaskTimelineSummary `json:"summary"`
+	Members    []TaskRecord        `json:"members"`
+}
+
+// TaskTimelineSummary 给前端提供无需重新解释引擎状态码的汇总信息。
+type TaskTimelineSummary struct {
+	Total          int `json:"total"`
+	Passed         int `json:"passed"`
+	Rejected       int `json:"rejected"`
+	SystemPassed   int `json:"system_passed"`
+	SystemRejected int `json:"system_rejected"`
+	Skipped        int `json:"skipped"`
+	Linked         int `json:"linked"`
+	Pending        int `json:"pending"`
 }
 
 type TaskRecord struct {

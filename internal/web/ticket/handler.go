@@ -76,9 +76,15 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
 		Handle(ginx.B[DetailProcessInstIdReq](h.Detail)),
 	)
-	g.POST("/task/record", detail("流转记录", "record").
+	// 已由按节点批次聚合的 /task/timeline 替代；保留原始任务查询实现，
+	// 供流程内部审计逻辑继续复用，但不再暴露逐任务的 HTTP 接口。
+	// g.POST("/task/record", detail("流转记录", "record").
+	// 	AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
+	// 	Handle(ginx.B[RecordTaskReq](h.TaskRecord)),
+	// )
+	g.POST("/task/timeline", detail("流转时间线", "timeline").
 		AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
-		Handle(ginx.B[RecordTaskReq](h.TaskRecord)),
+		Handle(ginx.B[TaskTimelineReq](h.TaskTimeline)),
 	)
 	g.POST("/todo", list("所有待办工单", "todo").
 		Needs("ticket:template:view_by_ids").
@@ -381,6 +387,66 @@ func (h *Handler) TaskRecord(ctx *ginx.Context, req RecordTaskReq) (ginx.Result,
 	if err != nil {
 		return systemErrorResult, err
 	}
+	records := h.toTaskRecords(ctx.Context, ts)
+
+	return ginx.Result{
+		Data: RetrieveTaskRecords{
+			TaskRecords: records,
+			Total:       total,
+		},
+	}, nil
+}
+
+// TaskTimeline 以节点执行批次为单位返回流转历史；成员明细仅作为事件的展开内容。
+func (h *Handler) TaskTimeline(ctx *ginx.Context, req TaskTimelineReq) (ginx.Result, error) {
+	groups, total, err := h.engineSvc.AccessibleTaskTimeline(ctx.Context, req.ProcessInstId, int(req.Offset), int(req.Limit))
+	if err != nil {
+		return systemErrorResult, err
+	}
+
+	allMembers := make([]model.Task, 0)
+	for _, group := range groups {
+		allMembers = append(allMembers, group.Members...)
+	}
+	recordsByTaskID := make(map[int]TaskRecord, len(allMembers))
+	allRecords := h.toTaskRecords(ctx.Context, allMembers)
+	for idx, record := range allRecords {
+		recordsByTaskID[allMembers[idx].TaskID] = record
+	}
+
+	events := make([]TaskTimelineEvent, 0, len(groups))
+	for _, group := range groups {
+		members := make([]TaskRecord, 0, len(group.Members))
+		for _, member := range group.Members {
+			members = append(members, recordsByTaskID[member.TaskID])
+		}
+		id := group.NodeID + ":" + group.BatchCode
+		events = append(events, TaskTimelineEvent{
+			ID:         id,
+			NodeID:     group.NodeID,
+			NodeName:   group.NodeName,
+			BatchCode:  group.BatchCode,
+			IsCosigned: group.IsCosigned,
+			OccurredAt: group.OccurredAt.String(),
+			Actors:     timelineActors(members),
+			Summary: TaskTimelineSummary{
+				Total:          group.TaskCount,
+				Passed:         group.PassedCount,
+				Rejected:       group.RejectedCount,
+				SystemPassed:   group.SystemPassedCount,
+				SystemRejected: group.SystemRejectedCount,
+				Skipped:        group.SkippedCount,
+				Linked:         group.LinkedCount,
+				Pending:        group.PendingCount,
+			},
+			Members: members,
+		})
+	}
+
+	return ginx.Result{Data: RetrieveTaskTimeline{Events: events, Total: total}}, nil
+}
+
+func (h *Handler) toTaskRecords(ctx context.Context, ts []model.Task) []TaskRecord {
 
 	userIDs := slice.Map(ts, func(idx int, src model.Task) string {
 		return src.UserID
@@ -393,7 +459,7 @@ func (h *Handler) TaskRecord(ctx *ginx.Context, req RecordTaskReq) (ginx.Result,
 		}
 	}
 
-	uMap, err := h.getUserMap(ctx.Context, uniqueUserIDs)
+	uMap, err := h.getUserMap(ctx, uniqueUserIDs)
 	if err != nil {
 		uMap = make(map[string]string)
 	}
@@ -401,12 +467,12 @@ func (h *Handler) TaskRecord(ctx *ginx.Context, req RecordTaskReq) (ginx.Result,
 	taskIds := slice.Map(ts, func(idx int, src model.Task) int {
 		return src.TaskID
 	})
-	taskDataMap, err := h.svc.ListTaskFormsByTaskIDs(ctx.Context, taskIds)
+	taskDataMap, err := h.svc.ListTaskFormsByTaskIDs(ctx, taskIds)
 	if err != nil {
 		taskDataMap = make(map[int][]domain.FormValue)
 	}
 
-	records := slice.Map(ts, func(idx int, src model.Task) TaskRecord {
+	return slice.Map(ts, func(idx int, src model.Task) TaskRecord {
 		userName := uMap[src.UserID]
 		if userName == "" {
 			userName = src.UserID
@@ -430,13 +496,20 @@ func (h *Handler) TaskRecord(ctx *ginx.Context, req RecordTaskReq) (ginx.Result,
 			}),
 		}
 	})
+}
 
-	return ginx.Result{
-		Data: RetrieveTaskRecords{
-			TaskRecords: records,
-			Total:       total,
-		},
-	}, nil
+func timelineActors(records []TaskRecord) []string {
+	actors := make([]string, 0, len(records))
+	for _, record := range records {
+		// 1 和 2 分别表示人工通过、人工驳回；系统联动状态不作为主处理人。
+		if record.Status != 1 && record.Status != 2 {
+			continue
+		}
+		if !slice.Contains(actors, record.ApprovedBy) {
+			actors = append(actors, record.ApprovedBy)
+		}
+	}
+	return actors
 }
 
 func (h *Handler) toDomain(req CreateTicketReq) domain.Ticket {
