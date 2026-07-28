@@ -19,16 +19,29 @@ type preparation struct {
 	input      domain.TaskArgs
 }
 
-func (s *taskService) prepareSchedule(ctx context.Context, task domain.Task,
-	ticket domain.Ticket) (int64, error) {
+type taskDefinition struct {
+	scheduledAt        int64
+	compensationNodeID string
+}
+
+func (s *taskService) prepareTaskDefinition(ctx context.Context, task domain.Task,
+	ticket domain.Ticket) (taskDefinition, error) {
 	prepared, err := s.resolvePreparation(ctx, task, ticket)
+	definition := taskDefinition{
+		compensationNodeID: prepared.automation.CompensationNodeID,
+	}
 	if err != nil {
-		return 0, err
+		return definition, err
 	}
 	if err = s.applyTemplateScheduleOverride(ctx, task.NodeID, ticket.TemplateId, &prepared.automation); err != nil {
-		return 0, s.taskError(task.ID, taskPreparationOperation, err)
+		return definition, s.taskError(task.ID, taskPreparationOperation, err)
 	}
-	return s.calculateScheduledAt(prepared.automation, prepared.input, ticket.TemplateId)
+	scheduledAt, err := s.calculateScheduledAt(prepared.automation, prepared.input, ticket.TemplateId)
+	if err != nil {
+		return definition, err
+	}
+	definition.scheduledAt = scheduledAt
+	return definition, nil
 }
 
 func (s *taskService) prepareAttempt(ctx context.Context,
@@ -52,10 +65,6 @@ func (s *taskService) prepareAttempt(ctx context.Context,
 
 func (s *taskService) resolvePreparation(ctx context.Context, task domain.Task,
 	ticket domain.Ticket) (preparation, error) {
-	input, err := s.assembleRuntimeArgs(ctx, ticket)
-	if err != nil {
-		return preparation{}, s.taskError(task.ID, taskPreparationOperation, err)
-	}
 	instance, err := s.engine.GetInstanceByID(ctx, task.ProcessInstanceID)
 	if err != nil {
 		return preparation{}, s.taskError(task.ID, taskPreparationOperation, err)
@@ -64,9 +73,13 @@ func (s *taskService) resolvePreparation(ctx context.Context, task domain.Task,
 	if err != nil {
 		return preparation{}, s.taskError(task.ID, taskPreparationOperation, err)
 	}
-	automation, err := s.workflows.GetAutomationProperty(toEasyWorkflow(flow), task.NodeID)
+	automation, err := s.workflows.GetAutomationProperty(easyflow.FromDomainWorkflow(flow), task.NodeID)
 	if err != nil {
 		return preparation{}, s.taskError(task.ID, taskPreparationOperation, err)
+	}
+	input, err := s.assembleRuntimeArgs(ctx, ticket)
+	if err != nil {
+		return preparation{automation: automation}, s.taskError(task.ID, taskPreparationOperation, err)
 	}
 	return preparation{automation: automation, input: input}, nil
 }
@@ -145,19 +158,4 @@ func (s *taskService) assembleRuntimeArgs(ctx context.Context, ticket domain.Tic
 		}
 	}
 	return input, nil
-}
-
-func toEasyWorkflow(workflow domain.Workflow) easyflow.Workflow {
-	edges := make([]map[string]any, len(workflow.FlowData.Edges))
-	for index, edge := range workflow.FlowData.Edges {
-		edges[index] = map[string]any(edge)
-	}
-	nodes := make([]map[string]any, len(workflow.FlowData.Nodes))
-	for index, node := range workflow.FlowData.Nodes {
-		nodes[index] = map[string]any(node)
-	}
-	return easyflow.Workflow{
-		Id: workflow.Id, Name: workflow.Name, Owner: workflow.Owner,
-		FlowData: easyflow.LogicFlow{Edges: edges, Nodes: nodes},
-	}
 }

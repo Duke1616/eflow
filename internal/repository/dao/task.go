@@ -11,21 +11,25 @@ import (
 
 // Task 是流程自动化节点的持久化实体，不保存执行器配置和日志镜像。
 type Task struct {
-	ID                int64  `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'自动化任务主键'"`
-	TenantID          int64  `gorm:"column:tenant_id;type:bigint;not null;uniqueIndex:uk_automation_node,priority:1;index;comment:'租户 ID'"`
-	TicketID          int64  `gorm:"column:ticket_id;type:bigint;not null;index;comment:'关联工单 ID'"`
-	ProcessInstanceID int    `gorm:"column:process_instance_id;type:int;not null;uniqueIndex:uk_automation_node,priority:2;index;comment:'流程实例 ID'"`
-	NodeID            string `gorm:"column:node_id;type:varchar(128);not null;uniqueIndex:uk_automation_node,priority:3;comment:'自动化节点 ID'"`
-	NodeName          string `gorm:"column:node_name;type:varchar(250);not null;comment:'自动化节点名称快照'"`
-	ProcessVersion    int    `gorm:"column:process_version;type:int;not null;comment:'流程实例版本快照'"`
-	Status            uint8  `gorm:"column:status;type:tinyint unsigned;not null;index;comment:'编排状态'"`
-	Phase             string `gorm:"column:phase;type:varchar(32);not null;comment:'最近编排阶段'"`
-	ScheduledAt       int64  `gorm:"column:scheduled_at;type:bigint;not null;index;comment:'计划提交时间'"`
-	CurrentAttemptID  int64  `gorm:"column:current_attempt_id;type:bigint;not null;default:0;index;comment:'当前执行尝试 ID'"`
-	AdvancedAt        int64  `gorm:"column:advanced_at;type:bigint;not null;default:0;index;comment:'流程推进完成时间'"`
-	LastError         string `gorm:"column:last_error;type:text;comment:'最近编排错误'"`
-	CTime             int64  `gorm:"column:ctime;type:bigint;comment:'创建时间'"`
-	UTime             int64  `gorm:"column:utime;type:bigint;comment:'更新时间'"`
+	ID                  int64  `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'自动化任务主键'"`
+	TenantID            int64  `gorm:"column:tenant_id;type:bigint;not null;uniqueIndex:uk_automation_node,priority:1;index;comment:'租户 ID'"`
+	TicketID            int64  `gorm:"column:ticket_id;type:bigint;not null;index;comment:'关联工单 ID'"`
+	ProcessInstanceID   int    `gorm:"column:process_instance_id;type:int;not null;uniqueIndex:uk_automation_node,priority:2;index;comment:'流程实例 ID'"`
+	NodeID              string `gorm:"column:node_id;type:varchar(128);not null;uniqueIndex:uk_automation_node,priority:3;comment:'自动化节点 ID'"`
+	NodeName            string `gorm:"column:node_name;type:varchar(250);not null;comment:'自动化节点名称快照'"`
+	ProcessVersion      int    `gorm:"column:process_version;type:int;not null;comment:'流程实例版本快照'"`
+	Status              uint8  `gorm:"column:status;type:tinyint unsigned;not null;index;comment:'编排状态'"`
+	Phase               string `gorm:"column:phase;type:varchar(32);not null;comment:'最近编排阶段'"`
+	ScheduledAt         int64  `gorm:"column:scheduled_at;type:bigint;not null;index;comment:'计划提交时间'"`
+	OriginalScheduledAt int64  `gorm:"column:original_scheduled_at;type:bigint;not null;default:0;comment:'首次计划提交时间'"`
+	ExecutionKind       string `gorm:"column:execution_kind;type:varchar(24);not null;default:'PROCESS';index;comment:'任务执行类型'"`
+	CompensationNodeID  string `gorm:"column:compensation_node_id;type:varchar(128);not null;default:'';comment:'成功动作对应的补偿节点 ID'"`
+	CurrentAttemptID    int64  `gorm:"column:current_attempt_id;type:bigint;not null;default:0;index;comment:'当前执行尝试 ID'"`
+	AdvancedAt          int64  `gorm:"column:advanced_at;type:bigint;not null;default:0;index;comment:'流程推进完成时间'"`
+	CancelledAt         int64  `gorm:"column:cancelled_at;type:bigint;not null;default:0;comment:'流程撤回取消时间'"`
+	LastError           string `gorm:"column:last_error;type:text;comment:'最近编排错误'"`
+	CTime               int64  `gorm:"column:ctime;type:bigint;comment:'创建时间'"`
+	UTime               int64  `gorm:"column:utime;type:bigint;comment:'更新时间'"`
 }
 
 // TableName 返回新自动化任务表名。
@@ -91,10 +95,13 @@ func (g *gormTaskDAO) FindByID(ctx context.Context, id int64) (Task, error) {
 }
 
 func (g *gormTaskDAO) Block(ctx context.Context, id int64, reason string) error {
-	return g.db.WithContext(ctx).Model(&Task{}).Where("id = ?", id).Updates(map[string]any{
-		"status": domain.TaskStatusBlocked.ToUint8(), "phase": domain.TaskPhaseBlocked,
-		"last_error": reason, "utime": time.Now().UnixMilli(),
-	}).Error
+	return g.db.WithContext(ctx).Model(&Task{}).
+		Where("id = ? AND status IN (?, ?)", id,
+			domain.TaskStatusWaiting.ToUint8(), domain.TaskStatusFailed.ToUint8()).
+		Updates(map[string]any{
+			"status": domain.TaskStatusBlocked.ToUint8(), "phase": domain.TaskPhaseBlocked,
+			"last_error": reason, "utime": time.Now().UnixMilli(),
+		}).Error
 }
 
 func (g *gormTaskDAO) PrepareRetry(ctx context.Context, id int64) error {

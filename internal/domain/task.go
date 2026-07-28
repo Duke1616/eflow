@@ -10,6 +10,7 @@ const (
 	TaskStatusWaiting    TaskStatus = 4
 	TaskStatusBlocked    TaskStatus = 5
 	TaskStatusSubmitting TaskStatus = 6
+	TaskStatusCancelled  TaskStatus = 7
 )
 
 // ToUint8 返回用于持久化的状态值。
@@ -31,7 +32,22 @@ const (
 	TaskPhaseFailed     TaskPhase = "FAILED"
 	TaskPhaseBlocked    TaskPhase = "BLOCKED"
 	TaskPhaseRetrying   TaskPhase = "RETRYING"
+	TaskPhaseCancelled  TaskPhase = "CANCELLED"
 )
+
+// TaskExecutionKind 区分正常流程任务与流程撤回后激活的补偿任务。
+type TaskExecutionKind string
+
+const (
+	TaskExecutionProcess      TaskExecutionKind = "PROCESS"
+	TaskExecutionCompensation TaskExecutionKind = "COMPENSATION"
+)
+
+// AllowsStart 判断指定工单状态下是否允许创建新的执行尝试。
+func (k TaskExecutionKind) AllowsStart(ticketStatus Status) bool {
+	return (k == TaskExecutionProcess && ticketStatus == PROCESS) ||
+		(k == TaskExecutionCompensation && ticketStatus == WITHDRAWING)
+}
 
 // IsTerminal 判断执行尝试是否已经结束。
 func (s AttemptStatus) IsTerminal() bool {
@@ -43,22 +59,26 @@ type TaskArgs map[string]any
 
 // Task 表示一个流程实例中的自动化节点，不保存 etask 执行实现细节。
 type Task struct {
-	ID                int64
-	TenantID          int64
-	TicketID          int64
-	ProcessInstanceID int
-	NodeID            string
-	NodeName          string
-	ProcessVersion    int
-	Status            TaskStatus
-	Phase             TaskPhase
-	ScheduledAt       int64
-	CurrentAttemptID  int64
-	AdvancedAt        int64
-	LastError         string
-	Output            string // 当前成功尝试的结构化输出，仅用于领域查询，不在任务表重复持久化。
-	CTime             int64
-	UTime             int64
+	ID                  int64
+	TenantID            int64
+	TicketID            int64
+	ProcessInstanceID   int
+	NodeID              string
+	NodeName            string
+	ProcessVersion      int
+	Status              TaskStatus
+	Phase               TaskPhase
+	ScheduledAt         int64
+	OriginalScheduledAt int64
+	ExecutionKind       TaskExecutionKind
+	CompensationNodeID  string
+	CurrentAttemptID    int64
+	AdvancedAt          int64
+	CancelledAt         int64
+	LastError           string
+	Output              string // 当前成功尝试的结构化输出，仅用于领域查询，不在任务表重复持久化。
+	CTime               int64
+	UTime               int64
 }
 
 // AttemptStatus 表示一次 etask 提交尝试的生命周期。

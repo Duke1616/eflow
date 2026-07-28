@@ -5,6 +5,7 @@
       <methods>
         <method importPath="github.com/Duke1616/eflow/internal/repository" receiver="IEngineRepository" name="GetProxyNodeID" />
         <method importPath="github.com/Duke1616/eflow/internal/repository" receiver="IEngineRepository" name="GetProxyNodeByProcessInstId" />
+        <method importPath="github.com/Duke1616/eflow/internal/service/task" receiver="*taskService" name="resolvePreparation" />
       </methods>
     </inspection_tool>
     <inspection_tool class="SqlNoDataSourceInspection" enabled="false" level="WARNING" enabled_by_default="false" />

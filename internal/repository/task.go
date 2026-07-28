@@ -139,6 +139,8 @@ func toTaskEntity(task domain.Task) dao.Task {
 		ProcessInstanceID: task.ProcessInstanceID, NodeID: task.NodeID,
 		NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
 		Status: task.Status.ToUint8(), Phase: string(task.Phase), ScheduledAt: task.ScheduledAt,
+		OriginalScheduledAt: task.OriginalScheduledAt, ExecutionKind: string(task.ExecutionKind),
+		CompensationNodeID: task.CompensationNodeID, CancelledAt: task.CancelledAt,
 		CurrentAttemptID: task.CurrentAttemptID, AdvancedAt: task.AdvancedAt,
 		LastError: task.LastError, CTime: task.CTime, UTime: task.UTime,
 	}
@@ -150,8 +152,10 @@ func toTaskDomain(task dao.Task) domain.Task {
 		ProcessInstanceID: task.ProcessInstanceID, NodeID: task.NodeID,
 		NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
 		Status: domain.TaskStatus(task.Status), Phase: domain.TaskPhase(task.Phase),
-		ScheduledAt: task.ScheduledAt, CurrentAttemptID: task.CurrentAttemptID,
-		AdvancedAt: task.AdvancedAt, LastError: task.LastError,
+		ScheduledAt: task.ScheduledAt, OriginalScheduledAt: task.OriginalScheduledAt,
+		ExecutionKind:      domain.TaskExecutionKind(task.ExecutionKind),
+		CompensationNodeID: task.CompensationNodeID, CurrentAttemptID: task.CurrentAttemptID,
+		AdvancedAt: task.AdvancedAt, CancelledAt: task.CancelledAt, LastError: task.LastError,
 		CTime: task.CTime, UTime: task.UTime,
 	}
 }

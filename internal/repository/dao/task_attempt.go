@@ -13,6 +13,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+var ErrTaskNotRunnable = errors.New("自动化任务当前不可启动")
+
 // TaskAttempt 是一次提交到 etask 的执行尝试。
 type TaskAttempt struct {
 	ID          int64                           `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'执行尝试主键'"`
@@ -62,6 +64,15 @@ func (g *gormTaskAttemptDAO) Begin(ctx context.Context, taskID, runnerID int64,
 	input domain.TaskArgs) (TaskAttempt, error) {
 	var attempt TaskAttempt
 	err := g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var snapshot Task
+		if err := tx.Select("ticket_id").Where("id = ?", taskID).First(&snapshot).Error; err != nil {
+			return err
+		}
+		var ticket Ticket
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", snapshot.TicketID).First(&ticket).Error; err != nil {
+			return err
+		}
 		var task Task
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", taskID).First(&task).Error; err != nil {
 			return err
@@ -69,6 +80,13 @@ func (g *gormTaskAttemptDAO) Begin(ctx context.Context, taskID, runnerID int64,
 		if task.CurrentAttemptID > 0 &&
 			(task.Status == domain.TaskStatusSubmitting.ToUint8() || task.Status == domain.TaskStatusRunning.ToUint8()) {
 			return tx.Where("id = ?", task.CurrentAttemptID).First(&attempt).Error
+		}
+		if task.Status != domain.TaskStatusWaiting.ToUint8() {
+			return ErrTaskNotRunnable
+		}
+		executionKind := domain.TaskExecutionKind(task.ExecutionKind)
+		if !executionKind.AllowsStart(domain.Status(ticket.Status)) {
+			return ErrTaskNotRunnable
 		}
 		var last TaskAttempt
 		attemptNo := 1

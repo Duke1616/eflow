@@ -528,9 +528,27 @@ func (e *ProcessEvent) EventUserNodeRejectProxyCleanup(taskID int, node *model.N
 	return nil
 }
 
-// EventRevoke 流程撤销
+// EventRevoke 在流程归档前校验撤回栅栏，禁止绕过统一撤回服务直接归档。
 func (e *ProcessEvent) EventRevoke(instID int, RevokeUserID string) error {
-	e.logger.Info("【EventRevoke】流程已被撤销",
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	ticketIDValue, err := e.engineSvc.GetTicketIdByVariable(ctx, instID)
+	if err != nil {
+		return fmt.Errorf("查询撤回流程关联工单失败: %w", err)
+	}
+	ticketID, err := strconv.ParseInt(ticketIDValue, 10, 64)
+	if err != nil || ticketID <= 0 {
+		return fmt.Errorf("撤回流程关联工单 ID 非法: %q", ticketIDValue)
+	}
+	ticket, err := e.ticketSvc.GetByID(ctx, ticketID)
+	if err != nil {
+		return fmt.Errorf("查询撤回工单失败: %w", err)
+	}
+	if ticket.Status != domain.WITHDRAWING {
+		return fmt.Errorf("工单未进入撤回准备状态: status=%d", ticket.Status)
+	}
+	e.logger.Info("【EventRevoke】流程撤回前置检查完成",
 		elog.Int("instID", instID),
 		elog.String("RevokeUserID", RevokeUserID))
 	return nil

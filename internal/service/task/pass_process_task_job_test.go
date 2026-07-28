@@ -46,11 +46,44 @@ func TestPassProcessTaskJobContinuesAfterTaskFailure(t *testing.T) {
 	require.Equal(t, 2, tasks.listCalls)
 }
 
+func TestPassProcessTaskJobSkipsArchivedProcess(t *testing.T) {
+	advance := false
+	tasks := &passTaskServiceStub{
+		remaining: []domain.Task{{ID: 1, TenantID: 11, TicketID: 21}},
+		advance:   &advance,
+	}
+	engineSvc := &passEngineStub{}
+	job := NewPassProcessTaskJob(tasks, engineSvc, 10, time.Minute)
+
+	err := job.run(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, tasks.marked)
+	require.Empty(t, engineSvc.tenantIDs)
+}
+
+func TestPassProcessTaskJobDefersWithdrawingProcess(t *testing.T) {
+	tasks := &passTaskServiceStub{
+		remaining:    []domain.Task{{ID: 1, TenantID: 11, TicketID: 21}},
+		advanceError: ErrWithdrawalInProgress,
+	}
+	engineSvc := &passEngineStub{}
+	job := NewPassProcessTaskJob(tasks, engineSvc, 10, time.Minute)
+
+	err := job.run(context.Background())
+
+	require.NoError(t, err)
+	require.Empty(t, tasks.marked)
+	require.Empty(t, engineSvc.tenantIDs)
+}
+
 type passTaskServiceStub struct {
 	Service
-	remaining []domain.Task
-	marked    []int64
-	listCalls int
+	remaining    []domain.Task
+	marked       []int64
+	listCalls    int
+	advance      *bool
+	advanceError error
 }
 
 func (s *passTaskServiceStub) ListUnadvancedSuccessTasks(_ context.Context, limit,
@@ -78,6 +111,16 @@ func (s *passTaskServiceStub) MarkTaskAsAutoPassed(_ context.Context, id int64) 
 		}
 	}
 	return nil
+}
+
+func (s *passTaskServiceStub) ShouldAdvanceProcessTask(context.Context, int64) (bool, error) {
+	if s.advanceError != nil {
+		return false, s.advanceError
+	}
+	if s.advance == nil {
+		return true, nil
+	}
+	return *s.advance, nil
 }
 
 type passEngineStub struct {

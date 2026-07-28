@@ -22,6 +22,8 @@ import (
 
 const maxTaskAttempts = 5
 
+var ErrWithdrawalInProgress = errors.New("工单正在撤回，暂不推进自动化节点")
+
 // Service 定义流程自动化任务的编排能力。
 type Service interface {
 	// CreateTask 创建任务，并固化触发时的节点名称与流程版本快照。
@@ -56,11 +58,14 @@ type Service interface {
 	MarkTaskAsAutoPassed(ctx context.Context, id int64) error
 	// ListReadyTasks 查询已经到计划时间的任务。
 	ListReadyTasks(ctx context.Context, limit int64) ([]domain.Task, error)
+	// ShouldAdvanceProcessTask 判断成功任务是否还需要推进活动流程。
+	ShouldAdvanceProcessTask(ctx context.Context, id int64) (bool, error)
 }
 
 type taskService struct {
 	tasks      repository.TaskRepository
 	attempts   repository.TaskAttemptRepository
+	withdrawal repository.WithdrawalRepository
 	engine     engine.Service
 	workflows  workflow.Service
 	runners    etaskclient.RunnerCatalog
@@ -75,11 +80,12 @@ type taskService struct {
 
 // NewTaskService 创建自动化任务编排服务。
 func NewTaskService(tasks repository.TaskRepository, attempts repository.TaskAttemptRepository,
+	withdrawal repository.WithdrawalRepository,
 	workflows workflow.Service, runners etaskclient.RunnerCatalog, engineService engine.Service,
 	tickets ticket.Service, dispatches dispatchSvc.Service, executions etaskclient.TaskDispatcher,
 	reader etaskclient.ExecutionReader, users userv1.UserServiceClient, templates templateSvc.Service) Service {
 	return &taskService{
-		tasks: tasks, attempts: attempts, workflows: workflows, runners: runners,
+		tasks: tasks, attempts: attempts, withdrawal: withdrawal, workflows: workflows, runners: runners,
 		engine: engineService, tickets: tickets, dispatches: dispatches,
 		templates:  templates,
 		executions: executions, reader: reader, users: users,
@@ -110,8 +116,10 @@ func (s *taskService) CreateTask(ctx context.Context, ticketID int64,
 		ProcessInstanceID: processInstanceID, NodeID: nodeID,
 		NodeName: nodeName, ProcessVersion: instance.ProcVersion,
 		Status: domain.TaskStatusWaiting, Phase: domain.TaskPhaseReady,
+		ExecutionKind: domain.TaskExecutionProcess,
 	}
-	scheduledAt, err := s.prepareSchedule(ctx, draft, ticket)
+	definition, err := s.prepareTaskDefinition(ctx, draft, ticket)
+	draft.CompensationNodeID = definition.compensationNodeID
 	if err != nil {
 		draft.Status = domain.TaskStatusBlocked
 		draft.Phase = domain.TaskPhaseBlocked
@@ -123,7 +131,8 @@ func (s *taskService) CreateTask(ctx context.Context, ticketID int64,
 		}
 		return blocked, err
 	}
-	draft.ScheduledAt = scheduledAt
+	draft.ScheduledAt = definition.scheduledAt
+	draft.OriginalScheduledAt = definition.scheduledAt
 	task, created, err := s.tasks.FindOrCreate(ctx, draft)
 	if err != nil {
 		return domain.Task{}, err
@@ -131,7 +140,7 @@ func (s *taskService) CreateTask(ctx context.Context, ticketID int64,
 	if !created {
 		return task, nil
 	}
-	if scheduledAt <= time.Now().UnixMilli() {
+	if definition.scheduledAt <= time.Now().UnixMilli() && ticket.Status == domain.PROCESS {
 		if startErr := s.StartTask(ctx, task.ID); startErr != nil {
 			s.logger.Error("即时自动化任务启动失败", elog.Int64("taskID", task.ID), elog.FieldErr(startErr))
 			return task, startErr
@@ -169,6 +178,9 @@ func (s *taskService) StartTask(ctx context.Context, id int64) error {
 	}
 	attempt, err := s.attempts.Begin(ctx, task.ID, runnerID, input)
 	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotRunnable) {
+			return nil
+		}
 		return err
 	}
 	return s.submitAttempt(ctx, attempt)
@@ -236,7 +248,19 @@ func (s *taskService) CompleteAttempt(ctx context.Context, requestID string,
 	if !status.IsTerminal() {
 		return domain.TaskAttempt{}, fmt.Errorf("执行尝试终态非法: %s", status)
 	}
-	return s.attempts.Complete(ctx, requestID, status, output, reason)
+	attempt, err := s.attempts.Complete(ctx, requestID, status, output, reason)
+	if err != nil || attempt.Status != domain.AttemptStatusSuccess {
+		return attempt, err
+	}
+	task, err := s.tasks.FindByID(ctx, attempt.TaskID)
+	if err != nil {
+		return attempt, err
+	}
+	if task.ExecutionKind != domain.TaskExecutionCompensation {
+		return attempt, nil
+	}
+	_, err = s.withdrawal.TryFinalize(tenantContext(ctx, task.TenantID), task.ProcessInstanceID)
+	return attempt, err
 }
 
 func (s *taskService) ListTasksByStatusAfterID(ctx context.Context, status domain.TaskStatus,
@@ -320,10 +344,10 @@ func (s *taskService) ReconcileTask(ctx context.Context, id int64) error {
 	}
 	switch execution.Status {
 	case "SUCCESS":
-		_, err = s.attempts.Complete(ctx, attempt.RequestID, domain.AttemptStatusSuccess,
+		_, err = s.CompleteAttempt(ctx, attempt.RequestID, domain.AttemptStatusSuccess,
 			execution.Result, "")
 	case "FAILED":
-		_, err = s.attempts.Complete(ctx, attempt.RequestID, domain.AttemptStatusFailed,
+		_, err = s.CompleteAttempt(ctx, attempt.RequestID, domain.AttemptStatusFailed,
 			execution.Result, execution.Result)
 	}
 	return err
@@ -335,6 +359,21 @@ func (s *taskService) MarkTaskAsAutoPassed(ctx context.Context, id int64) error 
 
 func (s *taskService) ListReadyTasks(ctx context.Context, limit int64) ([]domain.Task, error) {
 	return s.tasks.ListReady(ctx, limit)
+}
+
+func (s *taskService) ShouldAdvanceProcessTask(ctx context.Context, id int64) (bool, error) {
+	task, err := s.tasks.FindByID(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	ticket, err := s.tickets.GetByID(tenantContext(ctx, task.TenantID), task.TicketID)
+	if err != nil {
+		return false, err
+	}
+	if ticket.Status == domain.WITHDRAWING {
+		return false, ErrWithdrawalInProgress
+	}
+	return ticket.Status == domain.PROCESS, nil
 }
 
 func tenantContext(ctx context.Context, tenantID int64) context.Context {

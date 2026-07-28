@@ -8,8 +8,10 @@ import (
 	taskConsumer "github.com/Duke1616/eflow/internal/event/task"
 	templateConsumer "github.com/Duke1616/eflow/internal/event/template"
 	ticketConsumer "github.com/Duke1616/eflow/internal/event/ticket"
+	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	serviceTask "github.com/Duke1616/eflow/internal/service/task"
+	withdrawalSvc "github.com/Duke1616/eflow/internal/service/withdrawal"
 	workflow "github.com/Duke1616/eflow/internal/service/workflow"
 )
 
@@ -17,6 +19,8 @@ import (
 // NOTE: 新增后台任务时在此处注入，打通定时任务、后台作业补偿及全量大事件 Kafka 消费监听
 func InitTasks(
 	taskSvc serviceTask.Service,
+	withdrawalRepo repository.WithdrawalRepository,
+	compensationPlanner withdrawalSvc.CompensationPlanner,
 	engineSvc engine.Service,
 	executeResultConsumer *taskConsumer.ExecuteResultConsumer,
 	processConsumer *processConsumer.ProcessEventConsumer,
@@ -30,6 +34,7 @@ func InitTasks(
 		serviceTask.NewStartTaskJob(taskSvc, 100, 8, 10*time.Second, 30*time.Second),
 		serviceTask.NewTaskRecoveryJob(taskSvc, 100, time.Minute, time.Minute),
 		serviceTask.NewPassProcessTaskJob(taskSvc, engineSvc, 100, 10*time.Second),
+		withdrawalSvc.NewRecoveryJob(withdrawalRepo, compensationPlanner, 100, time.Minute, 5*time.Minute),
 		processConsumer,
 		wechatConsumer,
 		larkWsServer,

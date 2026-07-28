@@ -235,6 +235,35 @@ etask 在正式提交时统一合并，eflow 不再保存脚本源码、执行�
 
 敏感变量由 etask 管理，eflow 不允许通过任务变量接口新增或覆盖敏感变量明文。
 
+## 自动化任务撤回补偿
+
+普通自动化任务在流程撤回时默认取消。产生外部资源的节点只需要通过
+`compensation_node_id` 关联一个补偿动作，例如授权节点关联权限回收节点：
+
+```json
+{
+  "name": "权限授权",
+  "compensation_node_id": "permission-revoke"
+}
+```
+
+补偿节点仍然按正常流程配置自己的计划时间，不需要额外声明撤回策略：
+
+```json
+{
+  "name": "权限回收",
+  "schedule": {
+    "type": "delay",
+    "source": {"type": "template_field", "field": "quantity"},
+    "unit": "hour"
+  }
+}
+```
+
+只有源动作执行成功后，撤回才会创建或加速对应补偿任务。补偿执行期间工单保持 `WITHDRAWING`，
+全部补偿成功后才进入 `WITHDRAW`。未配置补偿动作的等待、失败或阻塞任务会被取消；普通自动化任务
+已经进入提交或运行状态时，eflow 会拒绝撤回，因为当前 etask 协议尚未提供可靠的执行取消能力。
+
 ## 部署
 
 `deploy/docker-compose.yaml` 提供了容器部署示例：

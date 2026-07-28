@@ -202,6 +202,16 @@ func (h *AutomationNodeHandler) Handle(ctx *Context, node Node) ([]model.Node, e
 	if err != nil {
 		return nil, fmt.Errorf("解析自动化节点 %s 属性失败: %w", node.ID, err)
 	}
+	if property.CompensationNodeID != "" {
+		if property.CompensationNodeID == node.ID {
+			return nil, fmt.Errorf("自动化节点 %s 不能将自身配置为补偿节点", node.ID)
+		}
+		compensationNode, ok := ctx.NodesMap[property.CompensationNodeID]
+		if !ok || compensationNode.Type != NodeTypeAuto {
+			return nil, fmt.Errorf("自动化节点 %s 配置的补偿节点 %s 不存在或不是自动化节点",
+				node.ID, property.CompensationNodeID)
+		}
+	}
 	n := model.Node{
 		NodeID:          node.ID,
 		NodeName:        property.Name,

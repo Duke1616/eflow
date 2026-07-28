@@ -65,7 +65,7 @@ type TicketDAO interface {
 	// CountHistory 使用与 ListHistory 相同的 PBAC 和查询条件统计历史工单总数。
 	CountHistory(ctx context.Context, userId string, status []int) (int64, error)
 	// FindByBizIdAndKey 依据场景 ID、单据号和允许的状态列表查找满足条件的唯一活跃工单记录
-	FindByBizIdAndKey(ctx context.Context, bizId int64, key string, status []uint8) (Ticket, error)
+	FindByBizIdAndKey(ctx context.Context, bizId int64, key string, status []int) (Ticket, error)
 	// MergeTicketData 高效利用原子更新将新表单属性合并至已持久化的 JSON 列中
 	MergeTicketData(ctx context.Context, id int64, data map[string]interface{}) error
 }
@@ -193,7 +193,7 @@ func (g *gormTicketDAO) ticketQuery(ctx context.Context, userId string, status [
 	return query
 }
 
-func (g *gormTicketDAO) FindByBizIdAndKey(ctx context.Context, bizId int64, key string, status []uint8) (Ticket, error) {
+func (g *gormTicketDAO) FindByBizIdAndKey(ctx context.Context, bizId int64, key string, status []int) (Ticket, error) {
 	var res Ticket
 	query := g.db.WithContext(ctx).Where("biz_id = ? AND `key` = ?", bizId, key)
 	if len(status) > 0 {

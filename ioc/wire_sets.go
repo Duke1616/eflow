@@ -27,6 +27,7 @@ import (
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
+	withdrawalSvc "github.com/Duke1616/eflow/internal/service/withdrawal"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	dispatchHdl "github.com/Duke1616/eflow/internal/web/dispatch"
 	"github.com/Duke1616/eflow/internal/web/task"
@@ -80,6 +81,13 @@ var (
 		taskSvc.NewTaskService,
 		task.NewHandler,
 		etask.NewTaskDispatcher,
+	)
+
+	WithdrawalSet = wire.NewSet(
+		dao.NewWithdrawalDAO,
+		repository.NewWithdrawalRepository,
+		withdrawalSvc.NewCompensationPlanner,
+		withdrawalSvc.NewService,
 	)
 
 	// TicketSet 工单核心模块的 Provider 集合
@@ -178,6 +186,7 @@ var (
 		EngineSet,
 		TaskSet,
 		TicketSet,
+		WithdrawalSet,
 		EventSet,
 		DispatchSet,
 	)

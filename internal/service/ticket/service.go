@@ -94,7 +94,8 @@ func (s *ticketService) CreateBizTicket(ctx context.Context, ticket domain.Ticke
 
 	// 如果是告警转工单，且 Key 和 BizID 不为空，检查是否已有相同 Key 和 BizID 的进行中工单
 	if ticket.Provide.IsAlert() && ticket.Key != "" && ticket.BizID > 0 {
-		existingTicket, err := s.repo.FindByBizIdAndKey(ctx, ticket.BizID, ticket.Key, []domain.Status{domain.START, domain.PROCESS})
+		existingTicket, err := s.repo.FindByBizIdAndKey(ctx, ticket.BizID, ticket.Key,
+			[]domain.Status{domain.START, domain.PROCESS, domain.WITHDRAWING})
 		if err != nil {
 			s.l.Warn("查询已有工单失败",
 				elog.FieldErr(err),
@@ -213,13 +214,15 @@ func (s *ticketService) ListByUser(ctx context.Context, userId string, offset, l
 	)
 	eg.Go(func() error {
 		var err error
-		ts, err = s.repo.ListTicket(ctx, userId, []int{domain.PROCESS.ToInt()}, offset, limit)
+		ts, err = s.repo.ListTicket(ctx, userId,
+			[]int{domain.PROCESS.ToInt(), domain.WITHDRAWING.ToInt()}, offset, limit)
 		return err
 	})
 
 	eg.Go(func() error {
 		var err error
-		total, err = s.repo.CountTicket(ctx, userId, []int{domain.PROCESS.ToInt()})
+		total, err = s.repo.CountTicket(ctx, userId,
+			[]int{domain.PROCESS.ToInt(), domain.WITHDRAWING.ToInt()})
 		return err
 	})
 	if err := eg.Wait(); err != nil {

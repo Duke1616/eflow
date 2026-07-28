@@ -138,8 +138,11 @@ func mapTasks(tasks []domain.Task) []Task {
 			ID: task.ID, TicketID: task.TicketID, ProcessInstanceID: task.ProcessInstanceID,
 			NodeID: task.NodeID, NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
 			Status: task.Status.ToUint8(), Phase: string(task.Phase),
-			ScheduledAt: task.ScheduledAt, CurrentAttemptID: task.CurrentAttemptID,
-			AdvancedAt: task.AdvancedAt, LastError: task.LastError,
+			ScheduledAt: task.ScheduledAt, OriginalScheduledAt: task.OriginalScheduledAt,
+			CompensationNodeID: task.CompensationNodeID,
+			IsCompensation:     task.ExecutionKind == domain.TaskExecutionCompensation,
+			CurrentAttemptID:   task.CurrentAttemptID, AdvancedAt: task.AdvancedAt,
+			CancelledAt: task.CancelledAt, LastError: task.LastError,
 			CTime: task.CTime, UTime: task.UTime,
 		})
 	}

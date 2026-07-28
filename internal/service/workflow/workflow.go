@@ -108,7 +108,7 @@ func (s *workflowService) Delete(ctx context.Context, id int64) (int64, error) {
 
 func (s *workflowService) Deploy(ctx context.Context, wf domain.Workflow) error {
 	// 1. 将画布中的前端 DSL 数据转换底层 easyflow 路由引擎所需的图拓扑 Process 模型
-	process, err := s.engineCovert.Convert(s.toEasyWorkflow(wf))
+	process, err := s.engineCovert.Convert(easyflow.FromDomainWorkflow(wf))
 	if err != nil {
 		return err
 	}
@@ -227,25 +227,4 @@ func (s *workflowService) FindInstanceFlow(ctx context.Context, workflowID int64
 	}
 
 	return latest, nil
-}
-
-func (s *workflowService) toEasyWorkflow(wf domain.Workflow) easyflow.Workflow {
-	edges := make([]map[string]interface{}, len(wf.FlowData.Edges))
-	for i, e := range wf.FlowData.Edges {
-		edges[i] = e
-	}
-	nodes := make([]map[string]interface{}, len(wf.FlowData.Nodes))
-	for i, n := range wf.FlowData.Nodes {
-		nodes[i] = n
-	}
-
-	return easyflow.Workflow{
-		Id:    wf.Id,
-		Name:  wf.Name,
-		Owner: wf.Owner,
-		FlowData: easyflow.LogicFlow{
-			Edges: edges,
-			Nodes: nodes,
-		},
-	}
 }

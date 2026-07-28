@@ -46,6 +46,8 @@ const (
 	END Status = 3
 	// WITHDRAW 发起人主动撤回工单
 	WITHDRAW Status = 4
+	// WITHDRAWING 工单撤回处理中，用于阻止新的自动化执行尝试。
+	WITHDRAWING Status = 5
 )
 
 // Provide 工单的发起/同步来源提供者
@@ -94,6 +96,15 @@ type Ticket struct {
 	Ctime            int64            // 发起创建时间 (毫秒级时间戳)
 	Wtime            int64            // 完成归档时间
 	NotificationConf NotificationConf // 为支持告警自动转单等引入的外部通知媒介配置
+}
+
+// WithdrawalCandidate 是长期停留在撤回中状态、等待后台恢复的工单快照。
+type WithdrawalCandidate struct {
+	TicketID          int64
+	TenantID          int64
+	ProcessInstanceID int
+	EngineActive      bool
+	EngineRevoked     bool
 }
 
 // ErrInvalidParameter 统一的校验失败错误定义

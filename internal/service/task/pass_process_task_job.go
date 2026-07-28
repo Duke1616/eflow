@@ -60,6 +60,22 @@ func (j *PassProcessTaskJob) run(ctx context.Context) error {
 			afterID = task.ID
 			taskCtx := tenantContext(ctx, task.TenantID)
 			j.logger.Info("任务开启自动通过逻辑", elog.Int64("id", task.ID))
+			shouldAdvance, checkErr := j.svc.ShouldAdvanceProcessTask(taskCtx, task.ID)
+			if checkErr != nil {
+				if errors.Is(checkErr, ErrWithdrawalInProgress) {
+					continue
+				}
+				runErr = errors.Join(runErr,
+					fmt.Errorf("检查自动化任务流程状态失败: task_id=%d: %w", task.ID, checkErr))
+				continue
+			}
+			if !shouldAdvance {
+				if err = j.svc.MarkTaskAsAutoPassed(taskCtx, task.ID); err != nil {
+					runErr = errors.Join(runErr,
+						fmt.Errorf("标记已归档流程任务无需推进失败: task_id=%d: %w", task.ID, err))
+				}
+				continue
+			}
 			mt, err1 := j.engineSvc.GetAutomationTask(taskCtx, task.NodeID, task.ProcessInstanceID)
 			if err1 != nil {
 				runErr = errors.Join(runErr,

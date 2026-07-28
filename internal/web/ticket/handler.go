@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
@@ -14,6 +13,7 @@ import (
 	"github.com/Duke1616/eflow/internal/pkg/ticketpbac"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
+	withdrawalSvc "github.com/Duke1616/eflow/internal/service/withdrawal"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/Duke1616/eiam/pkg/web/capability"
@@ -27,19 +27,22 @@ var ticketNotAccessibleResult = ginx.Result{Code: 403, Msg: "工单不存在或�
 
 type Handler struct {
 	capability.IRegistry
-	svc         ticketSvc.Service
-	userSvc     userv1.UserServiceClient
-	engineSvc   engineSvc.Service
-	workflowSvc workflowSvc.Service
+	svc           ticketSvc.Service
+	userSvc       userv1.UserServiceClient
+	engineSvc     engineSvc.Service
+	workflowSvc   workflowSvc.Service
+	withdrawalSvc withdrawalSvc.Service
 }
 
-func NewHandler(svc ticketSvc.Service, engineSvc engineSvc.Service, userSvc userv1.UserServiceClient, workflowSvc workflowSvc.Service) *Handler {
+func NewHandler(svc ticketSvc.Service, engineSvc engineSvc.Service, userSvc userv1.UserServiceClient,
+	workflowSvc workflowSvc.Service, withdrawalSvc withdrawalSvc.Service) *Handler {
 	return &Handler{
-		svc:         svc,
-		userSvc:     userSvc,
-		engineSvc:   engineSvc,
-		workflowSvc: workflowSvc,
-		IRegistry:   capability.NewRegistry("ticket", "manager", "工单中心"),
+		svc:           svc,
+		userSvc:       userSvc,
+		engineSvc:     engineSvc,
+		workflowSvc:   workflowSvc,
+		withdrawalSvc: withdrawalSvc,
+		IRegistry:     capability.NewRegistry("ticket", "manager", "工单中心"),
 	}
 }
 
@@ -238,18 +241,16 @@ func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, er
 		return systemErrorResult, err
 	}
 
-	err = engine.InstanceRevoke(req.InstanceId, req.Force, username)
+	err = h.withdrawalSvc.Revoke(ctx.Context, req.InstanceId, req.Force, username)
 	if err != nil {
-		return systemErrorResult, err
-	}
-
-	err = h.svc.UpdateStatusByProcessInstanceID(ctx.Context, req.InstanceId, domain.WITHDRAW.ToUint8())
-	if err != nil {
+		if errors.Is(err, withdrawalSvc.ErrAutomationRunning) {
+			return ginx.Result{Code: 409, Msg: err.Error()}, nil
+		}
 		return systemErrorResult, err
 	}
 
 	return ginx.Result{
-		Msg:  "撤销工单成功",
+		Msg:  "撤回请求已提交",
 		Data: true,
 	}, nil
 }

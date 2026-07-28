@@ -2,11 +2,14 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/ecodeclub/ekit/slice"
 )
+
+var ErrTaskNotRunnable = errors.New("自动化任务当前不可启动")
 
 // TaskAttemptRepository 定义自动化任务执行尝试仓储。
 type TaskAttemptRepository interface {
@@ -37,6 +40,9 @@ func NewTaskAttemptRepository(attemptDAO dao.TaskAttemptDAO) TaskAttemptReposito
 func (r *taskAttemptRepository) Begin(ctx context.Context, taskID, runnerID int64,
 	input domain.TaskArgs) (domain.TaskAttempt, error) {
 	attempt, err := r.dao.Begin(ctx, taskID, runnerID, input)
+	if errors.Is(err, dao.ErrTaskNotRunnable) {
+		err = errors.Join(ErrTaskNotRunnable, err)
+	}
 	return toAttemptDomain(attempt), err
 }
 

@@ -143,6 +143,24 @@ func TestCompleteAttemptValidatesTerminalIdentity(t *testing.T) {
 	}
 }
 
+func TestCompleteAttemptFinalizesSuccessfulCompensation(t *testing.T) {
+	tasks := &taskRepositoryStub{task: domain.Task{
+		ID: 1, TenantID: 7, ProcessInstanceID: 101, ExecutionKind: domain.TaskExecutionCompensation,
+	}}
+	attempts := &attemptRepositoryStub{completedAttempt: domain.TaskAttempt{
+		ID: 11, TaskID: 1, Status: domain.AttemptStatusSuccess,
+	}}
+	withdrawals := &taskWithdrawalRepositoryStub{}
+	svc := &taskService{tasks: tasks, attempts: attempts, withdrawal: withdrawals}
+
+	_, err := svc.CompleteAttempt(context.Background(), "eflow:1:1",
+		domain.AttemptStatusSuccess, "", "")
+
+	require.NoError(t, err)
+	require.Equal(t, 101, withdrawals.processInstanceID)
+	require.Equal(t, int64(7), withdrawals.tenantID)
+}
+
 func TestReconcileTaskUsesPersistedExecutionState(t *testing.T) {
 	testCases := []struct {
 		name       string
@@ -213,6 +231,7 @@ type attemptRepositoryStub struct {
 	rejectedAttemptID int64
 	completeCalls     int
 	completedStatus   domain.AttemptStatus
+	completedAttempt  domain.TaskAttempt
 }
 
 func (s *attemptRepositoryStub) FindByID(context.Context, int64) (domain.TaskAttempt, error) {
@@ -238,7 +257,20 @@ func (s *attemptRepositoryStub) Complete(_ context.Context, _ string, status dom
 	_, _ string) (domain.TaskAttempt, error) {
 	s.completeCalls++
 	s.completedStatus = status
-	return domain.TaskAttempt{}, nil
+	return s.completedAttempt, nil
+}
+
+type taskWithdrawalRepositoryStub struct {
+	repository.WithdrawalRepository
+	processInstanceID int
+	tenantID          int64
+}
+
+func (s *taskWithdrawalRepositoryStub) TryFinalize(ctx context.Context,
+	processInstanceID int) (bool, error) {
+	s.processInstanceID = processInstanceID
+	s.tenantID = ctxutil.GetTenantID(ctx).Int64()
+	return true, nil
 }
 
 type executionReaderStub struct {

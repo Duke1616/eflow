@@ -115,6 +115,50 @@ func TestAutomationNodeHandlerRejectsInvalidProperty(t *testing.T) {
 	require.ErrorContains(t, err, "解析自动化节点 automation-1 属性失败")
 }
 
+func TestAutomationNodeHandlerValidatesCompensationNode(t *testing.T) {
+	recovery := Node{
+		ID: "recovery", Type: NodeTypeAuto,
+		Properties: map[string]any{
+			"name": "权限回收", "codebook_id": 2,
+		},
+	}
+	testCases := []struct {
+		name     string
+		property map[string]any
+		nodes    map[string]Node
+		wantErr  string
+	}{
+		{
+			name: "授权节点关联补偿节点",
+			property: map[string]any{
+				"name": "权限授权", "codebook_id": 1, "compensation_node_id": "recovery",
+			},
+			nodes: map[string]Node{"recovery": recovery},
+		},
+		{
+			name: "拒绝不存在的补偿节点",
+			property: map[string]any{
+				"name": "权限授权", "codebook_id": 1, "compensation_node_id": "missing",
+			},
+			wantErr: "不存在或不是自动化节点",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := &Context{NodesMap: testCase.nodes}
+			_, err := (&AutomationNodeHandler{}).Handle(ctx, Node{
+				ID: "authorization", Type: NodeTypeAuto, Properties: testCase.property,
+			})
+			if testCase.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, testCase.wantErr)
+			}
+		})
+	}
+}
+
 func TestUserProperty_NormalizeAssignees(t *testing.T) {
 	testCases := []struct {
 		name     string

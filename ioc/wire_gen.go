@@ -26,8 +26,9 @@ import (
 	"github.com/Duke1616/eflow/internal/service/task"
 	"github.com/Duke1616/eflow/internal/service/template"
 	"github.com/Duke1616/eflow/internal/service/ticket"
+	"github.com/Duke1616/eflow/internal/service/withdrawal"
 	"github.com/Duke1616/eflow/internal/service/workflow"
-	dispatch3 "github.com/Duke1616/eflow/internal/web/dispatch"
+	dispatch2 "github.com/Duke1616/eflow/internal/web/dispatch"
 	task2 "github.com/Duke1616/eflow/internal/web/task"
 	template2 "github.com/Duke1616/eflow/internal/web/template"
 	ticket2 "github.com/Duke1616/eflow/internal/web/ticket"
@@ -82,10 +83,14 @@ func InitApp() (*App, error) {
 	eiamConn := InitEIAMGrpcClient(registry)
 	eiamClient := eiam.NewEIAMClient(eiamConn)
 	userServiceClient := eiamClient.UserClient
-	taskService := task.NewTaskService(taskRepository, taskAttemptRepository, workflowService, runnerCatalog, engineService, ticketService, dispatchService, taskDispatcher, executionReader, userServiceClient, service)
+	withdrawalDAO := dao.NewWithdrawalDAO(db)
+	withdrawalRepository := repository.NewWithdrawalRepository(withdrawalDAO)
+	taskService := task.NewTaskService(taskRepository, taskAttemptRepository, withdrawalRepository, workflowService, runnerCatalog, engineService, ticketService, dispatchService, taskDispatcher, executionReader, userServiceClient, service)
 	taskHandler := task2.NewHandler(taskService)
-	ticketHandler := ticket2.NewHandler(ticketService, engineService, userServiceClient, workflowService)
-	dispatchHandler := dispatch3.NewHandler(dispatchService)
+	compensationPlanner := withdrawal.NewCompensationPlanner(taskRepository, withdrawalRepository, taskService, ticketService, engineService, workflowService)
+	withdrawalService := withdrawal.NewService(withdrawalRepository, compensationPlanner)
+	ticketHandler := ticket2.NewHandler(ticketService, engineService, userServiceClient, workflowService, withdrawalService)
+	dispatchHandler := dispatch2.NewHandler(dispatchService)
 	listener := InitListener()
 	component := InitGinWebServer(v, sdk, syncer, v2, handler, workflowHandler, taskHandler, ticketHandler, dispatchHandler, listener)
 	producer, err := InitTicketStatusModifyEventProducer(mq)
@@ -134,7 +139,7 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	iLarkCallbackHandler := ticket3.NewLarkCallbackHandler(engineService, ticketService, service, userService, workflowService, notificationSender, larkClient)
+	iLarkCallbackHandler := ticket3.NewLarkCallbackHandler(engineService, ticketService, service, userService, workflowService, withdrawalService, notificationSender, larkClient)
 	eventDispatcher := InitLarkDispatcher(iLarkCallbackHandler)
 	larkCallbackTicketServer := InitLarkServer(eventDispatcher)
 	wechatTicketEventProducer, err := InitWechatTicketEventProducer(mq)
@@ -145,7 +150,7 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	v3 := InitTasks(taskService, engineService, executeResultConsumer, processEventConsumer, wechatTicketConsumer, larkCallbackTicketServer, wechatApprovalCallbackConsumer, templateServiceClient)
+	v3 := InitTasks(taskService, withdrawalRepository, compensationPlanner, engineService, executeResultConsumer, processEventConsumer, wechatTicketConsumer, larkCallbackTicketServer, wechatApprovalCallbackConsumer, templateServiceClient)
 	app := &App{
 		Web:   component,
 		Event: processEvent,

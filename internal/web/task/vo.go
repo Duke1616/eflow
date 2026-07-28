@@ -29,20 +29,24 @@ type LogsReq struct {
 }
 
 type Task struct {
-	ID                int64  `json:"id"`
-	TicketID          int64  `json:"ticket_id"`
-	ProcessInstanceID int    `json:"process_instance_id"`
-	NodeID            string `json:"node_id"`
-	NodeName          string `json:"node_name"`
-	ProcessVersion    int    `json:"process_version"`
-	Status            uint8  `json:"status"`
-	Phase             string `json:"phase"`
-	ScheduledAt       int64  `json:"scheduled_at"`
-	CurrentAttemptID  int64  `json:"current_attempt_id"`
-	AdvancedAt        int64  `json:"advanced_at"`
-	LastError         string `json:"last_error"`
-	CTime             int64  `json:"ctime"`
-	UTime             int64  `json:"utime"`
+	ID                  int64  `json:"id"`
+	TicketID            int64  `json:"ticket_id"`
+	ProcessInstanceID   int    `json:"process_instance_id"`
+	NodeID              string `json:"node_id"`
+	NodeName            string `json:"node_name"`
+	ProcessVersion      int    `json:"process_version"`
+	Status              uint8  `json:"status"`
+	Phase               string `json:"phase"`
+	ScheduledAt         int64  `json:"scheduled_at"`
+	OriginalScheduledAt int64  `json:"original_scheduled_at"`
+	CompensationNodeID  string `json:"compensation_node_id"`
+	IsCompensation      bool   `json:"is_compensation"`
+	CurrentAttemptID    int64  `json:"current_attempt_id"`
+	AdvancedAt          int64  `json:"advanced_at"`
+	CancelledAt         int64  `json:"cancelled_at"`
+	LastError           string `json:"last_error"`
+	CTime               int64  `json:"ctime"`
+	UTime               int64  `json:"utime"`
 }
 
 type Attempt struct {

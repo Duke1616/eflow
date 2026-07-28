@@ -122,10 +122,10 @@ func (repo *ticketRepository) CountHistory(ctx context.Context, userId string, s
 }
 
 func (repo *ticketRepository) FindByBizIdAndKey(ctx context.Context, bizId int64, key string, status []domain.Status) (domain.Ticket, error) {
-	statusUint8 := slice.Map(status, func(idx int, src domain.Status) uint8 {
-		return src.ToUint8()
+	statusValues := slice.Map(status, func(idx int, src domain.Status) int {
+		return src.ToInt()
 	})
-	ticket, err := repo.dao.FindByBizIdAndKey(ctx, bizId, key, statusUint8)
+	ticket, err := repo.dao.FindByBizIdAndKey(ctx, bizId, key, statusValues)
 	return repo.toDomain(ticket), err
 }
 

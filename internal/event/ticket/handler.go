@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
@@ -20,6 +19,7 @@ import (
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
+	withdrawalSvc "github.com/Duke1616/eflow/internal/service/withdrawal"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/Duke1616/enotify/notify/feishu"
@@ -55,15 +55,16 @@ type ILarkCallbackHandler interface {
 }
 
 type larkCallbackHandler struct {
-	logger      *elog.Component
-	cfg         callback
-	engineSvc   engineSvc.Service
-	svc         ticketSvc.Service
-	templateSvc templateSvc.Service
-	userSvc     UserService
-	workflowSvc workflowSvc.Service
-	sender      sender.NotificationSender
-	lark        *lark.Client
+	logger        *elog.Component
+	cfg           callback
+	engineSvc     engineSvc.Service
+	svc           ticketSvc.Service
+	templateSvc   templateSvc.Service
+	userSvc       UserService
+	workflowSvc   workflowSvc.Service
+	withdrawalSvc withdrawalSvc.Service
+	sender        sender.NotificationSender
+	lark          *lark.Client
 }
 
 // NewLarkCallbackHandler 构造飞书卡片业务处理器
@@ -73,19 +74,21 @@ func NewLarkCallbackHandler(
 	templateSvc templateSvc.Service,
 	userSvc UserService,
 	workflowSvc workflowSvc.Service,
+	withdrawalSvc withdrawalSvc.Service,
 	sender sender.NotificationSender,
 	lark *lark.Client,
 ) ILarkCallbackHandler {
 	return &larkCallbackHandler{
-		logger:      elog.DefaultLogger.With(elog.FieldComponentName("LarkCallbackHandler")),
-		cfg:         getLarkCallbackConfig(),
-		engineSvc:   engineSvc,
-		svc:         svc,
-		templateSvc: templateSvc,
-		userSvc:     userSvc,
-		workflowSvc: workflowSvc,
-		sender:      sender,
-		lark:        lark,
+		logger:        elog.DefaultLogger.With(elog.FieldComponentName("LarkCallbackHandler")),
+		cfg:           getLarkCallbackConfig(),
+		engineSvc:     engineSvc,
+		svc:           svc,
+		templateSvc:   templateSvc,
+		userSvc:       userSvc,
+		workflowSvc:   workflowSvc,
+		withdrawalSvc: withdrawalSvc,
+		sender:        sender,
+		lark:          lark,
 	}
 }
 
@@ -234,16 +237,14 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) erro
 			return err
 		}
 
-		// NOTE: 撤销流程，直接调用 easy-workflow 的包级别 InstanceRevoke 进行终止
-		err = engine.InstanceRevoke(ticketResp.Process.InstanceId, true, userResp.Username)
+		err = h.withdrawalSvc.Revoke(ctx, ticketResp.Process.InstanceId, true, userResp.Username)
 		if err != nil {
-			remark = "你的节点任务已经结束，无法进行撤回，详情登录系统查看"
+			if errors.Is(err, withdrawalSvc.ErrAutomationRunning) {
+				remark = "自动化任务正在执行，暂时无法撤回，请稍后重试"
+			} else {
+				remark = "你的节点任务已经结束，无法进行撤回，详情登录系统查看"
+			}
 			h.logger.Error("飞书回调消息，撤销工单失败", elog.FieldErr(err))
-		}
-
-		err = h.svc.UpdateStatusByProcessInstanceID(ctx, ticketResp.Process.InstanceId, domain.WITHDRAW.ToUint8())
-		if err != nil {
-			h.logger.Error("撤销变更流程状态失败", elog.FieldErr(err))
 		}
 
 		return h.withdraw(ctx, evt, remark)
