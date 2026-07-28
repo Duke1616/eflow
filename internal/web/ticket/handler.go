@@ -96,7 +96,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.B[Todo](h.TodoByUser)),
 	)
 	g.POST("/history", list("历史工单", "history").
-		Needs("ticket:template:view_by_ids").
+		Needs("ticket:template:view_by_ids", "ticket:manager:rate").
 		AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
 		Handle(ginx.B[HistoryReq](h.History)),
 	)
@@ -118,6 +118,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.B[RevokeOrderReq](h.Revoke)),
 	)
 	g.POST("/rating/submit", op("评价工单", "rate").
+		NoSync().
 		Handle(ginx.B[SubmitRatingReq](h.SubmitRating)),
 	)
 	g.POST("/task/form_config", detail("任务节点表单配置", "form_config").
