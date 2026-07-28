@@ -23,6 +23,7 @@ import (
 	"github.com/Duke1616/eflow/internal/service/event/strategy/chat"
 	"github.com/Duke1616/eflow/internal/service/event/strategy/start"
 	"github.com/Duke1616/eflow/internal/service/event/strategy/user"
+	"github.com/Duke1616/eflow/internal/service/rating"
 	"github.com/Duke1616/eflow/internal/service/task"
 	"github.com/Duke1616/eflow/internal/service/template"
 	"github.com/Duke1616/eflow/internal/service/ticket"
@@ -89,7 +90,10 @@ func InitApp() (*App, error) {
 	taskHandler := task2.NewHandler(taskService)
 	compensationPlanner := withdrawal.NewCompensationPlanner(taskRepository, withdrawalRepository, taskService, ticketService, engineService, workflowService)
 	withdrawalService := withdrawal.NewService(withdrawalRepository, compensationPlanner)
-	ticketHandler := ticket2.NewHandler(ticketService, engineService, userServiceClient, workflowService, withdrawalService)
+	ticketRatingDAO := dao.NewTicketRatingDAO(db)
+	ticketRatingRepository := repository.NewTicketRatingRepository(ticketRatingDAO)
+	ratingService := rating.NewService(ticketRepository, ticketRatingRepository)
+	ticketHandler := ticket2.NewHandler(ticketService, engineService, userServiceClient, workflowService, withdrawalService, ratingService)
 	dispatchHandler := dispatch2.NewHandler(dispatchService)
 	listener := InitListener()
 	component := InitGinWebServer(v, sdk, syncer, v2, handler, workflowHandler, taskHandler, ticketHandler, dispatchHandler, listener)

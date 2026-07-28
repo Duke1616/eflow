@@ -12,6 +12,7 @@ import (
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/pkg/ticketpbac"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
+	ratingSvc "github.com/Duke1616/eflow/internal/service/rating"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	withdrawalSvc "github.com/Duke1616/eflow/internal/service/withdrawal"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
@@ -32,16 +33,18 @@ type Handler struct {
 	engineSvc     engineSvc.Service
 	workflowSvc   workflowSvc.Service
 	withdrawalSvc withdrawalSvc.Service
+	ratingSvc     ratingSvc.Service
 }
 
 func NewHandler(svc ticketSvc.Service, engineSvc engineSvc.Service, userSvc userv1.UserServiceClient,
-	workflowSvc workflowSvc.Service, withdrawalSvc withdrawalSvc.Service) *Handler {
+	workflowSvc workflowSvc.Service, withdrawalSvc withdrawalSvc.Service, ratingSvc ratingSvc.Service) *Handler {
 	return &Handler{
 		svc:           svc,
 		userSvc:       userSvc,
 		engineSvc:     engineSvc,
 		workflowSvc:   workflowSvc,
 		withdrawalSvc: withdrawalSvc,
+		ratingSvc:     ratingSvc,
 		IRegistry:     capability.NewRegistry("ticket", "manager", "工单中心"),
 	}
 }
@@ -107,6 +110,9 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	)
 	g.POST("/revoke", op("撤销工单", "revoke").
 		Handle(ginx.B[RevokeOrderReq](h.Revoke)),
+	)
+	g.POST("/rating/submit", op("评价工单", "rate").
+		Handle(ginx.B[SubmitRatingReq](h.SubmitRating)),
 	)
 	g.POST("/task/form_config", detail("任务节点表单配置", "form_config").
 		Needs("ticket:template:get", "ticket:manager:get").
@@ -241,8 +247,11 @@ func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, er
 		return systemErrorResult, err
 	}
 
-	err = h.withdrawalSvc.Revoke(ctx.Context, req.InstanceId, req.Force, username)
+	err = h.withdrawalSvc.Revoke(ctx.Context, req.InstanceId, req.Force, username, req.Reason)
 	if err != nil {
+		if errors.Is(err, withdrawalSvc.ErrInvalidRevokeReason) {
+			return ginx.Result{Code: 400, Msg: err.Error()}, nil
+		}
 		if errors.Is(err, withdrawalSvc.ErrAutomationRunning) {
 			return ginx.Result{Code: 409, Msg: err.Error()}, nil
 		}
@@ -253,6 +262,27 @@ func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, er
 		Msg:  "撤回请求已提交",
 		Data: true,
 	}, nil
+}
+
+func (h *Handler) SubmitRating(ctx *ginx.Context, req SubmitRatingReq) (ginx.Result, error) {
+	username, err := h.getSessUsername(ctx)
+	if err != nil {
+		return systemErrorResult, err
+	}
+	rating, err := h.ratingSvc.Submit(ctx.Context, req.TicketID, username, req.Score, req.Comment)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrInvalidParameter):
+			return ginx.Result{Code: 400, Msg: err.Error()}, nil
+		case errors.Is(err, ratingSvc.ErrTicketNotRateable):
+			return ginx.Result{Code: 403, Msg: ratingSvc.ErrTicketNotRateable.Error()}, nil
+		case errors.Is(err, ratingSvc.ErrAlreadyRated):
+			return ginx.Result{Code: 409, Msg: ratingSvc.ErrAlreadyRated.Error()}, nil
+		default:
+			return systemErrorResult, err
+		}
+	}
+	return ginx.Result{Msg: "评价提交成功", Data: toRatingVO(rating)}, nil
 }
 
 func (h *Handler) Pass(ctx *ginx.Context, req PassOrderReq) (ginx.Result, error) {
@@ -330,9 +360,20 @@ func (h *Handler) Detail(ctx *ginx.Context, req DetailProcessInstIdReq) (ginx.Re
 		return systemErrorResult, err
 	}
 
-	return ginx.Result{
-		Data: h.toVoTicket(ticket),
-	}, nil
+	username, err := h.getSessUsername(ctx)
+	if err != nil {
+		return systemErrorResult, err
+	}
+	rating, exists, err := h.ratingSvc.FindByTicketID(ctx.Context, ticket.Id)
+	if err != nil {
+		return systemErrorResult, err
+	}
+	result := h.toVoTicket(ticket)
+	result.CanRate = canRateTicket(ticket, username, exists)
+	if exists {
+		result.Rating = toRatingVO(rating)
+	}
+	return ginx.Result{Data: result}, nil
 }
 
 func (h *Handler) TaskRecord(ctx *ginx.Context, req RecordTaskReq) (ginx.Result, error) {
@@ -421,11 +462,21 @@ func (h *Handler) toVoTicket(req domain.Ticket) Ticket {
 		Ctime:             time.Unix(req.Ctime/1000, 0).Format("2006-01-02 15:04:05"),
 		Wtime:             time.Unix(req.Wtime/1000, 0).Format("2006-01-02 15:04:05"),
 		Data:              req.Data,
+		RevokeReason:      req.RevokeReason,
 	}
 }
 
 func (h *Handler) History(ctx *ginx.Context, req HistoryReq) (ginx.Result, error) {
 	os, total, err := h.svc.ListHistory(ctx.Context, req.UserId, req.Offset, req.Limit)
+	if err != nil {
+		return systemErrorResult, err
+	}
+	username, err := h.getSessUsername(ctx)
+	if err != nil {
+		return systemErrorResult, err
+	}
+	ticketIDs := slice.Map(os, func(_ int, ticket domain.Ticket) int64 { return ticket.Id })
+	ratings, err := h.ratingSvc.ListByTicketIDs(ctx.Context, ticketIDs)
 	if err != nil {
 		return systemErrorResult, err
 	}
@@ -454,7 +505,7 @@ func (h *Handler) History(ctx *ginx.Context, req HistoryReq) (ginx.Result, error
 					starter = src.CreateBy
 				}
 
-				return Ticket{
+				result := Ticket{
 					Id:                src.Id,
 					TemplateId:        src.TemplateId,
 					Starter:           starter,
@@ -465,10 +516,28 @@ func (h *Handler) History(ctx *ginx.Context, req HistoryReq) (ginx.Result, error
 					Ctime:             time.Unix(src.Ctime/1000, 0).Format("2006-01-02 15:04:05"),
 					Wtime:             time.Unix(src.Wtime/1000, 0).Format("2006-01-02 15:04:05"),
 					Data:              src.Data,
+					RevokeReason:      src.RevokeReason,
 				}
+				rating, rated := ratings[src.Id]
+				result.CanRate = canRateTicket(src, username, rated)
+				if rated {
+					result.Rating = toRatingVO(rating)
+				}
+				return result
 			}),
 		},
 	}, nil
+}
+
+func canRateTicket(ticket domain.Ticket, actor string, alreadyRated bool) bool {
+	return ticket.Status == domain.END && ticket.CreateBy == actor && !alreadyRated
+}
+
+func toRatingVO(rating domain.TicketRating) *Rating {
+	return &Rating{
+		Score: rating.Score, Comment: rating.Comment,
+		Rater: rating.RaterUsername, RatedAt: rating.CTime,
+	}
 }
 
 func (h *Handler) toVoEngineTicket(ctx context.Context, instances []domain.Instance) ([]Ticket, error) {

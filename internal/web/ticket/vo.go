@@ -55,6 +55,13 @@ type TransferReq struct {
 type RevokeOrderReq struct {
 	InstanceId int    `json:"instance_id"`
 	Force      bool   `json:"force"`
+	Reason     string `json:"reason"`
+}
+
+type SubmitRatingReq struct {
+	TicketID int64  `json:"ticket_id"`
+	Score    uint8  `json:"score"`
+	Comment  string `json:"comment"`
 }
 
 type TaskFormConfigReq struct {
@@ -98,6 +105,16 @@ type Ticket struct {
 	CurrentStep        string                 `json:"current_step"`
 	ApprovedBy         string                 `json:"approved_by"`
 	ProcInstCreateTime interface{}            `json:"proc_inst_create_time"`
+	CanRate            bool                   `json:"can_rate"`
+	Rating             *Rating                `json:"rating,omitempty"`
+	RevokeReason       string                 `json:"revoke_reason,omitempty"`
+}
+
+type Rating struct {
+	Score   uint8  `json:"score"`
+	Comment string `json:"comment"`
+	Rater   string `json:"rater"`
+	RatedAt int64  `json:"rated_at"`
 }
 
 type FormValue struct {

@@ -18,10 +18,15 @@ var (
 
 // WithdrawalDAO 持久化工单撤回状态机及其关联自动化任务迁移。
 type WithdrawalDAO interface {
-	Prepare(ctx context.Context, processInstanceID int) error
+	// Prepare 加锁校验工单和运行中任务，并原子写入撤回中状态及撤单原因。
+	Prepare(ctx context.Context, processInstanceID int, reason string) error
+	// ActivateCompensations 激活指定补偿任务并取消其余可取消任务。
 	ActivateCompensations(ctx context.Context, processInstanceID int, nodeIDs []string) error
+	// TryFinalize 在不存在未完成补偿任务时原子完成撤回。
 	TryFinalize(ctx context.Context, processInstanceID int) (bool, error)
+	// Rollback 将尚未完成引擎撤回的工单恢复为处理中并清除撤单原因。
 	Rollback(ctx context.Context, processInstanceID int) error
+	// ListStale 分页读取需要恢复的撤回中工单及其流程引擎状态。
 	ListStale(ctx context.Context, before int64, afterID, limit int64) ([]WithdrawalCandidate, error)
 }
 
@@ -38,7 +43,7 @@ type gormWithdrawalDAO struct{ db *gorm.DB }
 
 func NewWithdrawalDAO(db *gorm.DB) WithdrawalDAO { return &gormWithdrawalDAO{db: db} }
 
-func (g *gormWithdrawalDAO) Prepare(ctx context.Context, processInstanceID int) error {
+func (g *gormWithdrawalDAO) Prepare(ctx context.Context, processInstanceID int, reason string) error {
 	return g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var ticket Ticket
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -69,7 +74,7 @@ func (g *gormWithdrawalDAO) Prepare(ctx context.Context, processInstanceID int) 
 
 		if err := tx.Model(&Ticket{}).Where("id = ? AND status = ?", ticket.Id, domain.PROCESS.ToUint8()).
 			Updates(map[string]any{
-				"status": domain.WITHDRAWING.ToUint8(), "utime": time.Now().UnixMilli(),
+				"status": domain.WITHDRAWING.ToUint8(), "revoke_reason": reason, "utime": time.Now().UnixMilli(),
 			}).Error; err != nil {
 			return err
 		}
@@ -177,7 +182,7 @@ func (g *gormWithdrawalDAO) Rollback(ctx context.Context, processInstanceID int)
 	return g.db.WithContext(ctx).Model(&Ticket{}).
 		Where("process_instance_id = ? AND status = ?", processInstanceID, domain.WITHDRAWING.ToUint8()).
 		Updates(map[string]any{
-			"status": domain.PROCESS.ToUint8(), "utime": time.Now().UnixMilli(),
+			"status": domain.PROCESS.ToUint8(), "revoke_reason": "", "utime": time.Now().UnixMilli(),
 		}).Error
 }
 

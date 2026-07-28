@@ -24,6 +24,7 @@ import (
 	"github.com/Duke1616/eflow/internal/service/event/strategy/chat"
 	"github.com/Duke1616/eflow/internal/service/event/strategy/start"
 	userstrategy "github.com/Duke1616/eflow/internal/service/event/strategy/user"
+	ratingSvc "github.com/Duke1616/eflow/internal/service/rating"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
@@ -94,8 +95,11 @@ var (
 	TicketSet = wire.NewSet(
 		dao.NewTicketDAO,
 		dao.NewTaskFormDAO,
+		dao.NewTicketRatingDAO,
 		repository.NewTicketRepository,
+		repository.NewTicketRatingRepository,
 		ticketSvc.NewService,
+		ratingSvc.NewService,
 		ticket.NewHandler,
 	)
 

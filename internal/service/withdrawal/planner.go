@@ -29,7 +29,9 @@ type CompensationPlan struct {
 
 // CompensationPlanner 根据已成功动作生成补偿计划，并在流程引擎撤回后幂等激活计划。
 type CompensationPlanner interface {
+	// Build 在流程撤回前生成只读补偿计划，不改变自动化任务状态。
 	Build(ctx context.Context, processInstanceID int) (CompensationPlan, error)
+	// Apply 在流程引擎撤回后幂等激活补偿计划并取消其余待执行任务。
 	Apply(ctx context.Context, processInstanceID int, plan CompensationPlan) error
 }
 

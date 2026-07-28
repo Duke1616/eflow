@@ -12,6 +12,7 @@ func InitTables(db *gorm.DB) error {
 		&Workflow{},
 		&Snapshot{},
 		&Ticket{},
+		&TicketRating{},
 		&TaskForm{},
 		&Task{},
 		&TaskAttempt{},

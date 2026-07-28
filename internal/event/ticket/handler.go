@@ -237,7 +237,11 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) erro
 			return err
 		}
 
-		err = h.withdrawalSvc.Revoke(ctx, ticketResp.Process.InstanceId, true, userResp.Username)
+		reason := strings.TrimSpace(evt.GetComment())
+		if reason == "" {
+			reason = "通过飞书卡片撤回"
+		}
+		err = h.withdrawalSvc.Revoke(ctx, ticketResp.Process.InstanceId, true, userResp.Username, reason)
 		if err != nil {
 			if errors.Is(err, withdrawalSvc.ErrAutomationRunning) {
 				remark = "自动化任务正在执行，暂时无法撤回，请稍后重试"

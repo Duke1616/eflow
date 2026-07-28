@@ -95,6 +95,7 @@ type Ticket struct {
 	Process          Process          // 绑定的流程引擎运行实例信息
 	Ctime            int64            // 发起创建时间 (毫秒级时间戳)
 	Wtime            int64            // 完成归档时间
+	RevokeReason     string           // 发起人撤回时填写的原因
 	NotificationConf NotificationConf // 为支持告警自动转单等引入的外部通知媒介配置
 }
 

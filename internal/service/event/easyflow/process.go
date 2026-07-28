@@ -157,6 +157,7 @@ func (e *ProcessEvent) EventNotify(instID int, node *model.Node, prevNode model.
 			elog.Int("instID", instID))
 		if err := e.ticketSvc.UpdateStatusByProcessInstanceID(ctx, instID, domain.END.ToUint8()); err != nil {
 			e.logger.Error("EventNotify 关闭工单失败：", elog.FieldErr(err), elog.Int("instID", instID))
+			return fmt.Errorf("关闭工单失败: %w", err)
 		}
 		return nil
 	}

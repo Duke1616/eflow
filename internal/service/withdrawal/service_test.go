@@ -47,7 +47,7 @@ func TestRevokeCoordinatesStateTransitions(t *testing.T) {
 			revoker := &processRevokerStub{err: testCase.revokeErr}
 			svc := newService(repo, planner, revoker)
 
-			err := svc.Revoke(context.Background(), 101, true, "starter")
+			err := svc.Revoke(context.Background(), 101, true, "starter", "不再需要该申请")
 
 			if testCase.wantErr == "" {
 				require.NoError(t, err)
@@ -59,6 +59,11 @@ func TestRevokeCoordinatesStateTransitions(t *testing.T) {
 			require.Equal(t, testCase.wantApply, planner.applyCalls)
 			require.Equal(t, testCase.wantFinalize, repo.finalizeCalls)
 			require.Equal(t, testCase.wantRollback, repo.rollbackCalls)
+			if testCase.prepareErr == nil {
+				require.Equal(t, "不再需要该申请", repo.reason)
+			} else {
+				require.Empty(t, repo.reason)
+			}
 		})
 	}
 }
@@ -66,8 +71,9 @@ func TestRevokeCoordinatesStateTransitions(t *testing.T) {
 func TestRevokeValidatesIdentity(t *testing.T) {
 	svc := newService(&withdrawalRepositoryStub{}, &compensationPlannerStub{}, &processRevokerStub{})
 
-	require.Error(t, svc.Revoke(context.Background(), 0, false, "starter"))
-	require.Error(t, svc.Revoke(context.Background(), 1, false, ""))
+	require.Error(t, svc.Revoke(context.Background(), 0, false, "starter", "不再需要"))
+	require.Error(t, svc.Revoke(context.Background(), 1, false, "", "不再需要"))
+	require.ErrorIs(t, svc.Revoke(context.Background(), 1, false, "starter", " "), ErrInvalidRevokeReason)
 }
 
 type withdrawalRepositoryStub struct {
@@ -76,9 +82,15 @@ type withdrawalRepositoryStub struct {
 	finalizeErr   error
 	finalizeCalls int
 	rollbackCalls int
+	reason        string
 }
 
-func (s *withdrawalRepositoryStub) Prepare(context.Context, int) error { return s.prepareErr }
+func (s *withdrawalRepositoryStub) Prepare(_ context.Context, _ int, reason string) error {
+	if s.prepareErr == nil {
+		s.reason = reason
+	}
+	return s.prepareErr
+}
 
 func (s *withdrawalRepositoryStub) TryFinalize(context.Context, int) (bool, error) {
 	s.finalizeCalls++

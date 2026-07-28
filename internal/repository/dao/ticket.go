@@ -28,6 +28,7 @@ type Ticket struct {
 	NotificationConf  sqlx.JsonField[NotificationConf]  `gorm:"column:notification_conf;type:json;comment:'工单通知偏好参数配置json'"`
 	Ctime             int64                             `gorm:"column:ctime;type:bigint;comment:'创建发起时间(毫秒)'"`
 	Wtime             int64                             `gorm:"column:wtime;type:bigint;comment:'办结归档时间(毫秒)'"`
+	RevokeReason      string                            `gorm:"column:revoke_reason;type:varchar(500);not null;default:'';comment:'撤单原因'"`
 	Utime             int64                             `gorm:"column:utime;type:bigint;comment:'最近修改时间(毫秒)'"`
 }
 
