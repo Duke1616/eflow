@@ -39,7 +39,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	group.POST("/retry", h.Capability("重试自动化任务", "retry").
 		Handle(ginx.B[RetryReq](h.Retry)))
 	group.POST("/attempt/list", h.Capability("执行尝试列表", "view_attempts").
-		Needs("ticket:task:logs").
+		Needs("ticket:task:logs", "task:execution:logs").
 		Handle(ginx.B[ListAttemptsReq](h.ListAttempts)))
 	group.POST("/attempt/logs", h.Capability("执行尝试日志", "logs").
 		NoSync().
