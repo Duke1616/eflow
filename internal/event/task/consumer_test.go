@@ -32,6 +32,10 @@ func TestHandleExecuteResult(t *testing.T) {
 			Source: workflowExecutionSource, RequestID: "eflow:1:1", ExecStatus: "FAILED",
 			TaskResult: "执行失败"}, wantCalls: 1, wantStatus: domain.AttemptStatusFailed,
 			wantReason: "执行失败"},
+		{name: "终止事件", event: event.ExecuteResultEvent{
+			Source: workflowExecutionSource, RequestID: "eflow:1:1", ExecStatus: "CANCELLED",
+			TaskResult: "管理员强制结束"}, wantCalls: 1, wantStatus: domain.AttemptStatusCancelled,
+			wantReason: "管理员强制结束"},
 	}
 
 	for _, testCase := range testCases {

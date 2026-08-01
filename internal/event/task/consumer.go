@@ -73,6 +73,8 @@ func (c *ExecuteResultConsumer) handle(ctx context.Context, current event.Execut
 	if current.ExecStatus == string(domain.AttemptStatusSuccess) {
 		status = domain.AttemptStatusSuccess
 		reason = ""
+	} else if current.ExecStatus == string(domain.AttemptStatusCancelled) {
+		status = domain.AttemptStatusCancelled
 	}
 	_, err := c.svc.CompleteAttempt(ctx, current.RequestID, status, current.TaskResult, reason)
 	return err

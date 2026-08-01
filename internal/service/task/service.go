@@ -22,7 +22,11 @@ import (
 
 const maxTaskAttempts = 5
 
-var ErrWithdrawalInProgress = errors.New("工单正在撤回，暂不推进自动化节点")
+var (
+	ErrWithdrawalInProgress   = errors.New("工单正在撤回，暂不推进自动化节点")
+	ErrInvalidTerminateReason = errors.New("终止原因不能为空且不能超过 500 个字符")
+	ErrTaskNotTerminable      = errors.New("当前自动化任务不能终止")
+)
 
 // Service 定义流程自动化任务的编排能力。
 type Service interface {
@@ -34,6 +38,8 @@ type Service interface {
 	RetryTask(ctx context.Context, id int64) error
 	// AutoRetryTask 创建一次自动恢复执行尝试。
 	AutoRetryTask(ctx context.Context, id int64) error
+	// TerminateTask 强制终止任务及其当前 etask execution，取消后仍可人工重试。
+	TerminateTask(ctx context.Context, id int64, reason string) error
 	// CompleteAttempt 根据幂等请求标识完成执行尝试。
 	CompleteAttempt(ctx context.Context, requestID string, status domain.AttemptStatus,
 		output, reason string) (domain.TaskAttempt, error)
@@ -212,6 +218,37 @@ func (s *taskService) AutoRetryTask(ctx context.Context, id int64) error {
 	return s.retry(ctx, id, true)
 }
 
+func (s *taskService) TerminateTask(ctx context.Context, id int64, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" || len([]rune(reason)) > 500 {
+		return ErrInvalidTerminateReason
+	}
+	task, err := s.tasks.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	ctx = tenantContext(ctx, task.TenantID)
+	if task.ExecutionKind == domain.TaskExecutionCompensation {
+		return fmt.Errorf("%w: 撤回补偿任务必须成功才能完成撤回", ErrTaskNotTerminable)
+	}
+	if task.Status == domain.TaskStatusSuccess {
+		return fmt.Errorf("%w: 任务已经成功", ErrTaskNotTerminable)
+	}
+	attempt, err := s.attempts.TerminateTask(ctx, id, reason)
+	if err != nil {
+		return err
+	}
+	if attempt.ID <= 0 {
+		return nil
+	}
+	// 本地终止会先把 Attempt 原子落为 CANCELLED，仍需向 etask 补发物理取消信号。
+	if attempt.Status.IsTerminal() && attempt.Status != domain.AttemptStatusCancelled {
+		return nil
+	}
+	// etask 会持久化 request ID 取消意图；execution 尚未创建时无需重新 Dispatch。
+	return s.executions.TerminateExecution(ctx, attempt.ExecutionID, attempt.RequestID, reason)
+}
+
 func (s *taskService) retry(ctx context.Context, id int64, automatic bool) error {
 	task, err := s.tasks.FindByID(ctx, id)
 	if err != nil {
@@ -223,7 +260,15 @@ func (s *taskService) retry(ctx context.Context, id int64, automatic bool) error
 		return s.StartTask(ctx, id)
 	}
 	if !task.Status.CanRetry() {
-		return fmt.Errorf("只有失败或阻塞的自动化任务可以重试")
+		return fmt.Errorf("只有失败、阻塞或已取消的自动化任务可以重试")
+	}
+	if task.Status == domain.TaskStatusCancelled {
+		if automatic {
+			return fmt.Errorf("已取消的自动化任务只支持人工重试")
+		}
+		if err = s.confirmCancelledAttemptTerminated(ctx, task); err != nil {
+			return err
+		}
 	}
 	if automatic {
 		attempts, listErr := s.attempts.ListByTaskID(ctx, id)
@@ -238,6 +283,27 @@ func (s *taskService) retry(ctx context.Context, id int64, automatic bool) error
 		return err
 	}
 	return s.StartTask(ctx, id)
+}
+
+func (s *taskService) confirmCancelledAttemptTerminated(ctx context.Context, task domain.Task) error {
+	if task.CurrentAttemptID <= 0 {
+		return nil
+	}
+	attempt, err := s.attempts.FindByID(ctx, task.CurrentAttemptID)
+	if err != nil {
+		return fmt.Errorf("查询已取消任务的执行尝试失败: %w", err)
+	}
+	if attempt.ExecutionID <= 0 && strings.TrimSpace(attempt.RequestID) == "" {
+		return nil
+	}
+	reason := strings.TrimSpace(attempt.Error)
+	if reason == "" {
+		reason = "重新执行前确认旧执行已终止"
+	}
+	if err = s.executions.TerminateExecution(ctx, attempt.ExecutionID, attempt.RequestID, reason); err != nil {
+		return fmt.Errorf("确认已取消任务的旧执行已终止失败: %w", err)
+	}
+	return nil
 }
 
 func (s *taskService) CompleteAttempt(ctx context.Context, requestID string,
@@ -348,6 +414,9 @@ func (s *taskService) ReconcileTask(ctx context.Context, id int64) error {
 			execution.Result, "")
 	case "FAILED":
 		_, err = s.CompleteAttempt(ctx, attempt.RequestID, domain.AttemptStatusFailed,
+			execution.Result, execution.Result)
+	case "CANCELLED":
+		_, err = s.CompleteAttempt(ctx, attempt.RequestID, domain.AttemptStatusCancelled,
 			execution.Result, execution.Result)
 	}
 	return err

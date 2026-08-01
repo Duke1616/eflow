@@ -113,6 +113,158 @@ func TestRetryTaskResumesSubmittingAttempt(t *testing.T) {
 	require.Equal(t, int64(9001), attempts.boundExecutionID)
 }
 
+func TestRetryCancelledTaskConfirmsPreviousExecutionTermination(t *testing.T) {
+	stopAfterConfirmation := errors.New("stop after confirmation")
+	task := activeTask(domain.TaskStatusCancelled)
+	attempt := currentAttempt(9001)
+	attempt.Status = domain.AttemptStatusCancelled
+	attempt.Error = "管理员强制结束"
+	tasks := &taskRepositoryStub{task: task, prepareRetryErr: stopAfterConfirmation}
+	attempts := &attemptRepositoryStub{attempt: attempt}
+	dispatcher := &dispatcherStub{}
+	svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+
+	err := svc.RetryTask(context.Background(), task.ID)
+
+	require.ErrorIs(t, err, stopAfterConfirmation)
+	require.Equal(t, 1, dispatcher.terminateCalls)
+	require.Equal(t, int64(9001), dispatcher.terminatedExecutionID)
+	require.Equal(t, "eflow:1:1", dispatcher.terminatedRequestID)
+	require.Equal(t, "管理员强制结束", dispatcher.terminatedReason)
+	require.Equal(t, 1, tasks.prepareRetryCalls)
+}
+
+func TestRetryCancelledTaskStopsWhenTerminationCannotBeConfirmed(t *testing.T) {
+	task := activeTask(domain.TaskStatusCancelled)
+	attempt := currentAttempt(9001)
+	attempt.Status = domain.AttemptStatusCancelled
+	tasks := &taskRepositoryStub{task: task}
+	attempts := &attemptRepositoryStub{attempt: attempt}
+	dispatcher := &dispatcherStub{terminateErr: errors.New("scheduler unavailable")}
+	svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+
+	err := svc.RetryTask(context.Background(), task.ID)
+
+	require.ErrorContains(t, err, "确认已取消任务的旧执行已终止失败")
+	require.Zero(t, tasks.prepareRetryCalls)
+}
+
+func TestAutoRetryDoesNotRestartCancelledTask(t *testing.T) {
+	task := activeTask(domain.TaskStatusCancelled)
+	tasks := &taskRepositoryStub{task: task}
+	dispatcher := &dispatcherStub{}
+	svc := &taskService{tasks: tasks, attempts: &attemptRepositoryStub{}, executions: dispatcher}
+
+	err := svc.AutoRetryTask(context.Background(), task.ID)
+
+	require.ErrorContains(t, err, "只支持人工重试")
+	require.Zero(t, dispatcher.terminateCalls)
+	require.Zero(t, tasks.prepareRetryCalls)
+}
+
+func TestTerminateTaskStopsRemoteExecution(t *testing.T) {
+	testCases := []struct {
+		name               string
+		task               domain.Task
+		attempt            domain.TaskAttempt
+		wantErr            string
+		wantLocalTerminate bool
+		wantRemote         bool
+	}{
+		{
+			name: "运行中任务同步终止 etask", task: activeTask(domain.TaskStatusRunning),
+			attempt: currentAttempt(9001), wantLocalTerminate: true, wantRemote: true,
+		},
+		{
+			name: "提交中任务按 request ID 登记取消意图", task: activeTask(domain.TaskStatusSubmitting),
+			attempt: currentAttempt(0), wantLocalTerminate: true, wantRemote: true,
+		},
+		{
+			name: "失败任务转为已取消", task: activeTask(domain.TaskStatusFailed),
+			attempt:            domain.TaskAttempt{ID: 11, TaskID: 1, Status: domain.AttemptStatusFailed},
+			wantLocalTerminate: true,
+		},
+		{
+			name: "已取消任务幂等补发远端终止", task: activeTask(domain.TaskStatusCancelled),
+			attempt: func() domain.TaskAttempt {
+				attempt := currentAttempt(9001)
+				attempt.Status = domain.AttemptStatusCancelled
+				return attempt
+			}(), wantLocalTerminate: true, wantRemote: true,
+		},
+		{
+			name: "成功任务不能终止", task: activeTask(domain.TaskStatusSuccess),
+			wantErr: "任务已经成功",
+		},
+		{
+			name: "补偿任务不能终止", task: func() domain.Task {
+				task := activeTask(domain.TaskStatusRunning)
+				task.ExecutionKind = domain.TaskExecutionCompensation
+				return task
+			}(),
+			wantErr: "补偿任务必须成功",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			tasks := &taskRepositoryStub{task: testCase.task}
+			attempts := &attemptRepositoryStub{attempt: testCase.attempt}
+			dispatcher := &dispatcherStub{executionID: 9001}
+			svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+
+			err := svc.TerminateTask(context.Background(), 1, "管理员强制结束")
+			if testCase.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, testCase.wantErr)
+			}
+			require.Equal(t, testCase.wantLocalTerminate, attempts.terminateCalls == 1)
+			require.Equal(t, testCase.wantRemote, dispatcher.terminateCalls == 1)
+			if testCase.wantRemote {
+				require.Equal(t, testCase.attempt.ExecutionID, dispatcher.terminatedExecutionID)
+				require.Equal(t, "eflow:1:1", dispatcher.terminatedRequestID)
+				require.Equal(t, int64(2), dispatcher.tenantID)
+			}
+		})
+	}
+}
+
+func TestSubmitAttemptOnlyBindsExecutionAfterDurableCancellationIntent(t *testing.T) {
+	tasks := &taskRepositoryStub{}
+	attempts := &attemptRepositoryStub{}
+	dispatcher := &dispatcherStub{executionID: 9001}
+	svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+
+	err := svc.submitAttempt(tenantContext(context.Background(), 2), currentAttempt(0))
+
+	require.NoError(t, err)
+	require.Equal(t, int64(9001), attempts.boundExecutionID)
+	require.Zero(t, dispatcher.terminateCalls)
+}
+
+func TestTerminateTaskUsesAttemptReturnedByTerminationTransaction(t *testing.T) {
+	before := activeTask(domain.TaskStatusRunning)
+	before.CurrentAttemptID = 0
+	tasks := &taskRepositoryStub{findByID: []domain.Task{before}}
+	attempts := &attemptRepositoryStub{attempt: func() domain.TaskAttempt {
+		attempt := currentAttempt(0)
+		attempt.Status = domain.AttemptStatusCancelled
+		return attempt
+	}()}
+	dispatcher := &dispatcherStub{}
+	svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+
+	err := svc.TerminateTask(context.Background(), 1, "管理员强制结束")
+
+	require.NoError(t, err)
+	require.Equal(t, 1, attempts.terminateCalls)
+	require.Equal(t, 1, dispatcher.terminateCalls)
+	require.Equal(t, int64(0), dispatcher.terminatedExecutionID)
+	require.Equal(t, "eflow:1:1", dispatcher.terminatedRequestID)
+	require.Equal(t, 1, tasks.findByIDCalls)
+}
+
 func TestCompleteAttemptValidatesTerminalIdentity(t *testing.T) {
 	testCases := []struct {
 		name      string
@@ -203,9 +355,18 @@ func currentAttempt(executionID int64) domain.TaskAttempt {
 
 type taskRepositoryStub struct {
 	repository.TaskRepository
-	task             domain.Task
-	findOrCreateTask domain.Task
-	created          bool
+	task              domain.Task
+	findByID          []domain.Task
+	findByIDCalls     int
+	findOrCreateTask  domain.Task
+	created           bool
+	prepareRetryCalls int
+	prepareRetryErr   error
+}
+
+func (s *taskRepositoryStub) PrepareRetry(context.Context, int64) error {
+	s.prepareRetryCalls++
+	return s.prepareRetryErr
 }
 
 func (s *taskRepositoryStub) FindOrCreate(context.Context, domain.Task) (domain.Task, bool, error) {
@@ -213,6 +374,11 @@ func (s *taskRepositoryStub) FindOrCreate(context.Context, domain.Task) (domain.
 }
 
 func (s *taskRepositoryStub) FindByID(context.Context, int64) (domain.Task, error) {
+	if s.findByIDCalls < len(s.findByID) {
+		task := s.findByID[s.findByIDCalls]
+		s.findByIDCalls++
+		return task, nil
+	}
 	return s.task, nil
 }
 
@@ -232,6 +398,7 @@ type attemptRepositoryStub struct {
 	completeCalls     int
 	completedStatus   domain.AttemptStatus
 	completedAttempt  domain.TaskAttempt
+	terminateCalls    int
 }
 
 func (s *attemptRepositoryStub) FindByID(context.Context, int64) (domain.TaskAttempt, error) {
@@ -251,6 +418,12 @@ func (s *attemptRepositoryStub) RecordSubmissionError(_ context.Context, attempt
 func (s *attemptRepositoryStub) RejectSubmission(_ context.Context, attemptID int64, _ string) error {
 	s.rejectedAttemptID = attemptID
 	return nil
+}
+
+func (s *attemptRepositoryStub) TerminateTask(context.Context, int64,
+	string) (domain.TaskAttempt, error) {
+	s.terminateCalls++
+	return s.attempt, nil
 }
 
 func (s *attemptRepositoryStub) Complete(_ context.Context, _ string, status domain.AttemptStatus,
@@ -293,11 +466,26 @@ func (s *ticketServiceStub) GetByID(context.Context, int64) (domain.Ticket, erro
 
 type dispatcherStub struct {
 	etaskclient.TaskDispatcher
-	executionID int64
-	err         error
-	calls       int
-	received    domain.TaskAttempt
-	tenantID    int64
+	executionID           int64
+	err                   error
+	calls                 int
+	received              domain.TaskAttempt
+	tenantID              int64
+	terminateCalls        int
+	terminatedExecutionID int64
+	terminatedRequestID   string
+	terminatedReason      string
+	terminateErr          error
+}
+
+func (s *dispatcherStub) TerminateExecution(ctx context.Context, executionID int64,
+	requestID, reason string) error {
+	s.terminateCalls++
+	s.terminatedExecutionID = executionID
+	s.terminatedRequestID = requestID
+	s.terminatedReason = reason
+	s.tenantID = ctxutil.GetTenantID(ctx).Int64()
+	return s.terminateErr
 }
 
 func (s *dispatcherStub) Dispatch(ctx context.Context, attempt domain.TaskAttempt) (int64, error) {

@@ -47,6 +47,8 @@ type TaskAttemptDAO interface {
 	RecordSubmissionError(ctx context.Context, attemptID int64, reason string) error
 	// RejectSubmission 记录 etask 明确拒绝的提交并阻塞当前任务。
 	RejectSubmission(ctx context.Context, attemptID int64, reason string) error
+	// TerminateTask 原子终止任务及其当前执行尝试，并返回事务锁定的当前尝试。
+	TerminateTask(ctx context.Context, taskID int64, reason string) (TaskAttempt, error)
 	// Complete 根据请求标识幂等完成执行尝试。
 	Complete(ctx context.Context, requestID, status, output, reason string) (TaskAttempt, error)
 	// FindByID 根据主键查询执行尝试。
@@ -116,9 +118,8 @@ func (g *gormTaskAttemptDAO) Begin(ctx context.Context, taskID, runnerID int64,
 func (g *gormTaskAttemptDAO) BindExecution(ctx context.Context, attemptID, executionID int64) error {
 	now := time.Now().UnixMilli()
 	return g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var attempt TaskAttempt
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ?", attemptID).First(&attempt).Error; err != nil {
+		_, attempt, err := lockTaskAndAttemptByID(tx, attemptID)
+		if err != nil {
 			return err
 		}
 		if attempt.ExecutionID.Valid && attempt.ExecutionID.Int64 != executionID {
@@ -139,7 +140,8 @@ func (g *gormTaskAttemptDAO) BindExecution(ctx context.Context, attemptID, execu
 			return nil
 		}
 		return tx.Model(&Task{}).
-			Where("id = ? AND current_attempt_id = ?", attempt.TaskID, attempt.ID).Updates(map[string]any{
+			Where("id = ? AND current_attempt_id = ? AND status = ?", attempt.TaskID, attempt.ID,
+				domain.TaskStatusSubmitting.ToUint8()).Updates(map[string]any{
 			"status": domain.TaskStatusRunning.ToUint8(), "phase": domain.TaskPhaseRunning,
 			"last_error": "", "utime": now,
 		}).Error
@@ -150,9 +152,8 @@ func (g *gormTaskAttemptDAO) RecordSubmissionError(ctx context.Context, attemptI
 	reason string) error {
 	now := time.Now().UnixMilli()
 	return g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var attempt TaskAttempt
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ?", attemptID).First(&attempt).Error; err != nil {
+		_, attempt, err := lockTaskAndAttemptByID(tx, attemptID)
+		if err != nil {
 			return err
 		}
 		if domain.AttemptStatus(attempt.Status).IsTerminal() {
@@ -164,7 +165,8 @@ func (g *gormTaskAttemptDAO) RecordSubmissionError(ctx context.Context, attemptI
 			return err
 		}
 		return tx.Model(&Task{}).
-			Where("id = ? AND current_attempt_id = ?", attempt.TaskID, attempt.ID).Updates(map[string]any{
+			Where("id = ? AND current_attempt_id = ? AND status = ?", attempt.TaskID, attempt.ID,
+				domain.TaskStatusSubmitting.ToUint8()).Updates(map[string]any{
 			"last_error": reason, "utime": now,
 		}).Error
 	})
@@ -173,9 +175,8 @@ func (g *gormTaskAttemptDAO) RecordSubmissionError(ctx context.Context, attemptI
 func (g *gormTaskAttemptDAO) RejectSubmission(ctx context.Context, attemptID int64, reason string) error {
 	now := time.Now().UnixMilli()
 	return g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var attempt TaskAttempt
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ?", attemptID).First(&attempt).Error; err != nil {
+		_, attempt, err := lockTaskAndAttemptByID(tx, attemptID)
+		if err != nil {
 			return err
 		}
 		if domain.AttemptStatus(attempt.Status).IsTerminal() {
@@ -188,21 +189,76 @@ func (g *gormTaskAttemptDAO) RejectSubmission(ctx context.Context, attemptID int
 			return err
 		}
 		return tx.Model(&Task{}).
-			Where("id = ? AND current_attempt_id = ?", attempt.TaskID, attempt.ID).Updates(map[string]any{
+			Where("id = ? AND current_attempt_id = ? AND status = ?", attempt.TaskID, attempt.ID,
+				domain.TaskStatusSubmitting.ToUint8()).Updates(map[string]any{
 			"status": domain.TaskStatusBlocked.ToUint8(), "phase": domain.TaskPhaseBlocked,
 			"last_error": reason, "utime": now,
 		}).Error
 	})
 }
 
+func (g *gormTaskAttemptDAO) TerminateTask(ctx context.Context,
+	taskID int64, reason string) (TaskAttempt, error) {
+	var attempt TaskAttempt
+	now := time.Now().UnixMilli()
+	err := g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var task Task
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", taskID).First(&task).Error; err != nil {
+			return err
+		}
+		if task.Status != domain.TaskStatusCancelled.ToUint8() &&
+			!domain.TaskStatus(task.Status).CanTerminate() {
+			return fmt.Errorf("自动化任务 %d 状态已变化，无法终止", taskID)
+		}
+		if task.Status != domain.TaskStatusCancelled.ToUint8() {
+			result := tx.Model(&Task{}).
+				Where("id = ? AND status = ?", taskID, task.Status).
+				Updates(map[string]any{
+					"status": domain.TaskStatusCancelled.ToUint8(), "phase": domain.TaskPhaseCancelled,
+					"cancelled_at": now, "last_error": reason, "utime": now,
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return fmt.Errorf("自动化任务 %d 状态已变化，无法终止", taskID)
+			}
+		}
+		if task.CurrentAttemptID <= 0 {
+			return nil
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", task.CurrentAttemptID).First(&attempt).Error; err != nil {
+			return err
+		}
+		if domain.AttemptStatus(attempt.Status).IsTerminal() {
+			return nil
+		}
+		if err := tx.Model(&TaskAttempt{}).Where("id = ?", attempt.ID).Updates(map[string]any{
+			"status": domain.AttemptStatusCancelled, "error_message": reason,
+			"completed_at": now, "utime": now,
+		}).Error; err != nil {
+			return err
+		}
+		attempt.Status = string(domain.AttemptStatusCancelled)
+		attempt.Error = reason
+		attempt.CompletedAt = now
+		attempt.UTime = now
+		return nil
+	})
+	return attempt, err
+}
+
 func (g *gormTaskAttemptDAO) Complete(ctx context.Context, requestID, status, output,
 	reason string) (TaskAttempt, error) {
 	var attempt TaskAttempt
 	err := g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("request_id = ?", requestID).First(&attempt).Error; err != nil {
+		_, locked, err := lockTaskAndAttemptByRequestID(tx, requestID)
+		if err != nil {
 			return err
 		}
+		attempt = locked
 		if domain.AttemptStatus(attempt.Status).IsTerminal() {
 			return nil
 		}
@@ -214,6 +270,10 @@ func (g *gormTaskAttemptDAO) Complete(ctx context.Context, requestID, status, ou
 			attemptStatus = domain.AttemptStatusSuccess
 			taskStatus = domain.TaskStatusSuccess
 			phase = domain.TaskPhaseSucceeded
+		} else if status == string(domain.AttemptStatusCancelled) {
+			attemptStatus = domain.AttemptStatusCancelled
+			taskStatus = domain.TaskStatusCancelled
+			phase = domain.TaskPhaseCancelled
 		}
 		if err := tx.Model(&TaskAttempt{}).Where("id = ?", attempt.ID).Updates(map[string]any{
 			"status": attemptStatus, "output": output, "error_message": reason,
@@ -222,7 +282,9 @@ func (g *gormTaskAttemptDAO) Complete(ctx context.Context, requestID, status, ou
 			return err
 		}
 		if err := tx.Model(&Task{}).
-			Where("id = ? AND current_attempt_id = ?", attempt.TaskID, attempt.ID).Updates(map[string]any{
+			Where("id = ? AND current_attempt_id = ? AND status IN ?", attempt.TaskID, attempt.ID, []int{
+				int(domain.TaskStatusSubmitting), int(domain.TaskStatusRunning),
+			}).Updates(map[string]any{
 			"status": taskStatus.ToUint8(), "phase": phase, "last_error": reason, "utime": now,
 		}).Error; err != nil {
 			return err
@@ -234,6 +296,36 @@ func (g *gormTaskAttemptDAO) Complete(ctx context.Context, requestID, status, ou
 		return nil
 	})
 	return attempt, err
+}
+
+func lockTaskAndAttemptByID(tx *gorm.DB, attemptID int64) (Task, TaskAttempt, error) {
+	var ref TaskAttempt
+	if err := tx.Select("id", "task_id").Where("id = ?", attemptID).First(&ref).Error; err != nil {
+		return Task{}, TaskAttempt{}, err
+	}
+	return lockTaskAndAttempt(tx, ref.TaskID, ref.ID)
+}
+
+func lockTaskAndAttemptByRequestID(tx *gorm.DB, requestID string) (Task, TaskAttempt, error) {
+	var ref TaskAttempt
+	if err := tx.Select("id", "task_id").Where("request_id = ?", requestID).First(&ref).Error; err != nil {
+		return Task{}, TaskAttempt{}, err
+	}
+	return lockTaskAndAttempt(tx, ref.TaskID, ref.ID)
+}
+
+func lockTaskAndAttempt(tx *gorm.DB, taskID, attemptID int64) (Task, TaskAttempt, error) {
+	var task Task
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", taskID).First(&task).Error; err != nil {
+		return Task{}, TaskAttempt{}, err
+	}
+	var attempt TaskAttempt
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", attemptID).First(&attempt).Error; err != nil {
+		return Task{}, TaskAttempt{}, err
+	}
+	return task, attempt, nil
 }
 
 func (g *gormTaskAttemptDAO) FindByID(ctx context.Context, id int64) (TaskAttempt, error) {

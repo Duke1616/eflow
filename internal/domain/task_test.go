@@ -27,6 +27,11 @@ func TestTaskExecutionKindAllowsStart(t *testing.T) {
 	}
 }
 
-func TestCancelledTaskCannotRetry(t *testing.T) {
-	require.False(t, TaskStatusCancelled.CanRetry())
+func TestCancelledTaskCanRetry(t *testing.T) {
+	require.True(t, TaskStatusCancelled.CanRetry())
+	require.True(t, TaskStatusRunning.CanTerminate())
+	require.True(t, TaskStatusFailed.CanTerminate())
+	require.False(t, TaskStatusSuccess.CanTerminate())
+	require.False(t, TaskStatusCancelled.CanTerminate())
+	require.True(t, AttemptStatusCancelled.IsTerminal())
 }

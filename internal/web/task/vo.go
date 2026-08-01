@@ -18,6 +18,11 @@ type RetryReq struct {
 	ID int64 `json:"id"`
 }
 
+type TerminateReq struct {
+	ID     int64  `json:"id"`
+	Reason string `json:"reason"`
+}
+
 type ListAttemptsReq struct {
 	TaskID int64 `json:"task_id"`
 }

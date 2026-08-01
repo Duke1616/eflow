@@ -58,3 +58,9 @@ func (s *schedulerClientStub) RunRunner(context.Context, *schedulerv1.RunRunnerR
 	...grpc.CallOption) (*schedulerv1.RunRunnerResponse, error) {
 	return s.response, s.err
 }
+
+func (s *schedulerClientStub) TerminateExecution(context.Context,
+	*schedulerv1.TerminateExecutionRequest,
+	...grpc.CallOption) (*schedulerv1.TerminateExecutionResponse, error) {
+	return &schedulerv1.TerminateExecutionResponse{Terminated: true}, s.err
+}

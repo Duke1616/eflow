@@ -26,7 +26,7 @@ type Task struct {
 	CompensationNodeID  string `gorm:"column:compensation_node_id;type:varchar(128);not null;default:'';comment:'成功动作对应的补偿节点 ID'"`
 	CurrentAttemptID    int64  `gorm:"column:current_attempt_id;type:bigint;not null;default:0;index;comment:'当前执行尝试 ID'"`
 	AdvancedAt          int64  `gorm:"column:advanced_at;type:bigint;not null;default:0;index;comment:'流程推进完成时间'"`
-	CancelledAt         int64  `gorm:"column:cancelled_at;type:bigint;not null;default:0;comment:'流程撤回取消时间'"`
+	CancelledAt         int64  `gorm:"column:cancelled_at;type:bigint;not null;default:0;comment:'任务取消或强制终止时间'"`
 	LastError           string `gorm:"column:last_error;type:text;comment:'最近编排错误'"`
 	CTime               int64  `gorm:"column:ctime;type:bigint;comment:'创建时间'"`
 	UTime               int64  `gorm:"column:utime;type:bigint;comment:'更新时间'"`
@@ -106,11 +106,12 @@ func (g *gormTaskDAO) Block(ctx context.Context, id int64, reason string) error 
 
 func (g *gormTaskDAO) PrepareRetry(ctx context.Context, id int64) error {
 	result := g.db.WithContext(ctx).Model(&Task{}).
-		Where("id = ? AND status IN (?, ?)", id,
-			domain.TaskStatusFailed.ToUint8(), domain.TaskStatusBlocked.ToUint8()).
+		Where("id = ? AND status IN (?, ?, ?)", id,
+			domain.TaskStatusFailed.ToUint8(), domain.TaskStatusBlocked.ToUint8(),
+			domain.TaskStatusCancelled.ToUint8()).
 		Updates(map[string]any{
 			"status": domain.TaskStatusWaiting.ToUint8(), "phase": domain.TaskPhaseRetrying,
-			"last_error": "", "utime": time.Now().UnixMilli(),
+			"cancelled_at": 0, "last_error": "", "utime": time.Now().UnixMilli(),
 		})
 	if result.Error != nil {
 		return result.Error

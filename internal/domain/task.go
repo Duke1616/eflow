@@ -18,7 +18,18 @@ func (s TaskStatus) ToUint8() uint8 { return uint8(s) }
 
 // CanRetry 判断编排任务是否允许创建新的执行尝试。
 func (s TaskStatus) CanRetry() bool {
-	return s == TaskStatusFailed || s == TaskStatusBlocked
+	return s == TaskStatusFailed || s == TaskStatusBlocked || s == TaskStatusCancelled
+}
+
+// CanTerminate 判断编排任务是否允许进入强制终止状态。
+func (s TaskStatus) CanTerminate() bool {
+	switch s {
+	case TaskStatusWaiting, TaskStatusBlocked, TaskStatusFailed,
+		TaskStatusSubmitting, TaskStatusRunning:
+		return true
+	default:
+		return false
+	}
 }
 
 // TaskPhase 描述最近一次编排动作，展示文案由表现层转换。
@@ -51,7 +62,7 @@ func (k TaskExecutionKind) AllowsStart(ticketStatus Status) bool {
 
 // IsTerminal 判断执行尝试是否已经结束。
 func (s AttemptStatus) IsTerminal() bool {
-	return s == AttemptStatusSuccess || s == AttemptStatusFailed
+	return s == AttemptStatusSuccess || s == AttemptStatusFailed || s == AttemptStatusCancelled
 }
 
 // TaskArgs 是一次执行尝试保存的业务输入快照。
@@ -89,6 +100,7 @@ const (
 	AttemptStatusRunning    AttemptStatus = "RUNNING"
 	AttemptStatusSuccess    AttemptStatus = "SUCCESS"
 	AttemptStatusFailed     AttemptStatus = "FAILED"
+	AttemptStatusCancelled  AttemptStatus = "CANCELLED"
 )
 
 // TaskAttempt 保存一次外部执行引用和 eflow 所需的业务快照。

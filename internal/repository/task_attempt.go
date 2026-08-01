@@ -21,6 +21,8 @@ type TaskAttemptRepository interface {
 	RecordSubmissionError(ctx context.Context, attemptID int64, reason string) error
 	// RejectSubmission 记录 etask 明确拒绝的提交，并阻塞当前任务。
 	RejectSubmission(ctx context.Context, attemptID int64, reason string) error
+	// TerminateTask 原子终止任务及其当前执行尝试，并返回事务锁定的当前尝试。
+	TerminateTask(ctx context.Context, taskID int64, reason string) (domain.TaskAttempt, error)
 	// Complete 根据请求标识完成执行尝试。
 	Complete(ctx context.Context, requestID string, status domain.AttemptStatus,
 		output, reason string) (domain.TaskAttempt, error)
@@ -57,6 +59,12 @@ func (r *taskAttemptRepository) RecordSubmissionError(ctx context.Context, attem
 
 func (r *taskAttemptRepository) RejectSubmission(ctx context.Context, attemptID int64, reason string) error {
 	return r.dao.RejectSubmission(ctx, attemptID, reason)
+}
+
+func (r *taskAttemptRepository) TerminateTask(ctx context.Context,
+	taskID int64, reason string) (domain.TaskAttempt, error) {
+	attempt, err := r.dao.TerminateTask(ctx, taskID, reason)
+	return toAttemptDomain(attempt), err
 }
 
 func (r *taskAttemptRepository) Complete(ctx context.Context, requestID string,

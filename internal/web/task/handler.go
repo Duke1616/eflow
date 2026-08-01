@@ -2,6 +2,7 @@ package task
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
@@ -38,6 +39,8 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Handle(ginx.B[ListTaskByInstanceIDReq](h.ListTaskByInstanceID)))
 	group.POST("/retry", h.Capability("重试自动化任务", "retry").
 		Handle(ginx.B[RetryReq](h.Retry)))
+	group.POST("/terminate", h.Capability("强制终止自动化任务", "terminate").
+		Handle(ginx.B[TerminateReq](h.Terminate)))
 	group.POST("/attempt/list", h.Capability("执行尝试列表", "view_attempts").
 		Needs("ticket:task:logs", "task:execution:logs").
 		Handle(ginx.B[ListAttemptsReq](h.ListAttempts)))
@@ -76,6 +79,17 @@ func (h *Handler) Retry(ctx *ginx.Context, req RetryReq) (ginx.Result, error) {
 		return invalidParameterResult(fmt.Errorf("自动化任务 ID 非法")), nil
 	}
 	if err := h.svc.RetryTask(ctx, req.ID); err != nil {
+		return systemErrorResult, err
+	}
+	return ginx.Result{Msg: "success"}, nil
+}
+
+func (h *Handler) Terminate(ctx *ginx.Context, req TerminateReq) (ginx.Result, error) {
+	req.Reason = strings.TrimSpace(req.Reason)
+	if req.ID <= 0 || req.Reason == "" || len([]rune(req.Reason)) > 500 {
+		return invalidParameterResult(fmt.Errorf("自动化任务 ID 非法或终止原因为空/超过 500 字")), nil
+	}
+	if err := h.svc.TerminateTask(ctx, req.ID, req.Reason); err != nil {
 		return systemErrorResult, err
 	}
 	return ginx.Result{Msg: "success"}, nil
