@@ -178,11 +178,11 @@ func (s *taskService) StartTask(ctx context.Context, id int64) error {
 		return nil
 	}
 
-	runnerID, input, err := s.prepareAttempt(ctx, task)
+	runnerID, programKind, input, err := s.prepareAttempt(ctx, task)
 	if err != nil {
 		return s.blockTask(ctx, task.ID, err)
 	}
-	attempt, err := s.attempts.Begin(ctx, task.ID, runnerID, input)
+	attempt, err := s.attempts.Begin(ctx, task.ID, runnerID, programKind, input)
 	if err != nil {
 		if errors.Is(err, repository.ErrTaskNotRunnable) {
 			return nil

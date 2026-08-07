@@ -23,6 +23,7 @@ type TaskAttempt struct {
 	AttemptNo   int                             `gorm:"column:attempt_no;type:int;not null;uniqueIndex:uk_task_attempt,priority:2;comment:'任务内尝试序号'"`
 	RequestID   string                          `gorm:"column:request_id;type:varchar(128);not null;uniqueIndex:uk_attempt_request,priority:2;comment:'etask 幂等请求标识'"`
 	RunnerID    int64                           `gorm:"column:runner_id;type:bigint;not null;index;comment:'本次选择的 Runner ID'"`
+	ProgramKind string                          `gorm:"column:program_kind;type:varchar(16);not null;default:INLINE;comment:'本次执行的程序模式'"`
 	ExecutionID sql.NullInt64                   `gorm:"column:execution_id;type:bigint;uniqueIndex;comment:'etask 执行 ID'"`
 	Status      string                          `gorm:"column:status;type:varchar(24);not null;index;comment:'执行尝试状态'"`
 	Input       sqlx.JsonField[domain.TaskArgs] `gorm:"column:input;type:json;comment:'业务输入快照'"`
@@ -40,7 +41,8 @@ func (TaskAttempt) TableName() string { return "automation_task_attempts" }
 // TaskAttemptDAO 定义执行尝试的持久化和状态迁移能力。
 type TaskAttemptDAO interface {
 	// Begin 在任务行锁内创建下一次尝试，或返回尚未完成提交的当前尝试。
-	Begin(ctx context.Context, taskID, runnerID int64, input domain.TaskArgs) (TaskAttempt, error)
+	Begin(ctx context.Context, taskID, runnerID int64, programKind domain.ProgramKind,
+		input domain.TaskArgs) (TaskAttempt, error)
 	// BindExecution 绑定 etask 执行 ID，并将任务和尝试置为运行中。
 	BindExecution(ctx context.Context, attemptID, executionID int64) error
 	// RecordSubmissionError 记录结果不确定的提交错误，等待使用相同请求标识重试。
@@ -63,7 +65,7 @@ type gormTaskAttemptDAO struct{ db *gorm.DB }
 func NewTaskAttemptDAO(db *gorm.DB) TaskAttemptDAO { return &gormTaskAttemptDAO{db: db} }
 
 func (g *gormTaskAttemptDAO) Begin(ctx context.Context, taskID, runnerID int64,
-	input domain.TaskArgs) (TaskAttempt, error) {
+	programKind domain.ProgramKind, input domain.TaskArgs) (TaskAttempt, error) {
 	var attempt TaskAttempt
 	err := g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var snapshot Task
@@ -101,8 +103,9 @@ func (g *gormTaskAttemptDAO) Begin(ctx context.Context, taskID, runnerID int64,
 		attempt = TaskAttempt{
 			TaskID: taskID, AttemptNo: attemptNo,
 			RequestID: fmt.Sprintf("eflow:%d:%d", taskID, attemptNo),
-			RunnerID:  runnerID, Status: string(domain.AttemptStatusSubmitting),
-			Input: sqlx.JsonField[domain.TaskArgs]{Val: input, Valid: true}, CTime: now, UTime: now,
+			RunnerID:  runnerID, ProgramKind: string(programKind),
+			Status: string(domain.AttemptStatusSubmitting),
+			Input:  sqlx.JsonField[domain.TaskArgs]{Val: input, Valid: true}, CTime: now, UTime: now,
 		}
 		if err := tx.Create(&attempt).Error; err != nil {
 			return err

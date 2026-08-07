@@ -45,22 +45,27 @@ func (s *taskService) prepareTaskDefinition(ctx context.Context, task domain.Tas
 }
 
 func (s *taskService) prepareAttempt(ctx context.Context,
-	task domain.Task) (int64, domain.TaskArgs, error) {
+	task domain.Task) (int64, domain.ProgramKind, domain.TaskArgs, error) {
 	ticket, err := s.tickets.GetByID(ctx, task.TicketID)
 	if err != nil {
-		return 0, nil, s.taskError(task.ID, taskPreparationOperation, err)
+		return 0, "", nil, s.taskError(task.ID, taskPreparationOperation, err)
 	}
 	prepared, err := s.resolvePreparation(ctx, task, ticket)
 	if err != nil {
-		return 0, nil, err
+		return 0, "", nil, err
+	}
+	programKind := prepared.automation.ProgramKind.Effective()
+	if !programKind.Valid() {
+		return 0, "", nil, s.taskError(task.ID, taskPreparationOperation,
+			fmt.Errorf("程序模式非法: %s", programKind))
 	}
 	runner, err := s.resolveRunner(ctx, ticket.TemplateId, prepared.automation, prepared.input)
 	if err != nil {
-		return 0, nil, s.taskError(task.ID, taskPreparationOperation, err)
+		return 0, "", nil, s.taskError(task.ID, taskPreparationOperation, err)
 	}
 	prepared.input["ticket_id"] = task.TicketID
 	prepared.input["process_inst_id"] = task.ProcessInstanceID
-	return runner.ID, prepared.input, nil
+	return runner.ID, programKind, prepared.input, nil
 }
 
 func (s *taskService) resolvePreparation(ctx context.Context, task domain.Task,

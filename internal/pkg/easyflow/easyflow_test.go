@@ -115,6 +115,34 @@ func TestAutomationNodeHandlerRejectsInvalidProperty(t *testing.T) {
 	require.ErrorContains(t, err, "解析自动化节点 automation-1 属性失败")
 }
 
+func TestAutomationNodeHandlerValidatesProgramKind(t *testing.T) {
+	testCases := []struct {
+		name    string
+		kind    any
+		wantErr string
+	}{
+		{name: "存量节点默认 INLINE"},
+		{name: "PROJECT", kind: "PROJECT"},
+		{name: "拒绝未知模式", kind: "UNKNOWN", wantErr: "程序模式非法"},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			properties := map[string]any{"name": "部署", "codebook_id": 1}
+			if testCase.kind != nil {
+				properties["program_kind"] = testCase.kind
+			}
+			_, err := (&AutomationNodeHandler{}).Handle(&Context{}, Node{
+				ID: "automation-1", Type: NodeTypeAuto, Properties: properties,
+			})
+			if testCase.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, testCase.wantErr)
+			}
+		})
+	}
+}
+
 func TestAutomationNodeHandlerValidatesCompensationNode(t *testing.T) {
 	recovery := Node{
 		ID: "recovery", Type: NodeTypeAuto,

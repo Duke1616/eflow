@@ -454,13 +454,14 @@ type ConditionProperty struct {
 }
 
 type AutomationProperty struct {
-	Name               string          `json:"name"`
-	CodebookId         int64           `json:"codebook_id"`                    // 代码库ID
-	Tag                string          `json:"tag"`                            // runner tags
-	NotifyMethod       []int64         `json:"notify_method"`                  // 消息通知模式
-	IsNotify           bool            `json:"is_notify"`                      // 是否开始消息通知
-	Schedule           *ScheduleConfig `json:"schedule,omitempty"`             // 单次执行计划；为空时读取下方历史字段
-	CompensationNodeID string          `json:"compensation_node_id,omitempty"` // 当前动作成功后的撤回补偿节点
+	Name               string             `json:"name"`
+	CodebookId         int64              `json:"codebook_id"`                    // 代码库ID
+	ProgramKind        domain.ProgramKind `json:"program_kind,omitempty"`         // 程序来源；空值兼容为 INLINE
+	Tag                string             `json:"tag"`                            // runner tags
+	NotifyMethod       []int64            `json:"notify_method"`                  // 消息通知模式
+	IsNotify           bool               `json:"is_notify"`                      // 是否开始消息通知
+	Schedule           *ScheduleConfig    `json:"schedule,omitempty"`             // 单次执行计划；为空时读取下方历史字段
+	CompensationNodeID string             `json:"compensation_node_id,omitempty"` // 当前动作成功后的撤回补偿节点
 	// Deprecated: 以下定时字段仅用于兼容历史流程配置。
 	Unit          uint8  `json:"unit"`           // 定时执行：单位
 	Quantity      int64  `json:"quantity"`       // 定时执行：数量

@@ -54,10 +54,15 @@ func (d *taskDispatcher) Dispatch(ctx context.Context, attempt domain.TaskAttemp
 	if err != nil {
 		return 0, fmt.Errorf("序列化自动化任务输入失败: %w", err)
 	}
+	programKind, err := toProtoProgramKind(attempt.ProgramKind)
+	if err != nil {
+		return 0, err
+	}
 	response, err := d.client.RunRunner(ctx, &schedulerv1.RunRunnerRequest{
-		RequestId: attempt.RequestID,
-		RunnerId:  attempt.RunnerID,
-		Params:    map[string]string{"args": string(args)},
+		RequestId:   attempt.RequestID,
+		RunnerId:    attempt.RunnerID,
+		ProgramKind: programKind,
+		Params:      map[string]string{"args": string(args)},
 	})
 	if err != nil {
 		if code := status.Code(err); code == codes.InvalidArgument || code == codes.FailedPrecondition {
@@ -69,4 +74,16 @@ func (d *taskDispatcher) Dispatch(ctx context.Context, attempt domain.TaskAttemp
 		return 0, fmt.Errorf("etask 返回了非法 execution ID")
 	}
 	return response.GetExecutionId(), nil
+}
+
+func toProtoProgramKind(kind domain.ProgramKind) (schedulerv1.ProgramKind, error) {
+	switch kind {
+	case domain.ProgramInline:
+		return schedulerv1.ProgramKind_PROGRAM_KIND_INLINE, nil
+	case domain.ProgramProject:
+		return schedulerv1.ProgramKind_PROGRAM_KIND_PROJECT, nil
+	default:
+		return schedulerv1.ProgramKind_PROGRAM_KIND_UNSPECIFIED,
+			fmt.Errorf("提交 etask 的程序模式非法: %s", kind)
+	}
 }

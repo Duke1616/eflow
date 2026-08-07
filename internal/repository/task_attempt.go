@@ -14,7 +14,8 @@ var ErrTaskNotRunnable = errors.New("自动化任务当前不可启动")
 // TaskAttemptRepository 定义自动化任务执行尝试仓储。
 type TaskAttemptRepository interface {
 	// Begin 创建或恢复当前待提交尝试。
-	Begin(ctx context.Context, taskID, runnerID int64, input domain.TaskArgs) (domain.TaskAttempt, error)
+	Begin(ctx context.Context, taskID, runnerID int64, programKind domain.ProgramKind,
+		input domain.TaskArgs) (domain.TaskAttempt, error)
 	// BindExecution 绑定 etask 执行 ID。
 	BindExecution(ctx context.Context, attemptID, executionID int64) error
 	// RecordSubmissionError 记录结果不确定的提交错误，保留当前尝试用于幂等重投。
@@ -40,8 +41,8 @@ func NewTaskAttemptRepository(attemptDAO dao.TaskAttemptDAO) TaskAttemptReposito
 }
 
 func (r *taskAttemptRepository) Begin(ctx context.Context, taskID, runnerID int64,
-	input domain.TaskArgs) (domain.TaskAttempt, error) {
-	attempt, err := r.dao.Begin(ctx, taskID, runnerID, input)
+	programKind domain.ProgramKind, input domain.TaskArgs) (domain.TaskAttempt, error) {
+	attempt, err := r.dao.Begin(ctx, taskID, runnerID, programKind, input)
 	if errors.Is(err, dao.ErrTaskNotRunnable) {
 		err = errors.Join(ErrTaskNotRunnable, err)
 	}
@@ -89,6 +90,7 @@ func toAttemptDomain(attempt dao.TaskAttempt) domain.TaskAttempt {
 	return domain.TaskAttempt{
 		ID: attempt.ID, TenantID: attempt.TenantID, TaskID: attempt.TaskID,
 		AttemptNo: attempt.AttemptNo, RequestID: attempt.RequestID, RunnerID: attempt.RunnerID,
+		ProgramKind: domain.ProgramKind(attempt.ProgramKind).Effective(),
 		ExecutionID: attempt.ExecutionID.Int64, Status: domain.AttemptStatus(attempt.Status),
 		Input: attempt.Input.Val, Output: attempt.Output, Error: attempt.Error,
 		SubmittedAt: attempt.SubmittedAt, CompletedAt: attempt.CompletedAt,

@@ -202,6 +202,10 @@ func (h *AutomationNodeHandler) Handle(ctx *Context, node Node) ([]model.Node, e
 	if err != nil {
 		return nil, fmt.Errorf("解析自动化节点 %s 属性失败: %w", node.ID, err)
 	}
+	property.ProgramKind = property.ProgramKind.Effective()
+	if !property.ProgramKind.Valid() {
+		return nil, fmt.Errorf("自动化节点 %s 的程序模式非法: %s", node.ID, property.ProgramKind)
+	}
 	if property.CompensationNodeID != "" {
 		if property.CompensationNodeID == node.ID {
 			return nil, fmt.Errorf("自动化节点 %s 不能将自身配置为补偿节点", node.ID)

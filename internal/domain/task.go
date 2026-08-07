@@ -111,6 +111,7 @@ type TaskAttempt struct {
 	AttemptNo   int
 	RequestID   string
 	RunnerID    int64
+	ProgramKind ProgramKind
 	ExecutionID int64
 	Status      AttemptStatus
 	Input       TaskArgs
