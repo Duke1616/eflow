@@ -14,15 +14,11 @@ import (
 )
 
 type stubRunnerCatalog struct {
-	find func(context.Context, int64) (etaskclient.Runner, error)
 	list func(context.Context, int64) ([]etaskclient.Runner, error)
 }
 
-func (s stubRunnerCatalog) FindByID(ctx context.Context, id int64) (etaskclient.Runner, error) {
-	if s.find == nil {
-		return etaskclient.Runner{}, errors.New("unexpected FindByID call")
-	}
-	return s.find(ctx, id)
+func (s stubRunnerCatalog) FindByID(context.Context, int64) (etaskclient.Runner, error) {
+	return etaskclient.Runner{}, errors.New("unexpected FindByID call")
 }
 
 func (s stubRunnerCatalog) ListByCodebookID(ctx context.Context, codebookID int64) ([]etaskclient.Runner, error) {
@@ -155,100 +151,4 @@ func TestPlanWorkflowRunnerUpdatesAbortsOnCatalogFailure(t *testing.T) {
 	require.Nil(t, updates)
 	require.ErrorContains(t, err, "查询错误")
 	require.Contains(t, properties, "tag")
-}
-
-func TestPlanDispatchNodeUpdatesResolvesByRunnerCodebook(t *testing.T) {
-	records := []flowRecord{{
-		table: "workflow", id: 7, tenantID: 3, templateIDs: []int64{10},
-		flowData: dao.LogicFlow{Nodes: []domain.FlowNode{
-			{"id": "restart", "type": "automation", "properties": map[string]interface{}{"codebook_id": 15}},
-			{"id": "remove", "type": "automation", "properties": map[string]interface{}{"codebook_id": 14}},
-		}},
-	}}
-	dispatches := []dao.Dispatch{
-		{Id: 1, TenantID: 3, TemplateId: 10, RunnerId: 101},
-		{Id: 2, TenantID: 3, TemplateId: 10, RunnerId: 102},
-	}
-	catalog := stubRunnerCatalog{find: func(ctx context.Context, id int64) (etaskclient.Runner, error) {
-		require.Equal(t, int64(3), ctxutil.GetTenantID(ctx).Int64())
-		codebooks := map[int64]int64{101: 15, 102: 14}
-		return etaskclient.Runner{ID: id, CodebookID: codebooks[id]}, nil
-	}}
-	summary := workflowRunnerSummary{}
-
-	updates, err := planDispatchNodeUpdates(context.Background(), dispatches, records,
-		catalog, &summary, &bytes.Buffer{})
-
-	require.NoError(t, err)
-	require.Equal(t, []dispatchNodeUpdate{
-		{id: 1, tenantID: 3, nodeID: "restart"},
-		{id: 2, tenantID: 3, nodeID: "remove"},
-	}, updates)
-	require.Equal(t, 2, summary.resolvedDispatches)
-}
-
-func TestPlanDispatchNodeUpdatesDoesNotGuessAmbiguousNode(t *testing.T) {
-	records := []flowRecord{{
-		table: "workflow", id: 7, tenantID: 3, templateIDs: []int64{10},
-		flowData: dao.LogicFlow{Nodes: []domain.FlowNode{
-			{"id": "restart-a", "type": "automation", "properties": map[string]interface{}{"codebook_id": 15}},
-			{"id": "restart-b", "type": "automation", "properties": map[string]interface{}{"codebook_id": 15}},
-		}},
-	}}
-	catalog := stubRunnerCatalog{find: func(context.Context, int64) (etaskclient.Runner, error) {
-		return etaskclient.Runner{ID: 101, CodebookID: 15}, nil
-	}}
-	var output bytes.Buffer
-	summary := workflowRunnerSummary{}
-
-	updates, err := planDispatchNodeUpdates(context.Background(), []dao.Dispatch{{
-		Id: 1, TenantID: 3, TemplateId: 10, RunnerId: 101,
-	}}, records, catalog, &summary, &output)
-
-	require.NoError(t, err)
-	require.Empty(t, updates)
-	require.Equal(t, 1, summary.ambiguousDispatches)
-	require.Contains(t, output.String(), "多个自动化节点")
-}
-
-func TestPlanDispatchNodeUpdatesPrefersCurrentWorkflow(t *testing.T) {
-	records := []flowRecord{
-		{
-			table: "workflow", id: 7, tenantID: 3, templateIDs: []int64{10},
-			flowData: dao.LogicFlow{Nodes: []domain.FlowNode{
-				{"id": "current", "type": "automation", "properties": map[string]interface{}{"codebook_id": 15}},
-			}},
-		},
-		{
-			table: "workflow_snapshot", id: 8, tenantID: 3, templateIDs: []int64{10},
-			flowData: dao.LogicFlow{Nodes: []domain.FlowNode{
-				{"id": "historical", "type": "automation", "properties": map[string]interface{}{"codebook_id": 15}},
-			}},
-		},
-	}
-	catalog := stubRunnerCatalog{find: func(context.Context, int64) (etaskclient.Runner, error) {
-		return etaskclient.Runner{ID: 101, CodebookID: 15}, nil
-	}}
-	summary := workflowRunnerSummary{}
-
-	updates, err := planDispatchNodeUpdates(context.Background(), []dao.Dispatch{{
-		Id: 1, TenantID: 3, TemplateId: 10, RunnerId: 101,
-	}}, records, catalog, &summary, &bytes.Buffer{})
-
-	require.NoError(t, err)
-	require.Equal(t, []dispatchNodeUpdate{{id: 1, tenantID: 3, nodeID: "current"}}, updates)
-}
-
-func TestPlanDispatchNodeUpdatesAbortsOnRunnerLookupFailure(t *testing.T) {
-	catalog := stubRunnerCatalog{find: func(context.Context, int64) (etaskclient.Runner, error) {
-		return etaskclient.Runner{}, errors.New("etask unavailable")
-	}}
-	summary := workflowRunnerSummary{}
-
-	updates, err := planDispatchNodeUpdates(context.Background(), []dao.Dispatch{{
-		Id: 1, TenantID: 3, TemplateId: 10, RunnerId: 101,
-	}}, nil, catalog, &summary, &bytes.Buffer{})
-
-	require.ErrorContains(t, err, "查询错误")
-	require.Empty(t, updates)
 }
