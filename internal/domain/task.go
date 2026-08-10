@@ -105,20 +105,21 @@ const (
 
 // TaskAttempt 保存一次外部执行引用和 eflow 所需的业务快照。
 type TaskAttempt struct {
-	ID          int64
-	TenantID    int64
-	TaskID      int64
-	AttemptNo   int
-	RequestID   string
-	RunnerID    int64
-	ProgramKind ProgramKind
-	ExecutionID int64
-	Status      AttemptStatus
-	Input       TaskArgs
-	Output      string
-	Error       string
-	SubmittedAt int64
-	CompletedAt int64
-	CTime       int64
-	UTime       int64
+	ID              int64
+	TenantID        int64
+	TaskID          int64
+	AttemptNo       int
+	RequestID       string
+	DefaultRunnerID int64
+	RunnerID        int64
+	RouteRuleID     int64
+	ExecutionID     int64
+	Status          AttemptStatus
+	Input           TaskArgs
+	Output          string
+	Error           string
+	SubmittedAt     int64
+	CompletedAt     int64
+	CTime           int64
+	UTime           int64
 }

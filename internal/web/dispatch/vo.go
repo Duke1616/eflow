@@ -1,17 +1,22 @@
 package dispatch
 
 type CreateDispatchReq struct {
-	TemplateId int64  `json:"template_id"`
-	RunnerId   int64  `json:"runner_id"`
-	Field      string `json:"field"`
-	Value      string `json:"value"`
+	TemplateId       int64  `json:"template_id"`
+	AutomationNodeID string `json:"automation_node_id"`
+	RunnerId         int64  `json:"runner_id"`
+	Field            string `json:"field"`
+	Value            string `json:"value"`
+	Priority         int    `json:"priority"`
 }
 
 type UpdateDispatchReq struct {
-	Id       int64  `json:"id"`
-	RunnerId int64  `json:"runner_id"`
-	Field    string `json:"field"`
-	Value    string `json:"value"`
+	Id               int64  `json:"id"`
+	TemplateId       int64  `json:"template_id"`
+	AutomationNodeID string `json:"automation_node_id"`
+	RunnerId         int64  `json:"runner_id"`
+	Field            string `json:"field"`
+	Value            string `json:"value"`
+	Priority         int    `json:"priority"`
 }
 
 type Page struct {
@@ -25,11 +30,13 @@ type ListByTemplateId struct {
 }
 
 type Dispatch struct {
-	Id         int64  `json:"id"`
-	TemplateId int64  `json:"template_id"`
-	RunnerId   int64  `json:"runner_id"`
-	Field      string `json:"field"`
-	Value      string `json:"value"`
+	Id               int64  `json:"id"`
+	TemplateId       int64  `json:"template_id"`
+	AutomationNodeID string `json:"automation_node_id"`
+	RunnerId         int64  `json:"runner_id"`
+	Field            string `json:"field"`
+	Value            string `json:"value"`
+	Priority         int    `json:"priority"`
 }
 
 type RetrieveDispatches struct {
@@ -38,9 +45,8 @@ type RetrieveDispatches struct {
 }
 
 type SyncDispatchReq struct {
-	TemplateId      int64 `json:"template_id"`
-	TemplateGroupId int64 `json:"template_group_id"`
-	SyncTemplateId  int64 `json:"sync_template_id"`
+	TemplateId     int64 `json:"template_id"`
+	SyncTemplateId int64 `json:"sync_template_id"`
 }
 
 type DeleteDispatchReq struct {

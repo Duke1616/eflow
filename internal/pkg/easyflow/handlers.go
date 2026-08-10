@@ -202,9 +202,8 @@ func (h *AutomationNodeHandler) Handle(ctx *Context, node Node) ([]model.Node, e
 	if err != nil {
 		return nil, fmt.Errorf("解析自动化节点 %s 属性失败: %w", node.ID, err)
 	}
-	property.ProgramKind = property.ProgramKind.Effective()
-	if !property.ProgramKind.Valid() {
-		return nil, fmt.Errorf("自动化节点 %s 的程序模式非法: %s", node.ID, property.ProgramKind)
+	if property.CodebookId <= 0 {
+		return nil, fmt.Errorf("自动化节点 %s 未配置有效的脚本文件", node.ID)
 	}
 	if property.CompensationNodeID != "" {
 		if property.CompensationNodeID == node.ID {

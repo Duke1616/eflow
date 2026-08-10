@@ -20,27 +20,16 @@ func TestDispatchClassifiesSubmissionError(t *testing.T) {
 		err          error
 		wantRejected bool
 		wantID       int64
-		programKind  domain.ProgramKind
-		wantKind     schedulerv1.ProgramKind
 	}{
-		{name: "INLINE 模式透传", response: &schedulerv1.RunRunnerResponse{ExecutionId: 99},
-			wantID: 99, programKind: domain.ProgramInline,
-			wantKind: schedulerv1.ProgramKind_PROGRAM_KIND_INLINE},
-		{name: "PROJECT 模式透传", response: &schedulerv1.RunRunnerResponse{ExecutionId: 100},
-			wantID: 100, programKind: domain.ProgramProject,
-			wantKind: schedulerv1.ProgramKind_PROGRAM_KIND_PROJECT},
-		{name: "参数被拒绝", programKind: domain.ProgramInline,
-			wantKind: schedulerv1.ProgramKind_PROGRAM_KIND_INLINE,
-			err:      status.Error(codes.InvalidArgument, "runner disabled"), wantRejected: true},
-		{name: "前置条件不满足", programKind: domain.ProgramInline,
-			wantKind: schedulerv1.ProgramKind_PROGRAM_KIND_INLINE,
-			err:      status.Error(codes.FailedPrecondition, "runner disabled"), wantRejected: true},
-		{name: "服务内部故障", programKind: domain.ProgramInline,
-			wantKind: schedulerv1.ProgramKind_PROGRAM_KIND_INLINE,
-			err:      status.Error(codes.Internal, "database unavailable")},
-		{name: "网络结果不确定", programKind: domain.ProgramInline,
-			wantKind: schedulerv1.ProgramKind_PROGRAM_KIND_INLINE,
-			err:      status.Error(codes.Unavailable, "connection lost")},
+		{name: "提交成功", response: &schedulerv1.RunRunnerResponse{ExecutionId: 99}, wantID: 99},
+		{name: "参数被拒绝",
+			err: status.Error(codes.InvalidArgument, "runner disabled"), wantRejected: true},
+		{name: "前置条件不满足",
+			err: status.Error(codes.FailedPrecondition, "runner disabled"), wantRejected: true},
+		{name: "服务内部故障",
+			err: status.Error(codes.Internal, "database unavailable")},
+		{name: "网络结果不确定",
+			err: status.Error(codes.Unavailable, "connection lost")},
 	}
 
 	for _, testCase := range testCases {
@@ -51,12 +40,12 @@ func TestDispatchClassifiesSubmissionError(t *testing.T) {
 			client := &ETASKClient{SchedulerClient: clientStub}
 			dispatcher := NewTaskDispatcher(client)
 			executionID, err := dispatcher.Dispatch(context.Background(), domain.TaskAttempt{
-				RequestID: "eflow:1:1", RunnerID: 10, ProgramKind: testCase.programKind,
+				RequestID: "eflow:1:1", RunnerID: 10,
 				Input: domain.TaskArgs{"ticket_id": 1},
 			})
 
 			require.Equal(t, testCase.wantID, executionID)
-			require.Equal(t, testCase.wantKind, clientStub.request.GetProgramKind())
+			require.Equal(t, int64(10), clientStub.request.GetRunnerId())
 			require.Equal(t, testCase.wantRejected, errors.Is(err, ErrRejected))
 			if testCase.err == nil {
 				require.NoError(t, err)
@@ -65,14 +54,6 @@ func TestDispatchClassifiesSubmissionError(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestDispatchRejectsImplicitProgramKind(t *testing.T) {
-	dispatcher := NewTaskDispatcher(&ETASKClient{SchedulerClient: &schedulerClientStub{}})
-	_, err := dispatcher.Dispatch(context.Background(), domain.TaskAttempt{
-		RequestID: "eflow:1:1", RunnerID: 10, Input: domain.TaskArgs{},
-	})
-	require.ErrorContains(t, err, "程序模式非法")
 }
 
 type schedulerClientStub struct {

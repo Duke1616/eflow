@@ -28,14 +28,20 @@ type FindByIdsReq struct {
 	Ids []int64 `json:"ids"`
 }
 
-// AutomationCodebookIdsReq 根据工作流 ID 查询自动化节点引用的脚本模板 ID
-type AutomationCodebookIdsReq struct {
+// AutomationNodesReq 根据工作流 ID 查询自动化节点默认执行单元。
+type AutomationNodesReq struct {
 	WorkflowId int64 `json:"workflow_id"`
 }
 
-// RetrieveAutomationCodebookIds 承载自动化节点名称到脚本模板 ID 的映射
-type RetrieveAutomationCodebookIds struct {
-	AutomationCodebooks map[string]int64 `json:"automation_codebooks"`
+type AutomationNodeVO struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	CodebookID int64  `json:"codebook_id"`
+	RunnerID   int64  `json:"runner_id"`
+}
+
+type RetrieveAutomationNodes struct {
+	AutomationNodes []AutomationNodeVO `json:"automation_nodes"`
 }
 
 // ByKeywordReq 按照关键字模糊查询工作流列表请求参数

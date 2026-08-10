@@ -55,20 +55,22 @@ type Task struct {
 }
 
 type Attempt struct {
-	ID          int64           `json:"id"`
-	TaskID      int64           `json:"task_id"`
-	AttemptNo   int             `json:"attempt_no"`
-	RequestID   string          `json:"request_id"`
-	RunnerID    int64           `json:"runner_id"`
-	ExecutionID int64           `json:"execution_id"`
-	Status      string          `json:"status"`
-	Input       domain.TaskArgs `json:"input"`
-	Output      string          `json:"output"`
-	Error       string          `json:"error"`
-	SubmittedAt int64           `json:"submitted_at"`
-	CompletedAt int64           `json:"completed_at"`
-	CTime       int64           `json:"ctime"`
-	UTime       int64           `json:"utime"`
+	ID              int64           `json:"id"`
+	TaskID          int64           `json:"task_id"`
+	AttemptNo       int             `json:"attempt_no"`
+	RequestID       string          `json:"request_id"`
+	DefaultRunnerID int64           `json:"default_runner_id"`
+	RunnerID        int64           `json:"runner_id"`
+	RouteRuleID     int64           `json:"route_rule_id"`
+	ExecutionID     int64           `json:"execution_id"`
+	Status          string          `json:"status"`
+	Input           domain.TaskArgs `json:"input"`
+	Output          string          `json:"output"`
+	Error           string          `json:"error"`
+	SubmittedAt     int64           `json:"submitted_at"`
+	CompletedAt     int64           `json:"completed_at"`
+	CTime           int64           `json:"ctime"`
+	UTime           int64           `json:"utime"`
 }
 
 type ExecutionLog struct {

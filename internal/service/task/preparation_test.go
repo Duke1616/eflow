@@ -19,80 +19,132 @@ func TestResolveRunnerByDispatch(t *testing.T) {
 		name         string
 		dispatches   []domain.Dispatch
 		listErr      error
-		runner       etaskclient.Runner
 		runners      map[int64]etaskclient.Runner
 		wantMatch    bool
 		wantRunnerID int64
+		wantRuleID   int64
 		wantErr      string
 	}{
 		{name: "没有匹配规则允许回退", dispatches: []domain.Dispatch{{
-			Field: "environment", Value: "prod", RunnerId: 10,
+			AutomationNodeID: "node-1", Field: "environment", Value: "prod", RunnerId: 10,
 		}}},
-		{name: "规则查询失败阻断执行", listErr: errors.New("database unavailable"), wantErr: "查询自动派发规则失败"},
-		{name: "匹配规则缺少执行单元允许回退", dispatches: []domain.Dispatch{{
-			Field: "environment", Value: "test",
-		}}},
-		{name: "跳过缺少执行单元后选择有效规则", dispatches: []domain.Dispatch{
-			{Field: "environment", Value: "test"},
-			{Field: "environment", Value: "test", RunnerId: 11},
-		}, runners: map[int64]etaskclient.Runner{
-			11: {ID: 11, CodebookID: 20},
-		}, wantMatch: true, wantRunnerID: 11},
-		{name: "其他 Codebook 的匹配规则允许回退", dispatches: []domain.Dispatch{{
-			Field: "environment", Value: "test", RunnerId: 10,
-		}}, runner: etaskclient.Runner{ID: 10, CodebookID: 99}},
-		{name: "跳过其他 Codebook 后选择兼容规则", dispatches: []domain.Dispatch{
-			{Field: "environment", Value: "test", RunnerId: 10},
-			{Field: "environment", Value: "test", RunnerId: 11},
+		{name: "规则查询失败阻断执行", listErr: errors.New("database unavailable"), wantErr: "查询执行单元路由规则失败"},
+		{name: "匹配规则缺少执行单元被拒绝", dispatches: []domain.Dispatch{{
+			AutomationNodeID: "node-1", Field: "environment", Value: "test",
+		}}, wantErr: "缺少有效执行单元"},
+		{name: "其他节点的匹配规则被忽略", dispatches: []domain.Dispatch{{
+			AutomationNodeID: "node-2", Field: "environment", Value: "test", RunnerId: 10,
+		}}, runners: map[int64]etaskclient.Runner{10: {ID: 10, CodebookID: 20}}},
+		{name: "不同脚本文件的执行单元被拒绝", dispatches: []domain.Dispatch{
+			{AutomationNodeID: "node-1", Field: "environment", Value: "test", RunnerId: 10},
 		}, runners: map[int64]etaskclient.Runner{
 			10: {ID: 10, CodebookID: 99},
-			11: {ID: 11, CodebookID: 20},
-		}, wantMatch: true, wantRunnerID: 11},
+		}, wantErr: "未绑定自动化节点脚本 20"},
 		{name: "有效匹配返回执行单元", dispatches: []domain.Dispatch{{
-			Field: "environment", Value: "test", RunnerId: 10,
-		}}, runner: etaskclient.Runner{ID: 10, CodebookID: 20}, wantMatch: true, wantRunnerID: 10},
+			AutomationNodeID: "node-1", Field: "environment", Value: "test", RunnerId: 10,
+			Id: 21,
+		}}, runners: map[int64]etaskclient.Runner{10: {ID: 10, CodebookID: 20}},
+			wantMatch: true, wantRunnerID: 10, wantRuleID: 21},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			svc := &taskService{
 				dispatches: &dispatchServiceStub{dispatches: testCase.dispatches, err: testCase.listErr},
-				runners:    &runnerCatalogStub{runner: testCase.runner, runners: testCase.runners},
+				runners:    &runnerCatalogStub{runners: testCase.runners},
 			}
-			runner, matched, err := svc.resolveRunnerByDispatch(context.Background(), 1,
-				easyflow.AutomationProperty{CodebookId: 20}, domain.TaskArgs{"environment": "test"})
+			runner, ruleID, err := svc.resolveRunnerByDispatch(context.Background(), 1, "node-1",
+				20, domain.TaskArgs{"environment": "test"})
 			if testCase.wantErr != "" {
 				require.ErrorContains(t, err, testCase.wantErr)
 				return
 			}
 			require.NoError(t, err)
-			require.Equal(t, testCase.wantMatch, matched)
+			require.Equal(t, testCase.wantMatch, ruleID > 0)
+			require.Equal(t, testCase.wantRuleID, ruleID)
 			require.Equal(t, testCase.wantRunnerID, runner.ID)
 		})
 	}
 }
 
-func TestResolveRunnerFallsBackAfterSkippingOtherCodebook(t *testing.T) {
+func TestResolveRunnerUsesDefaultRunner(t *testing.T) {
 	runners := &runnerCatalogStub{
-		runner:   etaskclient.Runner{ID: 10, CodebookID: 99},
-		fallback: etaskclient.Runner{ID: 20, CodebookID: 20},
+		runner: etaskclient.Runner{ID: 20, CodebookID: 20},
 	}
 	svc := &taskService{
 		dispatches: &dispatchServiceStub{dispatches: []domain.Dispatch{{
-			Field: "environment", Value: "test", RunnerId: 10,
+			AutomationNodeID: "node-1", Field: "environment", Value: "test", RunnerId: 10,
 		}}},
 		runners: runners,
 	}
 
-	runner, err := svc.resolveRunner(context.Background(), 1,
-		easyflow.AutomationProperty{CodebookId: 20, Tag: "grant"},
+	decision, err := svc.resolveRunner(context.Background(), 1, "node-1",
+		easyflow.AutomationProperty{CodebookId: 20, RunnerID: 20},
 		domain.TaskArgs{"environment": "test"})
 
 	require.NoError(t, err)
-	require.Equal(t, int64(20), runner.ID)
-	require.Equal(t, 1, runners.fallbackCalls)
-	require.Equal(t, int64(20), runners.fallbackCodebookID)
-	require.Equal(t, "grant", runners.fallbackTag)
+	require.Equal(t, domain.RunnerRouteDecision{
+		DefaultRunnerID: 20, SelectedRunnerID: 20,
+	}, decision)
+}
+
+func TestResolveRunnerUsesDynamicRouteWithoutDefaultRunner(t *testing.T) {
+	svc := &taskService{
+		dispatches: &dispatchServiceStub{dispatches: []domain.Dispatch{{
+			Id: 21, AutomationNodeID: "node-1", Field: "environment", Value: "test", RunnerId: 10,
+		}}},
+		runners: &runnerCatalogStub{runners: map[int64]etaskclient.Runner{
+			10: {ID: 10, CodebookID: 20},
+		}},
+	}
+
+	decision, err := svc.resolveRunner(context.Background(), 1, "node-1",
+		easyflow.AutomationProperty{CodebookId: 20}, domain.TaskArgs{"environment": "test"})
+
+	require.NoError(t, err)
+	require.Equal(t, domain.RunnerRouteDecision{SelectedRunnerID: 10, RuleID: 21}, decision)
+}
+
+func TestResolveRunnerDoesNotLoadDefaultWhenDynamicRouteMatches(t *testing.T) {
+	svc := &taskService{
+		dispatches: &dispatchServiceStub{dispatches: []domain.Dispatch{{
+			Id: 21, AutomationNodeID: "node-1", Field: "environment", Value: "test", RunnerId: 10,
+		}}},
+		runners: &runnerCatalogStub{runners: map[int64]etaskclient.Runner{
+			10: {ID: 10, CodebookID: 20},
+		}},
+	}
+
+	decision, err := svc.resolveRunner(context.Background(), 1, "node-1",
+		easyflow.AutomationProperty{CodebookId: 20, RunnerID: 99}, domain.TaskArgs{"environment": "test"})
+
+	require.NoError(t, err)
+	require.Equal(t, domain.RunnerRouteDecision{
+		DefaultRunnerID: 99, SelectedRunnerID: 10, RuleID: 21,
+	}, decision)
+}
+
+func TestResolveRunnerRequiresFallbackWhenNoRuleMatches(t *testing.T) {
+	svc := &taskService{
+		dispatches: &dispatchServiceStub{},
+		runners:    &runnerCatalogStub{},
+	}
+
+	_, err := svc.resolveRunner(context.Background(), 1, "node-1",
+		easyflow.AutomationProperty{CodebookId: 20}, nil)
+
+	require.ErrorContains(t, err, "未命中动态路由，且自动化节点未配置默认执行单元")
+}
+
+func TestResolveRunnerRejectsDifferentCodebook(t *testing.T) {
+	svc := &taskService{runners: &runnerCatalogStub{
+		runner: etaskclient.Runner{ID: 20, CodebookID: 99},
+	}}
+
+	_, err := svc.resolveRunner(context.Background(), 0, "node-1",
+		easyflow.AutomationProperty{CodebookId: 20, RunnerID: 20}, nil)
+
+	require.ErrorContains(t, err, "未绑定自动化节点脚本 20")
 }
 
 func TestCalculateScheduledAt(t *testing.T) {
@@ -352,14 +404,24 @@ func (s *dispatchServiceStub) ListByTemplateId(context.Context, int64, int64,
 	return s.dispatches, int64(len(s.dispatches)), s.err
 }
 
+func (s *dispatchServiceStub) ListByTemplateNode(_ context.Context, _ int64,
+	nodeID string) ([]domain.Dispatch, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	filtered := make([]domain.Dispatch, 0, len(s.dispatches))
+	for _, dispatch := range s.dispatches {
+		if dispatch.AutomationNodeID == nodeID {
+			filtered = append(filtered, dispatch)
+		}
+	}
+	return filtered, nil
+}
+
 type runnerCatalogStub struct {
 	etaskclient.RunnerCatalog
-	runner             etaskclient.Runner
-	runners            map[int64]etaskclient.Runner
-	fallback           etaskclient.Runner
-	fallbackCalls      int
-	fallbackCodebookID int64
-	fallbackTag        string
+	runner  etaskclient.Runner
+	runners map[int64]etaskclient.Runner
 }
 
 func (s *runnerCatalogStub) FindByID(_ context.Context, id int64) (etaskclient.Runner, error) {
@@ -367,12 +429,4 @@ func (s *runnerCatalogStub) FindByID(_ context.Context, id int64) (etaskclient.R
 		return runner, nil
 	}
 	return s.runner, nil
-}
-
-func (s *runnerCatalogStub) FindByCodebookAndTag(_ context.Context, codebookID int64,
-	tag string) (etaskclient.Runner, error) {
-	s.fallbackCalls++
-	s.fallbackCodebookID = codebookID
-	s.fallbackTag = tag
-	return s.fallback, nil
 }

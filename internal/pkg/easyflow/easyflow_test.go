@@ -109,27 +109,27 @@ func TestAutomationNodeHandlerRejectsInvalidProperty(t *testing.T) {
 	handler := &AutomationNodeHandler{}
 	_, err := handler.Handle(&Context{}, Node{
 		ID: "automation-1", Type: NodeTypeAuto,
-		Properties: map[string]interface{}{"name": "部署", "codebook_id": "legacy-name"},
+		Properties: map[string]interface{}{"name": "部署", "runner_id": "invalid"},
 	})
 
 	require.ErrorContains(t, err, "解析自动化节点 automation-1 属性失败")
 }
 
-func TestAutomationNodeHandlerValidatesProgramKind(t *testing.T) {
+func TestAutomationNodeHandlerAllowsOptionalDefaultRunner(t *testing.T) {
 	testCases := []struct {
-		name    string
-		kind    any
-		wantErr string
+		name       string
+		codebookID any
+		runnerID   any
+		wantErr    string
 	}{
-		{name: "存量节点默认 INLINE"},
-		{name: "PROJECT", kind: "PROJECT"},
-		{name: "拒绝未知模式", kind: "UNKNOWN", wantErr: "程序模式非法"},
+		{name: "配置默认执行单元", codebookID: 20, runnerID: 10},
+		{name: "默认执行单元可以为空", codebookID: 20},
+		{name: "拒绝未配置脚本文件", runnerID: 10, wantErr: "未配置有效的脚本文件"},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			properties := map[string]any{"name": "部署", "codebook_id": 1}
-			if testCase.kind != nil {
-				properties["program_kind"] = testCase.kind
+			properties := map[string]any{
+				"name": "部署", "codebook_id": testCase.codebookID, "runner_id": testCase.runnerID,
 			}
 			_, err := (&AutomationNodeHandler{}).Handle(&Context{}, Node{
 				ID: "automation-1", Type: NodeTypeAuto, Properties: properties,
@@ -147,7 +147,7 @@ func TestAutomationNodeHandlerValidatesCompensationNode(t *testing.T) {
 	recovery := Node{
 		ID: "recovery", Type: NodeTypeAuto,
 		Properties: map[string]any{
-			"name": "权限回收", "codebook_id": 2,
+			"name": "权限回收", "codebook_id": 20, "runner_id": 2,
 		},
 	}
 	testCases := []struct {
@@ -159,14 +159,14 @@ func TestAutomationNodeHandlerValidatesCompensationNode(t *testing.T) {
 		{
 			name: "授权节点关联补偿节点",
 			property: map[string]any{
-				"name": "权限授权", "codebook_id": 1, "compensation_node_id": "recovery",
+				"name": "权限授权", "codebook_id": 10, "runner_id": 1, "compensation_node_id": "recovery",
 			},
 			nodes: map[string]Node{"recovery": recovery},
 		},
 		{
 			name: "拒绝不存在的补偿节点",
 			property: map[string]any{
-				"name": "权限授权", "codebook_id": 1, "compensation_node_id": "missing",
+				"name": "权限授权", "codebook_id": 10, "runner_id": 1, "compensation_node_id": "missing",
 			},
 			wantErr: "不存在或不是自动化节点",
 		},

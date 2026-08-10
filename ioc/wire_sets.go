@@ -103,10 +103,11 @@ var (
 		ticket.NewHandler,
 	)
 
-	// DispatchSet 自动派发模块的 Provider 集合
+	// DispatchSet 执行单元路由模块的 Provider 集合。
 	DispatchSet = wire.NewSet(
 		dao.NewDispatchDAO,
 		repository.NewDispatchRepository,
+		dispatchSvc.NewTemplateReader,
 		dispatchSvc.NewService,
 		dispatchHdl.NewHandler,
 	)

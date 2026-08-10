@@ -4,19 +4,12 @@ package etask.scheduler.v1;
 
 option go_package = "etask/scheduler/v1;scheduler";
 
-// ProgramKind 描述 Runner 绑定的 Codebook 按单文件还是完整项目执行。
-enum ProgramKind {
-  PROGRAM_KIND_UNSPECIFIED = 0;
-  PROGRAM_KIND_INLINE = 1;
-  PROGRAM_KIND_PROJECT = 2;
-}
-
 message RunRunnerRequest {
   string request_id = 1;
   int64 runner_id = 2;
   map<string, string> params = 3;
   map<string, string> variables = 4;
-  ProgramKind program_kind = 5; // 未指定时按 INLINE 执行，兼容存量调用方
+  reserved 5;
 }
 
 message RunRunnerResponse {

@@ -166,7 +166,8 @@ func mapTasks(tasks []domain.Task) []Task {
 func toAttemptVO(attempt domain.TaskAttempt) Attempt {
 	return Attempt{
 		ID: attempt.ID, TaskID: attempt.TaskID, AttemptNo: attempt.AttemptNo,
-		RequestID: attempt.RequestID, RunnerID: attempt.RunnerID, ExecutionID: attempt.ExecutionID,
+		RequestID: attempt.RequestID, DefaultRunnerID: attempt.DefaultRunnerID,
+		RunnerID: attempt.RunnerID, RouteRuleID: attempt.RouteRuleID, ExecutionID: attempt.ExecutionID,
 		Status: string(attempt.Status), Input: attempt.Input, Output: attempt.Output, Error: attempt.Error,
 		SubmittedAt: attempt.SubmittedAt, CompletedAt: attempt.CompletedAt,
 		CTime: attempt.CTime, UTime: attempt.UTime,

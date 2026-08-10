@@ -63,9 +63,9 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		NoSync().
 		Handle(ginx.B[FindByIdsReq](h.FindByIds)),
 	)
-	g.POST("/automation/codebooks", h.Capability("查询流程自动化脚本模板", "view_automation_codebooks").
+	g.POST("/automation/nodes", h.Capability("查询流程自动化节点", "view_automation_nodes").
 		NoSync().
-		Handle(ginx.B[AutomationCodebookIdsReq](h.AutomationCodebookIds)),
+		Handle(ginx.B[AutomationNodesReq](h.AutomationNodes)),
 	)
 	g.GET("/detail/:id", h.Capability("流程详情", "get").
 		Handle(ginx.W(h.Detail)),
@@ -153,17 +153,21 @@ func (h *Handler) FindByIds(ctx *ginx.Context, req FindByIdsReq) (ginx.Result, e
 	}, nil
 }
 
-// AutomationCodebookIds 查询工作流画布中自动化节点引用的脚本模板 ID
-func (h *Handler) AutomationCodebookIds(ctx *ginx.Context, req AutomationCodebookIdsReq) (ginx.Result, error) {
-	codebookIds, err := h.svc.GetAutomationCodebookIds(ctx.Context, req.WorkflowId)
+// AutomationNodes 查询工作流画布中的自动化节点及默认执行单元。
+func (h *Handler) AutomationNodes(ctx *ginx.Context, req AutomationNodesReq) (ginx.Result, error) {
+	nodes, err := h.svc.GetAutomationNodes(ctx.Context, req.WorkflowId)
 	if err != nil {
 		return SystemErrorResult, err
 	}
 
 	return ginx.Result{
-		Msg: "查询流程自动化脚本模板成功",
-		Data: RetrieveAutomationCodebookIds{
-			AutomationCodebooks: codebookIds,
+		Msg: "查询流程自动化节点成功",
+		Data: RetrieveAutomationNodes{
+			AutomationNodes: slice.Map(nodes, func(_ int, src easyflow.AutomationNodeRef) AutomationNodeVO {
+				return AutomationNodeVO{
+					ID: src.ID, Name: src.Name, CodebookID: src.CodebookID, RunnerID: src.RunnerID,
+				}
+			}),
 		},
 	}, nil
 }

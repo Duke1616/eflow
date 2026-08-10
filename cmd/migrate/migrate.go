@@ -25,6 +25,7 @@ func NewCommand() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "强制重新执行迁移（清除历史迁移记录）")
+	cmd.AddCommand(newWorkflowRunnersCommand())
 	return cmd
 }
 

@@ -9,7 +9,6 @@ import (
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
-	"github.com/gotomicro/ego/core/elog"
 )
 
 const taskPreparationOperation = "准备"
@@ -45,27 +44,22 @@ func (s *taskService) prepareTaskDefinition(ctx context.Context, task domain.Tas
 }
 
 func (s *taskService) prepareAttempt(ctx context.Context,
-	task domain.Task) (int64, domain.ProgramKind, domain.TaskArgs, error) {
+	task domain.Task) (domain.RunnerRouteDecision, domain.TaskArgs, error) {
 	ticket, err := s.tickets.GetByID(ctx, task.TicketID)
 	if err != nil {
-		return 0, "", nil, s.taskError(task.ID, taskPreparationOperation, err)
+		return domain.RunnerRouteDecision{}, nil, s.taskError(task.ID, taskPreparationOperation, err)
 	}
 	prepared, err := s.resolvePreparation(ctx, task, ticket)
 	if err != nil {
-		return 0, "", nil, err
+		return domain.RunnerRouteDecision{}, nil, err
 	}
-	programKind := prepared.automation.ProgramKind.Effective()
-	if !programKind.Valid() {
-		return 0, "", nil, s.taskError(task.ID, taskPreparationOperation,
-			fmt.Errorf("程序模式非法: %s", programKind))
-	}
-	runner, err := s.resolveRunner(ctx, ticket.TemplateId, prepared.automation, prepared.input)
+	decision, err := s.resolveRunner(ctx, ticket.TemplateId, task.NodeID, prepared.automation, prepared.input)
 	if err != nil {
-		return 0, "", nil, s.taskError(task.ID, taskPreparationOperation, err)
+		return domain.RunnerRouteDecision{}, nil, s.taskError(task.ID, taskPreparationOperation, err)
 	}
 	prepared.input["ticket_id"] = task.TicketID
 	prepared.input["process_inst_id"] = task.ProcessInstanceID
-	return runner.ID, programKind, prepared.input, nil
+	return decision, prepared.input, nil
 }
 
 func (s *taskService) resolvePreparation(ctx context.Context, task domain.Task,
@@ -89,25 +83,40 @@ func (s *taskService) resolvePreparation(ctx context.Context, task domain.Task,
 	return preparation{automation: automation, input: input}, nil
 }
 
-func (s *taskService) resolveRunner(ctx context.Context, templateID int64,
-	automation easyflow.AutomationProperty, input domain.TaskArgs) (etaskclient.Runner, error) {
+func (s *taskService) resolveRunner(ctx context.Context, templateID int64, nodeID string,
+	automation easyflow.AutomationProperty, input domain.TaskArgs) (domain.RunnerRouteDecision, error) {
+	decision := domain.RunnerRouteDecision{DefaultRunnerID: automation.RunnerID}
 	if templateID > 0 && s.dispatches != nil {
-		runner, matched, err := s.resolveRunnerByDispatch(ctx, templateID, automation, input)
+		runner, ruleID, err := s.resolveRunnerByDispatch(ctx, templateID, nodeID, automation.CodebookId, input)
 		if err != nil {
-			return etaskclient.Runner{}, err
+			return domain.RunnerRouteDecision{}, err
 		}
-		if matched {
-			return runner, nil
+		if ruleID > 0 {
+			decision.SelectedRunnerID = runner.ID
+			decision.RuleID = ruleID
+			return decision, nil
 		}
 	}
-	return s.runners.FindByCodebookAndTag(ctx, automation.CodebookId, automation.Tag)
+	if automation.RunnerID <= 0 {
+		return domain.RunnerRouteDecision{}, fmt.Errorf("未命中动态路由，且自动化节点未配置默认执行单元")
+	}
+	defaultRunner, err := s.runners.FindByID(ctx, automation.RunnerID)
+	if err != nil {
+		return domain.RunnerRouteDecision{}, fmt.Errorf("查询默认执行单元失败: %w", err)
+	}
+	if defaultRunner.CodebookID != automation.CodebookId {
+		return domain.RunnerRouteDecision{}, fmt.Errorf(
+			"默认执行单元 %d 未绑定自动化节点脚本 %d", defaultRunner.ID, automation.CodebookId)
+	}
+	decision.SelectedRunnerID = defaultRunner.ID
+	return decision, nil
 }
 
-func (s *taskService) resolveRunnerByDispatch(ctx context.Context, templateID int64,
-	automation easyflow.AutomationProperty, input domain.TaskArgs) (etaskclient.Runner, bool, error) {
-	dispatches, _, err := s.dispatches.ListByTemplateId(ctx, 0, 1000, templateID)
+func (s *taskService) resolveRunnerByDispatch(ctx context.Context, templateID int64, nodeID string,
+	codebookID int64, input domain.TaskArgs) (etaskclient.Runner, int64, error) {
+	dispatches, err := s.dispatches.ListByTemplateNode(ctx, templateID, nodeID)
 	if err != nil {
-		return etaskclient.Runner{}, false, fmt.Errorf("查询自动派发规则失败: %w", err)
+		return etaskclient.Runner{}, 0, fmt.Errorf("查询执行单元路由规则失败: %w", err)
 	}
 	for _, dispatch := range dispatches {
 		actual, exists := input[dispatch.Field]
@@ -115,32 +124,19 @@ func (s *taskService) resolveRunnerByDispatch(ctx context.Context, templateID in
 			continue
 		}
 		if dispatch.RunnerId <= 0 {
-			// 兼容存量脏数据：无效规则不能阻断同一模板下后续有效规则，
-			// 新增和修改入口会拒绝 runner_id <= 0。
-			if s.logger != nil {
-				s.logger.Warn("忽略缺少执行单元的派发规则",
-					elog.Int64("dispatchID", dispatch.Id))
-			}
-			continue
+			return etaskclient.Runner{}, 0, fmt.Errorf("路由规则 %d 缺少有效执行单元", dispatch.Id)
 		}
 		runner, findErr := s.runners.FindByID(ctx, dispatch.RunnerId)
 		if findErr != nil {
-			return etaskclient.Runner{}, false, fmt.Errorf("查询派发规则执行单元失败: %w", findErr)
+			return etaskclient.Runner{}, 0, fmt.Errorf("查询路由规则执行单元失败: %w", findErr)
 		}
-		if runner.CodebookID != automation.CodebookId {
-			// 派发规则在模板范围内共享，命中的字段规则可能属于同一模板的其他自动化节点。
-			// 此时继续寻找当前 Codebook 的规则；若没有兼容规则，上层会按节点 Codebook 和 Tag 回退选择。
-			if s.logger != nil {
-				s.logger.Debug("忽略与自动化节点 Codebook 不匹配的派发规则",
-					elog.Int64("dispatchID", dispatch.Id), elog.Int64("runnerID", runner.ID),
-					elog.Int64("runnerCodebookID", runner.CodebookID),
-					elog.Int64("automationCodebookID", automation.CodebookId))
-			}
-			continue
+		if runner.CodebookID != codebookID {
+			return etaskclient.Runner{}, 0, fmt.Errorf(
+				"路由规则执行单元 %d 未绑定自动化节点脚本 %d", runner.ID, codebookID)
 		}
-		return runner, true, nil
+		return runner, dispatch.Id, nil
 	}
-	return etaskclient.Runner{}, false, nil
+	return etaskclient.Runner{}, 0, nil
 }
 
 func (s *taskService) assembleRuntimeArgs(ctx context.Context, ticket domain.Ticket) (domain.TaskArgs, error) {

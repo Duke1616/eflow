@@ -17,22 +17,23 @@ var ErrTaskNotRunnable = errors.New("自动化任务当前不可启动")
 
 // TaskAttempt 是一次提交到 etask 的执行尝试。
 type TaskAttempt struct {
-	ID          int64                           `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'执行尝试主键'"`
-	TenantID    int64                           `gorm:"column:tenant_id;type:bigint;not null;uniqueIndex:uk_attempt_request,priority:1;index;comment:'租户 ID'"`
-	TaskID      int64                           `gorm:"column:task_id;type:bigint;not null;uniqueIndex:uk_task_attempt,priority:1;index;comment:'自动化任务 ID'"`
-	AttemptNo   int                             `gorm:"column:attempt_no;type:int;not null;uniqueIndex:uk_task_attempt,priority:2;comment:'任务内尝试序号'"`
-	RequestID   string                          `gorm:"column:request_id;type:varchar(128);not null;uniqueIndex:uk_attempt_request,priority:2;comment:'etask 幂等请求标识'"`
-	RunnerID    int64                           `gorm:"column:runner_id;type:bigint;not null;index;comment:'本次选择的 Runner ID'"`
-	ProgramKind string                          `gorm:"column:program_kind;type:varchar(16);not null;default:INLINE;comment:'本次执行的程序模式'"`
-	ExecutionID sql.NullInt64                   `gorm:"column:execution_id;type:bigint;uniqueIndex;comment:'etask 执行 ID'"`
-	Status      string                          `gorm:"column:status;type:varchar(24);not null;index;comment:'执行尝试状态'"`
-	Input       sqlx.JsonField[domain.TaskArgs] `gorm:"column:input;type:json;comment:'业务输入快照'"`
-	Output      string                          `gorm:"column:output;type:mediumtext;comment:'结构化执行输出'"`
-	Error       string                          `gorm:"column:error_message;type:text;comment:'提交或执行错误'"`
-	SubmittedAt int64                           `gorm:"column:submitted_at;type:bigint;not null;default:0;comment:'提交成功时间'"`
-	CompletedAt int64                           `gorm:"column:completed_at;type:bigint;not null;default:0;comment:'执行完成时间'"`
-	CTime       int64                           `gorm:"column:ctime;type:bigint;comment:'创建时间'"`
-	UTime       int64                           `gorm:"column:utime;type:bigint;comment:'更新时间'"`
+	ID              int64                           `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'执行尝试主键'"`
+	TenantID        int64                           `gorm:"column:tenant_id;type:bigint;not null;uniqueIndex:uk_attempt_request,priority:1;index;comment:'租户 ID'"`
+	TaskID          int64                           `gorm:"column:task_id;type:bigint;not null;uniqueIndex:uk_task_attempt,priority:1;index;comment:'自动化任务 ID'"`
+	AttemptNo       int                             `gorm:"column:attempt_no;type:int;not null;uniqueIndex:uk_task_attempt,priority:2;comment:'任务内尝试序号'"`
+	RequestID       string                          `gorm:"column:request_id;type:varchar(128);not null;uniqueIndex:uk_attempt_request,priority:2;comment:'etask 幂等请求标识'"`
+	DefaultRunnerID int64                           `gorm:"column:default_runner_id;type:bigint;not null;default:0;index;comment:'节点默认 Runner ID'"`
+	RunnerID        int64                           `gorm:"column:runner_id;type:bigint;not null;index;comment:'本次选择的 Runner ID'"`
+	RouteRuleID     int64                           `gorm:"column:route_rule_id;type:bigint;not null;default:0;index;comment:'命中的 Runner 路由规则 ID，0 表示默认路由'"`
+	ExecutionID     sql.NullInt64                   `gorm:"column:execution_id;type:bigint;uniqueIndex;comment:'etask 执行 ID'"`
+	Status          string                          `gorm:"column:status;type:varchar(24);not null;index;comment:'执行尝试状态'"`
+	Input           sqlx.JsonField[domain.TaskArgs] `gorm:"column:input;type:json;comment:'业务输入快照'"`
+	Output          string                          `gorm:"column:output;type:mediumtext;comment:'结构化执行输出'"`
+	Error           string                          `gorm:"column:error_message;type:text;comment:'提交或执行错误'"`
+	SubmittedAt     int64                           `gorm:"column:submitted_at;type:bigint;not null;default:0;comment:'提交成功时间'"`
+	CompletedAt     int64                           `gorm:"column:completed_at;type:bigint;not null;default:0;comment:'执行完成时间'"`
+	CTime           int64                           `gorm:"column:ctime;type:bigint;comment:'创建时间'"`
+	UTime           int64                           `gorm:"column:utime;type:bigint;comment:'更新时间'"`
 }
 
 // TableName 返回执行尝试表名。
@@ -41,7 +42,7 @@ func (TaskAttempt) TableName() string { return "automation_task_attempts" }
 // TaskAttemptDAO 定义执行尝试的持久化和状态迁移能力。
 type TaskAttemptDAO interface {
 	// Begin 在任务行锁内创建下一次尝试，或返回尚未完成提交的当前尝试。
-	Begin(ctx context.Context, taskID, runnerID int64, programKind domain.ProgramKind,
+	Begin(ctx context.Context, taskID int64, decision domain.RunnerRouteDecision,
 		input domain.TaskArgs) (TaskAttempt, error)
 	// BindExecution 绑定 etask 执行 ID，并将任务和尝试置为运行中。
 	BindExecution(ctx context.Context, attemptID, executionID int64) error
@@ -64,8 +65,8 @@ type gormTaskAttemptDAO struct{ db *gorm.DB }
 // NewTaskAttemptDAO 创建执行尝试 DAO。
 func NewTaskAttemptDAO(db *gorm.DB) TaskAttemptDAO { return &gormTaskAttemptDAO{db: db} }
 
-func (g *gormTaskAttemptDAO) Begin(ctx context.Context, taskID, runnerID int64,
-	programKind domain.ProgramKind, input domain.TaskArgs) (TaskAttempt, error) {
+func (g *gormTaskAttemptDAO) Begin(ctx context.Context, taskID int64,
+	decision domain.RunnerRouteDecision, input domain.TaskArgs) (TaskAttempt, error) {
 	var attempt TaskAttempt
 	err := g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var snapshot Task
@@ -102,10 +103,12 @@ func (g *gormTaskAttemptDAO) Begin(ctx context.Context, taskID, runnerID int64,
 		now := time.Now().UnixMilli()
 		attempt = TaskAttempt{
 			TaskID: taskID, AttemptNo: attemptNo,
-			RequestID: fmt.Sprintf("eflow:%d:%d", taskID, attemptNo),
-			RunnerID:  runnerID, ProgramKind: string(programKind),
-			Status: string(domain.AttemptStatusSubmitting),
-			Input:  sqlx.JsonField[domain.TaskArgs]{Val: input, Valid: true}, CTime: now, UTime: now,
+			RequestID:       fmt.Sprintf("eflow:%d:%d", taskID, attemptNo),
+			DefaultRunnerID: decision.DefaultRunnerID,
+			RunnerID:        decision.SelectedRunnerID,
+			RouteRuleID:     decision.RuleID,
+			Status:          string(domain.AttemptStatusSubmitting),
+			Input:           sqlx.JsonField[domain.TaskArgs]{Val: input, Valid: true}, CTime: now, UTime: now,
 		}
 		if err := tx.Create(&attempt).Error; err != nil {
 			return err
