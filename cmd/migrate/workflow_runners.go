@@ -39,7 +39,7 @@ func newWorkflowRunnersCommand() *cobra.Command {
 	options := workflowRunnerOptions{timeout: defaultWorkflowRunnerMigrationTimeout}
 	cmd := &cobra.Command{
 		Use:   "workflow-runners",
-		Short: "将旧工作流的 tag 路由迁移为明确的 runner_id",
+		Short: "迁移旧工作流的默认执行单元与动态路由",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.Root().SilenceUsage = true
@@ -71,18 +71,27 @@ func runWorkflowRunnerMigration(parent context.Context, options workflowRunnerOp
 	if err != nil {
 		return err
 	}
-	updates, err := planWorkflowRunnerUpdates(ctx, records, env.resolver, &summary, output)
-	printWorkflowRunnerSummary(output, summary, len(updates), options.apply)
+	workflowUpdates, err := planWorkflowRunnerUpdates(ctx, records, env.resolver, &summary, output)
+	if err != nil {
+		printWorkflowRunnerSummary(output, summary, len(workflowUpdates), 0, options.apply)
+		return err
+	}
+	dispatches, err := loadLegacyDispatches(ctx, env.db)
 	if err != nil {
 		return err
 	}
-	if !options.apply || len(updates) == 0 {
-		return nil
-	}
-	if err = applyWorkflowRunnerUpdates(ctx, env.db, updates); err != nil {
+	dispatchUpdates, err := planDispatchNodeUpdates(ctx, dispatches, records, env.resolver, &summary, output)
+	printWorkflowRunnerSummary(output, summary, len(workflowUpdates), len(dispatchUpdates), options.apply)
+	if err != nil {
 		return err
 	}
-	fmt.Fprintf(output, "迁移完成: 已更新 %d 条记录\n", len(updates))
+	if !options.apply || len(workflowUpdates)+len(dispatchUpdates) == 0 {
+		return nil
+	}
+	if err = applyWorkflowRunnerUpdates(ctx, env.db, workflowUpdates, dispatchUpdates); err != nil {
+		return err
+	}
+	fmt.Fprintf(output, "迁移完成: 工作流记录=%d, 动态路由=%d\n", len(workflowUpdates), len(dispatchUpdates))
 	return nil
 }
 
@@ -160,44 +169,64 @@ func (e *workflowRunnerEnvironment) Close() error {
 }
 
 type flowRecord struct {
-	table    string
-	id       int64
-	tenantID int64
-	version  int64
-	flowData dao.LogicFlow
+	table       string
+	id          int64
+	tenantID    int64
+	templateIDs []int64
+	version     int64
+	flowData    dao.LogicFlow
 }
 
 type workflowRunnerSummary struct {
-	workflows       int
-	snapshots       int
-	legacyNodes     int
-	resolvedNodes   int
-	cleanedNodes    int
-	noDefaultNodes  int
-	multipleMatches int
+	workflows            int
+	snapshots            int
+	legacyNodes          int
+	resolvedNodes        int
+	cleanedNodes         int
+	noDefaultNodes       int
+	multipleMatches      int
+	legacyDispatches     int
+	resolvedDispatches   int
+	ambiguousDispatches  int
+	unresolvedDispatches int
 }
 
 func loadWorkflowRecords(ctx context.Context, db *gorm.DB) ([]flowRecord, workflowRunnerSummary, error) {
 	var workflows []dao.Workflow
-	if err := db.WithContext(ctx).Select("id", "tenant_id", "utime", "flow_data").Find(&workflows).Error; err != nil {
+	if err := db.WithContext(ctx).Select("id", "tenant_id", "template_id", "utime", "flow_data").Find(&workflows).Error; err != nil {
 		return nil, workflowRunnerSummary{}, fmt.Errorf("读取 workflow: %w", err)
 	}
 	var snapshots []dao.Snapshot
-	if err := db.WithContext(ctx).Select("id", "tenant_id", "ctime", "flow_data").Find(&snapshots).Error; err != nil {
+	if err := db.WithContext(ctx).Select("id", "tenant_id", "workflow_id", "ctime", "flow_data").Find(&snapshots).Error; err != nil {
 		return nil, workflowRunnerSummary{}, fmt.Errorf("读取 workflow_snapshot: %w", err)
+	}
+	var templates []dao.Template
+	if err := db.WithContext(ctx).Select("id", "tenant_id", "workflow_id").Find(&templates).Error; err != nil {
+		return nil, workflowRunnerSummary{}, fmt.Errorf("读取 template: %w", err)
 	}
 
 	records := make([]flowRecord, 0, len(workflows)+len(snapshots))
+	templatesByWorkflow := make(map[[2]int64][]int64)
+	for _, template := range templates {
+		key := [2]int64{template.TenantID, template.WorkflowId}
+		templatesByWorkflow[key] = append(templatesByWorkflow[key], template.Id)
+	}
 	for _, workflow := range workflows {
+		key := [2]int64{workflow.TenantID, workflow.Id}
+		templateIDs := templatesByWorkflow[key]
+		if workflow.TemplateId > 0 && !containsInt64(templateIDs, workflow.TemplateId) {
+			templateIDs = append(templateIDs, workflow.TemplateId)
+		}
 		records = append(records, flowRecord{
 			table: "workflow", id: workflow.Id, tenantID: workflow.TenantID,
-			version: workflow.Utime, flowData: workflow.FlowData.Val,
+			templateIDs: templateIDs, version: workflow.Utime, flowData: workflow.FlowData.Val,
 		})
 	}
 	for _, snapshot := range snapshots {
 		records = append(records, flowRecord{
 			table: "workflow_snapshot", id: snapshot.Id, tenantID: snapshot.TenantID,
-			version: snapshot.Ctime, flowData: snapshot.FlowData.Val,
+			templateIDs: templatesByWorkflow[[2]int64{snapshot.TenantID, snapshot.WorkflowId}], version: snapshot.Ctime,
+			flowData: snapshot.FlowData.Val,
 		})
 	}
 	return records, workflowRunnerSummary{workflows: len(workflows), snapshots: len(snapshots)}, nil
@@ -305,6 +334,125 @@ func planWorkflowRunnerUpdates(ctx context.Context, records []flowRecord,
 	return updates, nil
 }
 
+type dispatchNodeUpdate struct {
+	id       int64
+	tenantID int64
+	nodeID   string
+}
+
+func loadLegacyDispatches(ctx context.Context, db *gorm.DB) ([]dao.Dispatch, error) {
+	var dispatches []dao.Dispatch
+	err := db.WithContext(ctx).
+		Where("automation_node_id IS NULL OR automation_node_id = ''").
+		Order("id ASC").
+		Find(&dispatches).Error
+	if err != nil {
+		return nil, fmt.Errorf("读取未关联节点的动态路由: %w", err)
+	}
+	return dispatches, nil
+}
+
+type cachedRunner struct {
+	runner etaskclient.Runner
+	err    error
+}
+
+func planDispatchNodeUpdates(ctx context.Context, dispatches []dao.Dispatch, records []flowRecord,
+	resolver etaskclient.RunnerCatalog, summary *workflowRunnerSummary,
+	output io.Writer) ([]dispatchNodeUpdate, error) {
+	currentWorkflows := make(map[[2]int64][]flowRecord)
+	snapshots := make(map[[2]int64][]flowRecord)
+	for _, record := range records {
+		for _, templateID := range record.templateIDs {
+			key := [2]int64{record.tenantID, templateID}
+			if record.table == "workflow" {
+				currentWorkflows[key] = append(currentWorkflows[key], record)
+				continue
+			}
+			snapshots[key] = append(snapshots[key], record)
+		}
+	}
+
+	cache := make(map[[2]int64]cachedRunner)
+	updates := make([]dispatchNodeUpdate, 0, len(dispatches))
+	problems := make([]string, 0)
+	summary.legacyDispatches = len(dispatches)
+	for _, dispatch := range dispatches {
+		cacheKey := [2]int64{dispatch.TenantID, dispatch.RunnerId}
+		result, found := cache[cacheKey]
+		if !found {
+			requestCtx := ctxutil.WithTenantID(ctx, dispatch.TenantID)
+			runner, findErr := resolver.FindByID(requestCtx, dispatch.RunnerId)
+			result = cachedRunner{runner: runner, err: findErr}
+			cache[cacheKey] = result
+		}
+		if result.err != nil {
+			problems = append(problems, describeLegacyDispatch(dispatch, result.err))
+			continue
+		}
+
+		workflowKey := [2]int64{dispatch.TenantID, dispatch.TemplateId}
+		nodeIDs := matchingAutomationNodeIDs(currentWorkflows[workflowKey], result.runner.CodebookID)
+		if len(nodeIDs) == 0 {
+			nodeIDs = matchingAutomationNodeIDs(snapshots[workflowKey], result.runner.CodebookID)
+		}
+		switch len(nodeIDs) {
+		case 1:
+			updates = append(updates, dispatchNodeUpdate{
+				id: dispatch.Id, tenantID: dispatch.TenantID, nodeID: nodeIDs[0],
+			})
+			summary.resolvedDispatches++
+		case 0:
+			summary.unresolvedDispatches++
+			fmt.Fprintln(output, "警告:", describeLegacyDispatch(dispatch,
+				fmt.Errorf("未找到绑定脚本 %d 的自动化节点", result.runner.CodebookID)))
+		default:
+			summary.ambiguousDispatches++
+			fmt.Fprintln(output, "警告:", describeLegacyDispatch(dispatch,
+				fmt.Errorf("脚本 %d 对应多个自动化节点: %s", result.runner.CodebookID,
+					strings.Join(nodeIDs, ", "))))
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return nil, fmt.Errorf("迁移动态路由时发生 %d 个查询错误，未写入任何数据:\n- %s",
+			len(problems), strings.Join(problems, "\n- "))
+	}
+	return updates, nil
+}
+
+func matchingAutomationNodeIDs(records []flowRecord, codebookID int64) []string {
+	nodes := make(map[string]struct{})
+	for _, record := range records {
+		for _, node := range record.flowData.Nodes {
+			if node["type"] != "automation" {
+				continue
+			}
+			properties, ok := node["properties"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			nodeCodebookID, valid := positiveInt64(properties["codebook_id"])
+			nodeID, idValid := node["id"].(string)
+			nodeID = strings.TrimSpace(nodeID)
+			if valid && nodeCodebookID == codebookID && idValid && nodeID != "" {
+				nodes[nodeID] = struct{}{}
+			}
+		}
+	}
+	result := make([]string, 0, len(nodes))
+	for nodeID := range nodes {
+		result = append(result, nodeID)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func describeLegacyDispatch(dispatch dao.Dispatch, err error) string {
+	return fmt.Sprintf("dispatch id=%d tenant_id=%d template_id=%d runner_id=%d: %v",
+		dispatch.Id, dispatch.TenantID, dispatch.TemplateId, dispatch.RunnerId, err)
+}
+
 func matchLegacyRunners(runners []etaskclient.Runner, tag string, programKind domain.ProgramKind) []etaskclient.Runner {
 	matches := make([]etaskclient.Runner, 0)
 	for _, runner := range runners {
@@ -320,6 +468,15 @@ func matchLegacyRunners(runners []etaskclient.Runner, tag string, programKind do
 func containsTag(tags []string, tag string) bool {
 	for _, candidate := range tags {
 		if strings.TrimSpace(candidate) == tag {
+			return true
+		}
+	}
+	return false
+}
+
+func containsInt64(values []int64, expected int64) bool {
+	for _, value := range values {
+		if value == expected {
 			return true
 		}
 	}
@@ -399,9 +556,10 @@ func describeLegacyNode(record flowRecord, node domain.FlowNode, err error) stri
 		record.table, record.id, record.tenantID, node["id"], err)
 }
 
-func applyWorkflowRunnerUpdates(ctx context.Context, db *gorm.DB, updates []flowRecord) error {
+func applyWorkflowRunnerUpdates(ctx context.Context, db *gorm.DB, workflowUpdates []flowRecord,
+	dispatchUpdates []dispatchNodeUpdate) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, update := range updates {
+		for _, update := range workflowUpdates {
 			flowData := sqlx.JsonField[dao.LogicFlow]{Val: update.flowData, Valid: true}
 			versionColumn := "utime"
 			if update.table == "workflow_snapshot" {
@@ -418,11 +576,24 @@ func applyWorkflowRunnerUpdates(ctx context.Context, db *gorm.DB, updates []flow
 				return fmt.Errorf("更新 %s id=%d: 记录不存在或已变化", update.table, update.id)
 			}
 		}
+		for _, update := range dispatchUpdates {
+			result := tx.Model(&dao.Dispatch{}).
+				Where("id = ? AND tenant_id = ?", update.id, update.tenantID).
+				Where("automation_node_id IS NULL OR automation_node_id = ''").
+				Update("automation_node_id", update.nodeID)
+			if result.Error != nil {
+				return fmt.Errorf("更新 dispatch id=%d: %w", update.id, result.Error)
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("更新 dispatch id=%d: 记录不存在或已变化", update.id)
+			}
+		}
 		return nil
 	})
 }
 
-func printWorkflowRunnerSummary(output io.Writer, summary workflowRunnerSummary, updates int, apply bool) {
+func printWorkflowRunnerSummary(output io.Writer, summary workflowRunnerSummary,
+	workflowUpdates, dispatchUpdates int, apply bool) {
 	mode := "预检"
 	if apply {
 		mode = "写入"
@@ -430,7 +601,11 @@ func printWorkflowRunnerSummary(output io.Writer, summary workflowRunnerSummary,
 	fmt.Fprintf(output,
 		"迁移%s: workflow=%d, snapshot=%d, 历史节点=%d, 已迁移默认值=%d, 已有默认值=%d, 无默认值=%d, 多候选=%d, 待更新记录=%d\n",
 		mode, summary.workflows, summary.snapshots, summary.legacyNodes, summary.resolvedNodes,
-		summary.cleanedNodes, summary.noDefaultNodes, summary.multipleMatches, updates)
+		summary.cleanedNodes, summary.noDefaultNodes, summary.multipleMatches, workflowUpdates)
+	fmt.Fprintf(output,
+		"动态路由: 待迁移=%d, 已解析=%d, 多节点歧义=%d, 未解析=%d, 待更新规则=%d\n",
+		summary.legacyDispatches, summary.resolvedDispatches, summary.ambiguousDispatches,
+		summary.unresolvedDispatches, dispatchUpdates)
 	if !apply {
 		fmt.Fprintln(output, "当前为 dry-run，确认结果后添加 --apply 执行写入")
 	}
