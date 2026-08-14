@@ -6,14 +6,16 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
+	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
-	"github.com/Duke1616/eflow/internal/pkg/resolve"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
@@ -38,8 +40,6 @@ type Service interface {
 	GetNodeProperty(info Info, nodeID string) ([]easyflow.Node, any, error)
 	// IsGlobalNotify 校验全局消息通知开关配置是否开启
 	IsGlobalNotify(wf domain.Workflow) bool
-	// EnrichTargets 解析包装运行时审批人匹配的目标元数据
-	EnrichTargets(info Info, assignees []easyflow.Assignee) []resolve.Target
 	// PrepareCommonFields 解析工单数据构建通用属性公示字段
 	PrepareCommonFields(info Info, data *NotificationData) []notification.Field
 	// ResolveAssignees 并发解析当前节点的审批人名单并自动同步注入
@@ -60,7 +60,7 @@ type service struct {
 	taskSvc         taskSvc.Service
 	orderSvc        ticketSvc.Service
 	engineSvc       engineSvc.Service
-	assigneeService resolve.Engine
+	recipientClient notificationv1.NotificationServiceClient
 	logger          *elog.Component
 
 	InitialInterval time.Duration
@@ -68,16 +68,17 @@ type service struct {
 	MaxRetries      int32
 }
 
+// NewService 创建流程通知策略共享服务，并注入 EAlert 通用接收人解析客户端。
 func NewService(userSvc userv1.UserServiceClient, templateSvc templateSvc.Service,
 	taskSvc taskSvc.Service, orderSvc ticketSvc.Service, engineSvc engineSvc.Service,
-	assigneeService resolve.Engine) Service {
+	recipientClient notificationv1.NotificationServiceClient) Service {
 	return &service{
 		templateSvc:     templateSvc,
 		userSvc:         userSvc,
 		taskSvc:         taskSvc,
 		orderSvc:        orderSvc,
 		engineSvc:       engineSvc,
-		assigneeService: assigneeService,
+		recipientClient: recipientClient,
 		logger:          elog.DefaultLogger,
 		InitialInterval: 5 * time.Second,
 		MaxInterval:     15 * time.Second,
@@ -94,16 +95,53 @@ func (s *service) FindTaskForms(ctx context.Context, ticketId int64) ([]domain.F
 }
 
 func (s *service) ResolveAssignees(ctx context.Context, info *Info, assignees []easyflow.Assignee) ([]domain.User, error) {
-	targets := s.EnrichTargets(*info, assignees)
-	users, err := s.assigneeService.Resolve(ctx, targets)
+	if info == nil {
+		return nil, fmt.Errorf("流程上下文不能为空")
+	}
+	selectors, err := s.buildRecipientSelectors(ctx, info, assignees)
 	if err != nil {
-		nodeID := ""
-		if info.CurrentNode != nil {
-			nodeID = info.CurrentNode.NodeID
-		}
+		return nil, err
+	}
+	if len(selectors) == 0 {
+		return nil, nil
+	}
+	if s.recipientClient == nil {
+		return nil, fmt.Errorf("EAlert 接收人解析客户端未配置")
+	}
+	nodeID := ""
+	if info.CurrentNode != nil {
+		nodeID = info.CurrentNode.NodeID
+	}
+	response, err := s.recipientClient.ResolveRecipients(ctx, &notificationv1.ResolveRecipientsRequest{
+		Recipients: selectors,
+	})
+	if err != nil {
 		return nil, fmt.Errorf("解析审批人失败 [Node: %s, Workflow: %s]: %w",
 			nodeID, info.Workflow.Name, err)
 	}
+	if response == nil {
+		return nil, fmt.Errorf("解析审批人失败 [Node: %s, Workflow: %s]: EAlert 返回空响应",
+			nodeID, info.Workflow.Name)
+	}
+	if response.GetErrorCode() != notificationv1.ErrorCode_ERROR_CODE_UNSPECIFIED {
+		return nil, fmt.Errorf("解析审批人失败 [Node: %s, Workflow: %s]: %s",
+			nodeID, info.Workflow.Name, response.GetErrorMessage())
+	}
+	if len(response.GetUserIds()) == 0 {
+		return nil, nil
+	}
+
+	usersResponse, err := s.userSvc.QueryByIds(ctx, &userv1.QueryByIdsReq{Ids: response.GetUserIds()})
+	if err != nil {
+		return nil, fmt.Errorf("查询审批人详情失败: %w", err)
+	}
+	if usersResponse == nil {
+		return nil, fmt.Errorf("查询审批人详情失败: EIAM 返回空响应")
+	}
+	if usersResponse.GetErrorCode() != userv1.ErrorCode_ERROR_CODE_UNSPECIFIED {
+		return nil, fmt.Errorf("查询审批人详情失败: %s", usersResponse.GetErrorMessage())
+	}
+	users := toDomainUsers(usersResponse.GetUsers())
 
 	if info.CurrentNode != nil {
 		info.CurrentNode.UserIDs = slice.Map(users, func(idx int, u domain.User) string {
@@ -290,34 +328,139 @@ func (s *service) IsGlobalNotify(wf domain.Workflow) bool {
 	return true
 }
 
-func (s *service) EnrichTargets(info Info, assignees []easyflow.Assignee) []resolve.Target {
-	return slice.Map(assignees, func(idx int, src easyflow.Assignee) resolve.Target {
-		src = src.Normalize()
-		values := src.Values
-		if src.Rule == "" {
-			s.logger.Warn("发现未定义的审批规则类型",
-				elog.String("nodeId", info.CurrentNode.NodeID),
-				elog.Any("assignee", src))
-		}
-		switch src.Rule {
-		case easyflow.LEADER, easyflow.MAIN_LEADER, easyflow.FOUNDER:
-			if len(values) == 0 {
-				values = []string{info.Ticket.CreateBy}
-			}
-		case easyflow.TEMPLATE:
-			var usernames []string
-			for _, field := range values {
-				if val, ok := info.Ticket.Data[field]; ok {
-					usernames = append(usernames, s.extractUsernamesFromField(field, val)...)
-				}
-			}
-			values = usernames
+// buildRecipientSelectors 将 EFlow 的审批规则转换为 EAlert 通用接收对象。
+// 工单模板字段、流程发起人等仅在这里处理，EAlert 不感知这些业务概念。
+func (s *service) buildRecipientSelectors(ctx context.Context, info *Info,
+	assignees []easyflow.Assignee) ([]*notificationv1.RecipientSelector, error) {
+	if info == nil {
+		return nil, fmt.Errorf("流程上下文不能为空")
+	}
+	selectors := make([]*notificationv1.RecipientSelector, 0, len(assignees))
+	for _, assignee := range assignees {
+		assignee = assignee.Normalize()
+		if assignee.Rule == "" {
+			return nil, fmt.Errorf("审批规则类型不能为空")
 		}
 
-		return resolve.Target{
-			Type:   string(src.Rule),
-			Values: values,
+		switch assignee.Rule {
+		case easyflow.APPOINT:
+			ids, err := s.userIDsByUsernames(ctx, assignee.Values)
+			if err != nil {
+				return nil, err
+			}
+			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_USER, ids)
+		case easyflow.TEMPLATE:
+			usernames := make([]string, 0)
+			for _, field := range assignee.Values {
+				if value, ok := info.Ticket.Data[field]; ok {
+					usernames = append(usernames, s.extractUsernamesFromField(field, value)...)
+				}
+			}
+			ids, err := s.userIDsByUsernames(ctx, usernames)
+			if err != nil {
+				return nil, err
+			}
+			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_USER, ids)
+		case easyflow.FOUNDER, easyflow.LEADER, easyflow.MAIN_LEADER:
+			username := info.Ticket.CreateBy
+			if len(assignee.Values) > 0 && strings.TrimSpace(assignee.Values[0]) != "" {
+				username = assignee.Values[0]
+			}
+			if strings.TrimSpace(username) == "" {
+				return nil, fmt.Errorf("审批规则 %s 缺少发起人信息", assignee.Rule)
+			}
+			ids, err := s.userIDsByUsernames(ctx, []string{username})
+			if err != nil {
+				return nil, fmt.Errorf("解析发起人失败: %w", err)
+			}
+			typeName := notificationv1.RecipientSelectorType_RECIPIENT_USER
+			switch assignee.Rule {
+			case easyflow.LEADER:
+				typeName = notificationv1.RecipientSelectorType_RECIPIENT_DEPARTMENT_LEADER
+			case easyflow.MAIN_LEADER:
+				typeName = notificationv1.RecipientSelectorType_RECIPIENT_SUPERVISING_LEADER
+			}
+			selectors = appendUserSelector(selectors, typeName, ids)
+		case easyflow.DEPARTMENT:
+			ids, err := parseRecipientIDs(assignee.Values)
+			if err != nil {
+				return nil, fmt.Errorf("解析部门 ID 失败: %w", err)
+			}
+			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_DEPARTMENT, ids)
+		case easyflow.TEAM:
+			ids, err := parseRecipientIDs(assignee.Values)
+			if err != nil {
+				return nil, fmt.Errorf("解析团队 ID 失败: %w", err)
+			}
+			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_TEAM, ids)
+		case easyflow.ON_CALL:
+			ids, err := parseRecipientIDs(assignee.Values)
+			if err != nil {
+				return nil, fmt.Errorf("解析值班计划 ID 失败: %w", err)
+			}
+			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_ONCALL, ids)
+		default:
+			return nil, fmt.Errorf("不支持的审批规则类型: %s", assignee.Rule)
 		}
+	}
+	return selectors, nil
+}
+
+func appendUserSelector(selectors []*notificationv1.RecipientSelector,
+	typeName notificationv1.RecipientSelectorType, ids []int64) []*notificationv1.RecipientSelector {
+	if len(ids) == 0 {
+		return selectors
+	}
+	return append(selectors, &notificationv1.RecipientSelector{Type: typeName, TargetIds: ids})
+}
+
+func (s *service) userIDsByUsernames(ctx context.Context, usernames []string) ([]int64, error) {
+	usernames = slice.FilterMap(usernames, func(_ int, username string) (string, bool) {
+		return strings.TrimSpace(username), strings.TrimSpace(username) != ""
+	})
+	if len(usernames) == 0 {
+		return nil, nil
+	}
+	response, err := s.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{Usernames: usernames})
+	if err != nil {
+		return nil, fmt.Errorf("按用户名查询用户失败: %w", err)
+	}
+	if response == nil {
+		return nil, fmt.Errorf("按用户名查询用户失败: EIAM 返回空响应")
+	}
+	if response.GetErrorCode() != userv1.ErrorCode_ERROR_CODE_UNSPECIFIED {
+		return nil, fmt.Errorf("按用户名查询用户失败: %s", response.GetErrorMessage())
+	}
+	return slice.FilterMap(response.GetUsers(), func(_ int, user *userv1.User) (int64, bool) {
+		if user == nil || user.GetId() <= 0 {
+			return 0, false
+		}
+		return user.GetId(), true
+	}), nil
+}
+
+func parseRecipientIDs(values []string) ([]int64, error) {
+	ids := make([]int64, 0, len(values))
+	for _, value := range values {
+		id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil || id <= 0 {
+			return nil, fmt.Errorf("无效 ID [%s]", value)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func toDomainUsers(src []*userv1.User) []domain.User {
+	return slice.FilterMap(src, func(_ int, user *userv1.User) (domain.User, bool) {
+		if user == nil || user.GetId() <= 0 {
+			return domain.User{}, false
+		}
+		return domain.User{
+			Id: user.GetId(), DepartmentId: user.GetDepartmentId(), Username: user.GetUsername(),
+			DisplayName: user.GetDisplayName(), Email: user.GetEmail(), Phone: user.GetPhone(),
+			LarkUserId: user.GetLarkUserId(), WechatUserId: user.GetWechatUserId(),
+		}, true
 	})
 }
 

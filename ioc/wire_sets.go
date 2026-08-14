@@ -11,12 +11,10 @@ import (
 	"github.com/Duke1616/eflow/internal/event"
 	ticketEvent "github.com/Duke1616/eflow/internal/event/ticket"
 	eflowEasyflow "github.com/Duke1616/eflow/internal/pkg/easyflow"
-	"github.com/Duke1616/eflow/internal/pkg/resolve"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
-	"github.com/Duke1616/eflow/internal/service/event/assignees"
 	"github.com/Duke1616/eflow/internal/service/event/easyflow"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
 	"github.com/Duke1616/eflow/internal/service/event/strategy/automation"
@@ -114,19 +112,6 @@ var (
 
 	// EventSet 流程事件模块的 Provider 集合
 	EventSet = wire.NewSet(
-		// 8个审批人解析器
-		assignees.NewAppointResolver,
-		assignees.NewFounderResolver,
-		assignees.NewDepartmentResolver,
-		assignees.NewLeaderResolver,
-		assignees.NewMainLeaderResolver,
-		assignees.NewOnCallResolver,
-		assignees.NewTeamResolver,
-		assignees.NewTemplateResolver,
-
-		// 审批人规则解析引擎
-		InitResolveEngine,
-
 		// 5个通知推送具体节点策略
 		strategy.NewService,
 		automation.NewNotification,
@@ -226,29 +211,4 @@ func InitSendStrategy(
 	carbonCopy *carbon_copy.Notification,
 ) strategy.SendStrategy {
 	return strategy.NewDispatcher(user, auto, startSvc, chatSvc, carbonCopy, base)
-}
-
-// InitResolveEngine 并发规则解析引擎及审批解析器自动注册
-func InitResolveEngine(
-	appoint *assignees.AppointResolver,
-	founder *assignees.FounderResolver,
-	department *assignees.DepartmentResolver,
-	leader *assignees.LeaderResolver,
-	mainLeader *assignees.MainLeaderResolver,
-	onCall *assignees.OnCallResolver,
-	team *assignees.TeamResolver,
-	template *assignees.TemplateResolver,
-) resolve.Engine {
-	engine := resolve.NewEngine()
-	engine.Register(
-		appoint,
-		founder,
-		department,
-		leader,
-		mainLeader,
-		onCall,
-		team,
-		template,
-	)
-	return engine
 }

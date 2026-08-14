@@ -16,6 +16,8 @@ enum Business {
   ALERT = 1;
   // 工单消息
   TICKET = 2;
+  // 任务执行消息
+  TASK = 3;
 }
 
 // 渠道类型枚举
@@ -94,12 +96,16 @@ enum ErrorCode {
   PROVIDER_NOT_FOUND = 15;
   // 未知渠道类型
   UNKNOWN_CHANNEL = 16;
+  // 接收对象解析失败
+  RECIPIENT_RESOLUTION_FAILED = 17;
 }
 
 
 service NotificationService {
   // 同步单条发送
   rpc SendNotification(SendNotificationRequest) returns (SendNotificationResponse);
+  // 解析标准化接收对象并返回去重后的 EIAM 用户 ID。
+  rpc ResolveRecipients(ResolveRecipientsRequest) returns (ResolveRecipientsResponse);
 }
 
 // 通知
@@ -136,6 +142,48 @@ message SendNotificationResponse {
   ErrorCode error_code = 3;
   // 错误详情
   string error_message = 4;
+}
+
+// 接收对象选择器类型。
+enum RecipientSelectorType {
+  // 未指定选择器类型。
+  RECIPIENT_SELECTOR_TYPE_UNSPECIFIED = 0;
+  // 指定用户，通过 target_ids 提供 EIAM 用户 ID。
+  RECIPIENT_USER = 1;
+  // 指定团队，通过 target_ids 提供 EAlert 团队 ID。
+  RECIPIENT_TEAM = 2;
+  // 指定部门，通过 target_ids 提供 EIAM 部门 ID。
+  RECIPIENT_DEPARTMENT = 3;
+  // 指定值班计划，通过 target_ids 提供 EAlert 值班计划 ID。
+  RECIPIENT_ONCALL = 4;
+  // 指定用户所属部门的领导列表，通过 target_ids 提供 EIAM 用户 ID。
+  RECIPIENT_DEPARTMENT_LEADER = 5;
+  // 指定用户所属部门的分管领导，通过 target_ids 提供 EIAM 用户 ID。
+  RECIPIENT_SUPERVISING_LEADER = 6;
+}
+
+// 接收对象选择器。
+message RecipientSelector {
+  // 选择器类型，决定 target_ids 的含义。
+  RecipientSelectorType type = 1;
+  // 固定接收对象 ID 列表；ID 的含义由 type 决定。
+  repeated int64 target_ids = 2;
+}
+
+// 解析接收对象请求。
+message ResolveRecipientsRequest {
+  // 接收对象选择器列表；多个选择器的解析结果取并集并按用户 ID 去重。
+  repeated RecipientSelector recipients = 1;
+}
+
+// 解析接收对象响应。
+message ResolveRecipientsResponse {
+  // 去重后的 EIAM 用户 ID 列表。
+  repeated int64 user_ids = 1;
+  // 请求级错误代码；解析成功时为 ERROR_CODE_UNSPECIFIED。
+  ErrorCode error_code = 2;
+  // 请求级错误详情；解析成功时为空。
+  string error_message = 3;
 }
 
 

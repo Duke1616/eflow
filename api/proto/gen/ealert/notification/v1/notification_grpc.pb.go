@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NotificationService_SendNotification_FullMethodName = "/ealert.notification.v1.NotificationService/SendNotification"
+	NotificationService_SendNotification_FullMethodName  = "/ealert.notification.v1.NotificationService/SendNotification"
+	NotificationService_ResolveRecipients_FullMethodName = "/ealert.notification.v1.NotificationService/ResolveRecipients"
 )
 
 // NotificationServiceClient is the client API for NotificationService service.
@@ -28,6 +29,8 @@ const (
 type NotificationServiceClient interface {
 	// 同步单条发送
 	SendNotification(ctx context.Context, in *SendNotificationRequest, opts ...grpc.CallOption) (*SendNotificationResponse, error)
+	// 解析标准化接收对象并返回去重后的 EIAM 用户 ID。
+	ResolveRecipients(ctx context.Context, in *ResolveRecipientsRequest, opts ...grpc.CallOption) (*ResolveRecipientsResponse, error)
 }
 
 type notificationServiceClient struct {
@@ -48,12 +51,24 @@ func (c *notificationServiceClient) SendNotification(ctx context.Context, in *Se
 	return out, nil
 }
 
+func (c *notificationServiceClient) ResolveRecipients(ctx context.Context, in *ResolveRecipientsRequest, opts ...grpc.CallOption) (*ResolveRecipientsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveRecipientsResponse)
+	err := c.cc.Invoke(ctx, NotificationService_ResolveRecipients_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NotificationServiceServer is the server API for NotificationService service.
 // All implementations must embed UnimplementedNotificationServiceServer
 // for forward compatibility.
 type NotificationServiceServer interface {
 	// 同步单条发送
 	SendNotification(context.Context, *SendNotificationRequest) (*SendNotificationResponse, error)
+	// 解析标准化接收对象并返回去重后的 EIAM 用户 ID。
+	ResolveRecipients(context.Context, *ResolveRecipientsRequest) (*ResolveRecipientsResponse, error)
 	mustEmbedUnimplementedNotificationServiceServer()
 }
 
@@ -66,6 +81,9 @@ type UnimplementedNotificationServiceServer struct{}
 
 func (UnimplementedNotificationServiceServer) SendNotification(context.Context, *SendNotificationRequest) (*SendNotificationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendNotification not implemented")
+}
+func (UnimplementedNotificationServiceServer) ResolveRecipients(context.Context, *ResolveRecipientsRequest) (*ResolveRecipientsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResolveRecipients not implemented")
 }
 func (UnimplementedNotificationServiceServer) mustEmbedUnimplementedNotificationServiceServer() {}
 func (UnimplementedNotificationServiceServer) testEmbeddedByValue()                             {}
@@ -106,6 +124,24 @@ func _NotificationService_SendNotification_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NotificationService_ResolveRecipients_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveRecipientsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NotificationServiceServer).ResolveRecipients(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NotificationService_ResolveRecipients_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NotificationServiceServer).ResolveRecipients(ctx, req.(*ResolveRecipientsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // NotificationService_ServiceDesc is the grpc.ServiceDesc for NotificationService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -116,6 +152,10 @@ var NotificationService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SendNotification",
 			Handler:    _NotificationService_SendNotification_Handler,
+		},
+		{
+			MethodName: "ResolveRecipients",
+			Handler:    _NotificationService_ResolveRecipients_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

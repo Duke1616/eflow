@@ -16,7 +16,6 @@ import (
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/internal/service/dispatch"
 	"github.com/Duke1616/eflow/internal/service/engine"
-	"github.com/Duke1616/eflow/internal/service/event/assignees"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
 	"github.com/Duke1616/eflow/internal/service/event/strategy/automation"
 	"github.com/Duke1616/eflow/internal/service/event/strategy/carbon_copy"
@@ -102,23 +101,11 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	appointResolver := assignees.NewAppointResolver(userServiceClient)
-	founderResolver := assignees.NewFounderResolver(userServiceClient)
-	departmentServiceClient := eiamClient.DepartmentClient
-	departmentResolver := assignees.NewDepartmentResolver(departmentServiceClient)
-	leaderResolver := assignees.NewLeaderResolver(userServiceClient, departmentServiceClient)
-	mainLeaderResolver := assignees.NewMainLeaderResolver(userServiceClient, departmentServiceClient)
 	ealertConn := InitEALERTGrpcClient(registry)
 	ealertClient := ealert.NewEALERTClient(ealertConn)
-	onCallServiceClient := ealertClient.OnCallClient
-	onCallResolver := assignees.NewOnCallResolver(onCallServiceClient, userServiceClient)
-	teamServiceClient := ealertClient.TeamClient
-	teamResolver := assignees.NewTeamResolver(teamServiceClient, userServiceClient)
-	templateResolver := assignees.NewTemplateResolver(userServiceClient)
-	resolveEngine := InitResolveEngine(appointResolver, founderResolver, departmentResolver, leaderResolver, mainLeaderResolver, onCallResolver, teamResolver, templateResolver)
-	strategyService := strategy.NewService(userServiceClient, service, taskService, ticketService, engineService, resolveEngine)
-	larkClient := InitLarkClient()
 	notificationServiceClient := ealertClient.NotificationClient
+	strategyService := strategy.NewService(userServiceClient, service, taskService, ticketService, engineService, notificationServiceClient)
+	larkClient := InitLarkClient()
 	templateServiceClient := ealertClient.TemplateClient
 	notificationSender, err := InitNotificationSender(larkClient, notificationServiceClient, templateServiceClient)
 	if err != nil {
@@ -127,6 +114,7 @@ func InitApp() (*App, error) {
 	notification := user.NewNotification(strategyService, notificationSender, notificationServiceClient)
 	automationNotification := automation.NewNotification(strategyService, notificationSender)
 	startNotification := start.NewNotification(strategyService, notificationSender)
+	teamServiceClient := ealertClient.TeamClient
 	chatNotification := chat.NewNotification(strategyService, notificationSender, larkClient, teamServiceClient)
 	carbon_copyNotification := carbon_copy.NewNotification(strategyService, notificationSender)
 	sendStrategy := InitSendStrategy(strategyService, notification, automationNotification, startNotification, chatNotification, carbon_copyNotification)
