@@ -11,6 +11,11 @@ type DetailProcessInstIdReq struct {
 	ProcessInstanceId int `json:"process_instance_id"`
 }
 
+// RestartProcessReq 表示重新启动指定工单流程的请求参数。
+type RestartProcessReq struct {
+	TicketID int64 `json:"ticket_id" validate:"required"`
+}
+
 type RecordTaskReq struct {
 	ProcessInstId int   `json:"process_inst_id"`
 	Offset        int64 `json:"offset"`
@@ -129,23 +134,25 @@ type TaskRecord struct {
 }
 
 type Ticket struct {
-	Id                 int64                  `json:"id"`
-	TaskId             int                    `json:"task_id"`
-	TemplateId         int64                  `json:"template_id"`
-	Starter            string                 `json:"starter"`
-	Status             uint8                  `json:"status"`
-	Provide            uint8                  `json:"provide"`
-	ProcessInstanceId  int                    `json:"process_instance_id"`
-	WorkflowId         int64                  `json:"workflow_id"`
-	Ctime              string                 `json:"ctime"`
-	Wtime              string                 `json:"wtime"`
-	Data               map[string]interface{} `json:"data"`
-	CurrentStep        string                 `json:"current_step"`
-	ApprovedBy         string                 `json:"approved_by"`
-	ProcInstCreateTime interface{}            `json:"proc_inst_create_time"`
-	CanRate            bool                   `json:"can_rate"`
-	Rating             *Rating                `json:"rating,omitempty"`
-	RevokeReason       string                 `json:"revoke_reason,omitempty"`
+	Id                   int64                  `json:"id"`
+	TaskId               int                    `json:"task_id"`
+	TemplateId           int64                  `json:"template_id"`
+	Starter              string                 `json:"starter"`
+	Status               uint8                  `json:"status"`
+	Provide              uint8                  `json:"provide"`
+	ProcessInstanceId    int                    `json:"process_instance_id"`
+	WorkflowId           int64                  `json:"workflow_id"`
+	Ctime                string                 `json:"ctime"`
+	Wtime                string                 `json:"wtime"`
+	Data                 map[string]interface{} `json:"data"`
+	CurrentStep          string                 `json:"current_step"`
+	ApprovedBy           string                 `json:"approved_by"`
+	ProcInstCreateTime   interface{}            `json:"proc_inst_create_time"`
+	CanRate              bool                   `json:"can_rate"`
+	Rating               *Rating                `json:"rating,omitempty"`
+	RevokeReason         string                 `json:"revoke_reason,omitempty"`
+	ProcessStartError    string                 `json:"process_start_error,omitempty"`
+	ProcessStartAttempts int                    `json:"process_start_attempts,omitempty"`
 }
 
 type Rating struct {

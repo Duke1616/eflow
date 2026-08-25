@@ -14,22 +14,24 @@ import (
 
 // Ticket 工单记录实体
 type Ticket struct {
-	Id                int64                             `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'工单自增ID'"`
-	TenantID          int64                             `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
-	BizID             int64                             `gorm:"column:biz_id;type:bigint;index;comment:'关联业务场景ID'"`
-	Key               string                            `gorm:"column:key;type:varchar(64);index;comment:'工单业务唯一单据号Key'"`
-	TemplateId        int64                             `gorm:"column:template_id;type:bigint;not null;index;comment:'绑定工单模板ID'"`
-	WorkflowId        int64                             `gorm:"column:workflow_id;type:bigint;not null;index;comment:'绑定工作流流程ID'"`
-	ProcessInstanceId int                               `gorm:"column:process_instance_id;type:int;index;comment:'关联流程实例执行ID'"`
-	CreateBy          string                            `gorm:"column:create_by;type:varchar(128);index;comment:'工单创建人用户名'"`
-	Provide           uint8                             `gorm:"column:provide;type:tinyint unsigned;comment:'业务提供属性'"`
-	Data              sqlx.JsonField[domain.TicketData] `gorm:"column:data;type:json;comment:'工单用户填写的动态数据json'"`
-	Status            uint8                             `gorm:"column:status;type:tinyint unsigned;index;comment:'工单当前状态'"`
-	NotificationConf  sqlx.JsonField[NotificationConf]  `gorm:"column:notification_conf;type:json;comment:'工单通知偏好参数配置json'"`
-	Ctime             int64                             `gorm:"column:ctime;type:bigint;comment:'创建发起时间(毫秒)'"`
-	Wtime             int64                             `gorm:"column:wtime;type:bigint;comment:'办结归档时间(毫秒)'"`
-	RevokeReason      string                            `gorm:"column:revoke_reason;type:varchar(500);not null;default:'';comment:'撤单原因'"`
-	Utime             int64                             `gorm:"column:utime;type:bigint;comment:'最近修改时间(毫秒)'"`
+	Id                   int64                             `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'工单自增ID'"`
+	TenantID             int64                             `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
+	BizID                int64                             `gorm:"column:biz_id;type:bigint;index;comment:'关联业务场景ID'"`
+	Key                  string                            `gorm:"column:key;type:varchar(64);index;comment:'工单业务唯一单据号Key'"`
+	TemplateId           int64                             `gorm:"column:template_id;type:bigint;not null;index;comment:'绑定工单模板ID'"`
+	WorkflowId           int64                             `gorm:"column:workflow_id;type:bigint;not null;index;comment:'绑定工作流流程ID'"`
+	ProcessInstanceId    int                               `gorm:"column:process_instance_id;type:int;index;comment:'关联流程实例执行ID'"`
+	CreateBy             string                            `gorm:"column:create_by;type:varchar(128);index;comment:'工单创建人用户名'"`
+	Provide              uint8                             `gorm:"column:provide;type:tinyint unsigned;comment:'业务提供属性'"`
+	Data                 sqlx.JsonField[domain.TicketData] `gorm:"column:data;type:json;comment:'工单用户填写的动态数据json'"`
+	Status               uint8                             `gorm:"column:status;type:tinyint unsigned;index;comment:'工单当前状态'"`
+	NotificationConf     sqlx.JsonField[NotificationConf]  `gorm:"column:notification_conf;type:json;comment:'工单通知偏好参数配置json'"`
+	Ctime                int64                             `gorm:"column:ctime;type:bigint;comment:'创建发起时间(毫秒)'"`
+	Wtime                int64                             `gorm:"column:wtime;type:bigint;comment:'办结归档时间(毫秒)'"`
+	RevokeReason         string                            `gorm:"column:revoke_reason;type:varchar(500);not null;default:'';comment:'撤单原因'"`
+	ProcessStartError    string                            `gorm:"column:process_start_error;type:varchar(1000);not null;default:'';comment:'流程启动失败原因'"`
+	ProcessStartAttempts int                               `gorm:"column:process_start_attempts;type:int;not null;default:0;comment:'流程启动尝试次数'"`
+	Utime                int64                             `gorm:"column:utime;type:bigint;comment:'最近修改时间(毫秒)'"`
 }
 
 // NotificationConf 工单相关的通知模板与参数配置
@@ -53,6 +55,14 @@ type TicketDAO interface {
 	Detail(ctx context.Context, id int64) (Ticket, error)
 	// RegisterProcessInstanceId 为指定工单登记绑定的引擎实例 ID 并且同步置为流转状态
 	RegisterProcessInstanceId(ctx context.Context, id int64, instanceId int, status uint8) error
+	// MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因
+	MarkProcessStartFailed(ctx context.Context, id int64, reason string) error
+	// PrepareProcessRestart 将流程启动失败工单原子切换回启动中状态
+	PrepareProcessRestart(ctx context.Context, id int64) error
+	// ListProcessStartFailed 分页查询流程启动中或启动失败的工单
+	ListProcessStartFailed(ctx context.Context, userId string, offset, limit int64) ([]Ticket, error)
+	// CountProcessStartFailed 统计流程启动中或启动失败的工单数量
+	CountProcessStartFailed(ctx context.Context, userId string) (int64, error)
 	// ListTicketByProcessInstanceIds 根据引擎实例 ID 列表高效批量反查工单物理记录
 	ListTicketByProcessInstanceIds(ctx context.Context, instanceIds []int) ([]Ticket, error)
 	// UpdateStatusByInstanceId 根据工作流实例 ID 物理更新工单单据流转状态
@@ -125,8 +135,56 @@ func (g *gormTicketDAO) RegisterProcessInstanceId(ctx context.Context, id int64,
 	return g.db.WithContext(ctx).Model(&Ticket{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"process_instance_id": instanceId,
 		"status":              status,
+		"process_start_error": "",
 		"utime":               time.Now().UnixMilli(),
 	}).Error
+}
+
+// MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因。
+func (g *gormTicketDAO) MarkProcessStartFailed(ctx context.Context, id int64, reason string) error {
+	if len([]rune(reason)) > 1000 {
+		reason = string([]rune(reason)[:1000])
+	}
+	return g.db.WithContext(ctx).Model(&Ticket{}).
+		Where("id = ? AND process_instance_id = 0 AND status IN ?", id,
+			[]uint8{domain.START.ToUint8(), domain.START_FAILED.ToUint8()}).
+		Updates(map[string]interface{}{
+			"status":                 domain.START_FAILED.ToUint8(),
+			"process_start_error":    reason,
+			"process_start_attempts": gorm.Expr("process_start_attempts + 1"),
+			"utime":                  time.Now().UnixMilli(),
+		}).Error
+}
+
+// PrepareProcessRestart 将流程启动失败工单原子切换回启动中状态。
+func (g *gormTicketDAO) PrepareProcessRestart(ctx context.Context, id int64) error {
+	result := g.db.WithContext(ctx).Model(&Ticket{}).
+		Where("id = ? AND process_instance_id = 0 AND status = ?", id, domain.START_FAILED.ToUint8()).
+		Updates(map[string]interface{}{
+			"status":              domain.START.ToUint8(),
+			"process_start_error": "",
+			"utime":               time.Now().UnixMilli(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("工单当前不是可重新启动状态")
+	}
+	return nil
+}
+
+// ListProcessStartFailed 分页查询流程启动中或启动失败的工单。
+func (g *gormTicketDAO) ListProcessStartFailed(ctx context.Context, userId string, offset, limit int64) ([]Ticket, error) {
+	var res []Ticket
+	query := g.ticketQuery(ctx, userId, []int{domain.START.ToInt(), domain.START_FAILED.ToInt()})
+	err := query.Order("ctime desc").Limit(int(limit)).Offset(int(offset)).Find(&res).Error
+	return res, err
+}
+
+// CountProcessStartFailed 统计流程启动中或启动失败的工单数量。
+func (g *gormTicketDAO) CountProcessStartFailed(ctx context.Context, userId string) (int64, error) {
+	return g.CountTicket(ctx, userId, []int{domain.START.ToInt(), domain.START_FAILED.ToInt()})
 }
 
 func (g *gormTicketDAO) ListTicketByProcessInstanceIds(ctx context.Context, instanceIds []int) ([]Ticket, error) {

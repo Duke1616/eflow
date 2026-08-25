@@ -48,6 +48,8 @@ const (
 	WITHDRAW Status = 4
 	// WITHDRAWING 工单撤回处理中，用于阻止新的自动化执行尝试。
 	WITHDRAWING Status = 5
+	// START_FAILED 流程实例启动失败，工单保留并允许重新启动。
+	START_FAILED Status = 6
 )
 
 // Provide 工单的发起/同步来源提供者
@@ -82,21 +84,23 @@ type TicketData map[string]interface{}
 
 // Ticket 具体的工单流转实例领域模型（核心业务对象，对应原 ecmdb 中的 Order 概念）
 type Ticket struct {
-	Id               int64            // 工单实例 ID
-	TenantID         int64            // 多租户隔离标识
-	BizID            int64            // 外部关联的业务实体 ID
-	Key              string           // 工单的唯一业务 Key (用以幂等校验等)
-	TemplateId       int64            // 所关联的页面渲染模板 ID
-	WorkflowId       int64            // 所关联的工作流流程定义 ID
-	Data             TicketData       // 用户在表单中填写的工单实时数据属性集合
-	Status           Status           // 工单当前流转状态
-	Provide          Provide          // 工单来源渠道提供商
-	CreateBy         string           // 工单创建/发起人 ID 或是系统名
-	Process          Process          // 绑定的流程引擎运行实例信息
-	Ctime            int64            // 发起创建时间 (毫秒级时间戳)
-	Wtime            int64            // 完成归档时间
-	RevokeReason     string           // 发起人撤回时填写的原因
-	NotificationConf NotificationConf // 为支持告警自动转单等引入的外部通知媒介配置
+	Id                   int64            // 工单实例 ID
+	TenantID             int64            // 多租户隔离标识
+	BizID                int64            // 外部关联的业务实体 ID
+	Key                  string           // 工单的唯一业务 Key (用以幂等校验等)
+	TemplateId           int64            // 所关联的页面渲染模板 ID
+	WorkflowId           int64            // 所关联的工作流流程定义 ID
+	Data                 TicketData       // 用户在表单中填写的工单实时数据属性集合
+	Status               Status           // 工单当前流转状态
+	Provide              Provide          // 工单来源渠道提供商
+	CreateBy             string           // 工单创建/发起人 ID 或是系统名
+	Process              Process          // 绑定的流程引擎运行实例信息
+	Ctime                int64            // 发起创建时间 (毫秒级时间戳)
+	Wtime                int64            // 完成归档时间
+	RevokeReason         string           // 发起人撤回时填写的原因
+	ProcessStartError    string           // 最近一次流程启动失败原因
+	ProcessStartAttempts int              // 流程启动尝试次数
+	NotificationConf     NotificationConf // 为支持告警自动转单等引入的外部通知媒介配置
 }
 
 // WithdrawalCandidate 是长期停留在撤回中状态、等待后台恢复的工单快照。

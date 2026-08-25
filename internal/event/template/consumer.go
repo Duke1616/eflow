@@ -9,6 +9,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	"github.com/Duke1616/eflow/pkg/mqx"
+	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/ecodeclub/mq-api"
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/xen0n/go-workwx"
@@ -62,6 +63,9 @@ func (c *WechatApprovalCallbackConsumer) Consume(ctx context.Context) error {
 	var evt workwx.OAApprovalInfo
 	if err = json.Unmarshal(cm.Value, &evt); err != nil {
 		return fmt.Errorf("解析消息失败: %w", err)
+	}
+	if ctxutil.GetTenantID(ctx) <= 0 {
+		return fmt.Errorf("企业微信审批回调消息缺少租户 metadata: topic=%s", cm.Topic)
 	}
 
 	// NOTE: 在此自动自愈式增量获取或创建与企微绑定的工作流表单模版

@@ -44,6 +44,12 @@ type Service interface {
 	UpdateStatusByProcessInstanceID(ctx context.Context, instanceId int, status uint8) error
 	// BindProcessInstanceID 在流程引擎成功创建实例后反登记引擎的流程实例 ID 到物理工单上
 	BindProcessInstanceID(ctx context.Context, id int64, instanceId int) error
+	// MarkProcessStartFailed 保留工单并记录流程启动失败原因
+	MarkProcessStartFailed(ctx context.Context, id int64, reason string) error
+	// RestartProcess 使用原工单数据重新发送流程启动事件
+	RestartProcess(ctx context.Context, id int64) error
+	// ListProcessStartFailed 查询流程启动失败的工单
+	ListProcessStartFailed(ctx context.Context, userId string, offset, limit int64) ([]domain.Ticket, int64, error)
 	// ListByProcessInstanceIDs 根据流程实例 ID 列表批量高效反查关联的工单明细列表
 	ListByProcessInstanceIDs(ctx context.Context, instanceIds []int) ([]domain.Ticket, error)
 	// ListHistory 分页查询指定用户已完成或已撤销的工单流转历史记录
@@ -95,7 +101,7 @@ func (s *ticketService) CreateBizTicket(ctx context.Context, ticket domain.Ticke
 	// 如果是告警转工单，且 Key 和 BizID 不为空，检查是否已有相同 Key 和 BizID 的进行中工单
 	if ticket.Provide.IsAlert() && ticket.Key != "" && ticket.BizID > 0 {
 		existingTicket, err := s.repo.FindByBizIdAndKey(ctx, ticket.BizID, ticket.Key,
-			[]domain.Status{domain.START, domain.PROCESS, domain.WITHDRAWING})
+			[]domain.Status{domain.START, domain.PROCESS, domain.WITHDRAWING, domain.START_FAILED})
 		if err != nil {
 			s.l.Warn("查询已有工单失败",
 				elog.FieldErr(err),
@@ -132,7 +138,12 @@ func (s *ticketService) CreateBizTicket(ctx context.Context, ticket domain.Ticke
 		return domain.Ticket{}, err
 	}
 
-	return bizTicket, s.sendGenerateFlowEvent(ctx, ticket, bizTicket.Id, "TODO")
+	err = s.sendGenerateFlowEvent(ctx, ticket, bizTicket.Id, "TODO")
+	if err != nil {
+		_ = s.MarkProcessStartFailed(ctx, bizTicket.Id, err.Error())
+		return bizTicket, nil
+	}
+	return bizTicket, nil
 }
 
 func (s *ticketService) CreateTicket(ctx context.Context, req domain.Ticket) error {
@@ -160,7 +171,12 @@ func (s *ticketService) CreateTicket(ctx context.Context, req domain.Ticket) err
 		return err
 	}
 
-	return s.sendGenerateFlowEvent(ctx, req, ticketId, dTm.Name)
+	err := s.sendGenerateFlowEvent(ctx, req, ticketId, dTm.Name)
+	if err != nil {
+		_ = s.MarkProcessStartFailed(ctx, ticketId, err.Error())
+		return nil
+	}
+	return nil
 }
 
 func (s *ticketService) GetByProcessInstanceID(ctx context.Context, instanceId int) (domain.Ticket, error) {
@@ -177,6 +193,59 @@ func (s *ticketService) UpdateStatusByProcessInstanceID(ctx context.Context, ins
 
 func (s *ticketService) BindProcessInstanceID(ctx context.Context, id int64, instanceId int) error {
 	return s.repo.RegisterProcessInstanceId(ctx, id, instanceId)
+}
+
+// MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因。
+func (s *ticketService) MarkProcessStartFailed(ctx context.Context, id int64, reason string) error {
+	return s.repo.MarkProcessStartFailed(ctx, id, reason)
+}
+
+// RestartProcess 校验失败工单后使用原始数据重新发送流程启动事件。
+func (s *ticketService) RestartProcess(ctx context.Context, id int64) error {
+	ticket, err := s.repo.Detail(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ticket.Status != domain.START_FAILED || ticket.Process.InstanceId != 0 {
+		return fmt.Errorf("工单 %d 当前不是可重新启动状态", id)
+	}
+	if err = s.repo.PrepareProcessRestart(ctx, id); err != nil {
+		return err
+	}
+
+	tmpl, err := s.templateSvc.DetailTemplate(ctx, ticket.TemplateId)
+	if err != nil {
+		_ = s.MarkProcessStartFailed(ctx, id, err.Error())
+		return err
+	}
+	if err = s.sendGenerateFlowEvent(ctx, ticket, id, tmpl.Name); err != nil {
+		_ = s.MarkProcessStartFailed(ctx, id, err.Error())
+		return err
+	}
+	return nil
+}
+
+// ListProcessStartFailed 分页查询流程启动中或启动失败的工单及总数。
+func (s *ticketService) ListProcessStartFailed(ctx context.Context, userId string, offset, limit int64) ([]domain.Ticket, int64, error) {
+	var (
+		ts    []domain.Ticket
+		total int64
+		eg    errgroup.Group
+	)
+	eg.Go(func() error {
+		var err error
+		ts, err = s.repo.ListProcessStartFailed(ctx, userId, offset, limit)
+		return err
+	})
+	eg.Go(func() error {
+		var err error
+		total, err = s.repo.CountProcessStartFailed(ctx, userId)
+		return err
+	})
+	if err := eg.Wait(); err != nil {
+		return nil, 0, err
+	}
+	return ts, total, nil
 }
 
 func (s *ticketService) ListByProcessInstanceIDs(ctx context.Context, instanceIds []int) ([]domain.Ticket, error) {
@@ -215,14 +284,14 @@ func (s *ticketService) ListByUser(ctx context.Context, userId string, offset, l
 	eg.Go(func() error {
 		var err error
 		ts, err = s.repo.ListTicket(ctx, userId,
-			[]int{domain.PROCESS.ToInt(), domain.WITHDRAWING.ToInt()}, offset, limit)
+			[]int{domain.START.ToInt(), domain.PROCESS.ToInt(), domain.WITHDRAWING.ToInt(), domain.START_FAILED.ToInt()}, offset, limit)
 		return err
 	})
 
 	eg.Go(func() error {
 		var err error
 		total, err = s.repo.CountTicket(ctx, userId,
-			[]int{domain.PROCESS.ToInt(), domain.WITHDRAWING.ToInt()})
+			[]int{domain.START.ToInt(), domain.PROCESS.ToInt(), domain.WITHDRAWING.ToInt(), domain.START_FAILED.ToInt()})
 		return err
 	})
 	if err := eg.Wait(); err != nil {
@@ -432,7 +501,7 @@ func (s *ticketService) sendGenerateFlowEvent(ctx context.Context, req domain.Ti
 			elog.Any("evt", evt))
 	}
 
-	return nil
+	return err
 }
 
 func (s *ticketService) variables(req domain.Ticket) ([]event.Variables, error) {

@@ -11,6 +11,7 @@ import (
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	"github.com/Duke1616/eflow/pkg/mqx"
+	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/ecodeclub/mq-api"
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/xen0n/go-workwx"
@@ -59,6 +60,9 @@ func (c *WechatTicketConsumer) Consume(ctx context.Context) error {
 	var evt workwx.OAApprovalDetail
 	if err = json.Unmarshal(cm.Value, &evt); err != nil {
 		return fmt.Errorf("解析消息失败: %w", err)
+	}
+	if ctxutil.GetTenantID(ctx) <= 0 {
+		return fmt.Errorf("企业微信工单消息缺少租户 metadata: topic=%s", cm.Topic)
 	}
 
 	// NOTE: 转换企业微信 OA 表单信息为 key-value map 格式

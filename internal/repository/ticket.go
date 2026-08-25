@@ -25,6 +25,14 @@ type TicketRepository interface {
 	Detail(ctx context.Context, id int64) (domain.Ticket, error)
 	// RegisterProcessInstanceId 登记并将生成的流程实例 ID 回写绑定到工单记录中
 	RegisterProcessInstanceId(ctx context.Context, id int64, instanceId int) error
+	// MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因
+	MarkProcessStartFailed(ctx context.Context, id int64, reason string) error
+	// PrepareProcessRestart 将流程启动失败工单原子切换回启动中状态
+	PrepareProcessRestart(ctx context.Context, id int64) error
+	// ListProcessStartFailed 分页查询流程启动中或启动失败的工单
+	ListProcessStartFailed(ctx context.Context, userId string, offset, limit int64) ([]domain.Ticket, error)
+	// CountProcessStartFailed 统计流程启动中或启动失败的工单数量
+	CountProcessStartFailed(ctx context.Context, userId string) (int64, error)
 	// ListTicketByProcessInstanceIds 根据引擎实例 ID 集合批量高效拉取工单记录
 	ListTicketByProcessInstanceIds(ctx context.Context, instanceIds []int) ([]domain.Ticket, error)
 	// UpdateStatusByInstanceId 根据流程实例 ID 更新本地物理工单的最新审批流转状态
@@ -92,6 +100,27 @@ func (repo *ticketRepository) RegisterProcessInstanceId(ctx context.Context, id 
 	return repo.dao.RegisterProcessInstanceId(ctx, id, instanceId, domain.PROCESS.ToUint8())
 }
 
+// MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因。
+func (repo *ticketRepository) MarkProcessStartFailed(ctx context.Context, id int64, reason string) error {
+	return repo.dao.MarkProcessStartFailed(ctx, id, reason)
+}
+
+// PrepareProcessRestart 将流程启动失败工单原子切换回启动中状态。
+func (repo *ticketRepository) PrepareProcessRestart(ctx context.Context, id int64) error {
+	return repo.dao.PrepareProcessRestart(ctx, id)
+}
+
+// ListProcessStartFailed 分页查询流程启动中或启动失败的工单。
+func (repo *ticketRepository) ListProcessStartFailed(ctx context.Context, userId string, offset, limit int64) ([]domain.Ticket, error) {
+	tickets, err := repo.dao.ListProcessStartFailed(ctx, userId, offset, limit)
+	return slice.Map(tickets, func(idx int, src dao.Ticket) domain.Ticket { return repo.toDomain(src) }), err
+}
+
+// CountProcessStartFailed 统计流程启动中或启动失败的工单数量。
+func (repo *ticketRepository) CountProcessStartFailed(ctx context.Context, userId string) (int64, error) {
+	return repo.dao.CountProcessStartFailed(ctx, userId)
+}
+
 func (repo *ticketRepository) ListTicketByProcessInstanceIds(ctx context.Context, instanceIds []int) ([]domain.Ticket, error) {
 	tickets, err := repo.dao.ListTicketByProcessInstanceIds(ctx, instanceIds)
 	return slice.Map(tickets, func(idx int, src dao.Ticket) domain.Ticket { return repo.toDomain(src) }), err
@@ -135,15 +164,17 @@ func (repo *ticketRepository) MergeTicketData(ctx context.Context, id int64, dat
 
 func (repo *ticketRepository) toEntity(req domain.Ticket) dao.Ticket {
 	return dao.Ticket{
-		TenantID:   req.TenantID,
-		BizID:      req.BizID,
-		Key:        req.Key,
-		TemplateId: req.TemplateId,
-		Status:     req.Status.ToUint8(),
-		Provide:    req.Provide.ToUint8(),
-		WorkflowId: req.WorkflowId,
-		CreateBy:   req.CreateBy,
-		Data:       sqlx.JsonField[domain.TicketData]{Val: req.Data, Valid: true},
+		TenantID:             req.TenantID,
+		BizID:                req.BizID,
+		Key:                  req.Key,
+		TemplateId:           req.TemplateId,
+		Status:               req.Status.ToUint8(),
+		Provide:              req.Provide.ToUint8(),
+		WorkflowId:           req.WorkflowId,
+		CreateBy:             req.CreateBy,
+		ProcessStartError:    req.ProcessStartError,
+		ProcessStartAttempts: req.ProcessStartAttempts,
+		Data:                 sqlx.JsonField[domain.TicketData]{Val: req.Data, Valid: true},
 		NotificationConf: sqlx.JsonField[dao.NotificationConf]{
 			Val: dao.NotificationConf{
 				TemplateID:     req.NotificationConf.TemplateID,
@@ -157,20 +188,22 @@ func (repo *ticketRepository) toEntity(req domain.Ticket) dao.Ticket {
 
 func (repo *ticketRepository) toDomain(req dao.Ticket) domain.Ticket {
 	return domain.Ticket{
-		Id:           req.Id,
-		TenantID:     req.TenantID,
-		BizID:        req.BizID,
-		Key:          req.Key,
-		TemplateId:   req.TemplateId,
-		Status:       domain.Status(req.Status),
-		Provide:      domain.Provide(req.Provide),
-		WorkflowId:   req.WorkflowId,
-		Process:      domain.Process{InstanceId: req.ProcessInstanceId},
-		CreateBy:     req.CreateBy,
-		Data:         req.Data.Val,
-		Ctime:        req.Ctime,
-		Wtime:        req.Wtime,
-		RevokeReason: req.RevokeReason,
+		Id:                   req.Id,
+		TenantID:             req.TenantID,
+		BizID:                req.BizID,
+		Key:                  req.Key,
+		TemplateId:           req.TemplateId,
+		Status:               domain.Status(req.Status),
+		Provide:              domain.Provide(req.Provide),
+		WorkflowId:           req.WorkflowId,
+		Process:              domain.Process{InstanceId: req.ProcessInstanceId},
+		CreateBy:             req.CreateBy,
+		Data:                 req.Data.Val,
+		Ctime:                req.Ctime,
+		Wtime:                req.Wtime,
+		RevokeReason:         req.RevokeReason,
+		ProcessStartError:    req.ProcessStartError,
+		ProcessStartAttempts: req.ProcessStartAttempts,
 		NotificationConf: domain.NotificationConf{
 			TemplateID:     req.NotificationConf.Val.TemplateID,
 			TemplateParams: req.NotificationConf.Val.TemplateParams,

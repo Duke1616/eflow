@@ -11,6 +11,7 @@ import (
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eflow/pkg/mqx"
+	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/ecodeclub/mq-api"
 	"github.com/gotomicro/ego/core/elog"
 )
@@ -56,6 +57,9 @@ func (c *ProcessEventConsumer) Consume(ctx context.Context) error {
 	if err = json.Unmarshal(cm.Value, &evt); err != nil {
 		return fmt.Errorf("反序列化流程创建消息失败 %w", err)
 	}
+	if ctxutil.GetTenantID(ctx) <= 0 {
+		return fmt.Errorf("流程创建消息缺少租户 metadata: topic=%s", cm.Topic)
+	}
 
 	return c.handleTask(ctx, evt)
 }
@@ -68,7 +72,12 @@ func (c *ProcessEventConsumer) handleTask(ctx context.Context, evt event.TicketE
 
 	instanceId, err := engine.InstanceStart(flow.ProcessId, "业务申请", flow.Name, evt.Variables)
 	if err != nil {
-		return fmt.Errorf("启动流程引擎失败: %w", err)
+		if markErr := c.ticketSvc.MarkProcessStartFailed(ctx, evt.Id, err.Error()); markErr != nil {
+			return fmt.Errorf("启动流程引擎失败: %w; 记录启动失败状态失败: %v", err, markErr)
+		}
+		c.logger.Error("启动流程引擎失败，已保留工单等待重试",
+			elog.Int64("ticketId", evt.Id), elog.FieldErr(err))
+		return nil
 	}
 
 	// 将生成的流程引擎实例 ID 回写反登记到对应工单上，激活流程实例绑定关系

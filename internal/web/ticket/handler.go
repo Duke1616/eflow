@@ -71,6 +71,9 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 			"ticket:template:view", "ticket:template:view_group_summary", "cmdb:tools:upload").
 		Handle(ginx.B[CreateTicketReq](h.CreateTicket)),
 	)
+	g.POST("/process/restart", op("重新启动流程", "process_restart").
+		Handle(ginx.B[RestartProcessReq](h.RestartProcess)),
+	)
 	g.POST("/detail/process_inst_id", detail("工单详情", "get").
 		Needs("cmdb:tools:download").
 		AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
@@ -192,6 +195,14 @@ func (h *Handler) CreateTicket(ctx *ginx.Context, req CreateTicketReq) (ginx.Res
 	}, nil
 }
 
+// RestartProcess 重新发送流程启动事件，并将结果反馈给工单发起人。
+func (h *Handler) RestartProcess(ctx *ginx.Context, req RestartProcessReq) (ginx.Result, error) {
+	if err := h.svc.RestartProcess(ctx.Context, req.TicketID); err != nil {
+		return systemErrorResult, fmt.Errorf("重新启动流程失败: %w", err)
+	}
+	return ginx.Result{Msg: "流程已重新启动"}, nil
+}
+
 func (h *Handler) TodoAll(ctx *ginx.Context, req Todo) (ginx.Result, error) {
 	instances, total, err := h.engineSvc.ListAllTodoTasks(ctx.Context, req.UserId, req.ProcessName, req.SortByAsc, int(req.Offset), int(req.Limit))
 	if err != nil {
@@ -202,10 +213,17 @@ func (h *Handler) TodoAll(ctx *ginx.Context, req Todo) (ginx.Result, error) {
 	if err != nil {
 		return systemErrorResult, err
 	}
+	failedTickets, failedTotal, err := h.svc.ListProcessStartFailed(ctx.Context, "", req.Offset, req.Limit)
+	if err != nil {
+		return systemErrorResult, err
+	}
+	for _, failed := range failedTickets {
+		tickets = append([]Ticket{h.toVoTicket(failed)}, tickets...)
+	}
 
 	return ginx.Result{
 		Data: RetrieveTickets{
-			Total: total,
+			Total: total + failedTotal,
 			Tasks: tickets,
 		},
 		Msg: "查看待办工单列表成功",
@@ -335,8 +353,11 @@ func (h *Handler) StartUser(ctx *ginx.Context, req StartUserReq) (ginx.Result, e
 		return systemErrorResult, err
 	}
 
-	procInstIds := slice.Map(tickets, func(idx int, src domain.Ticket) int {
-		return src.Process.InstanceId
+	procInstIds := slice.FilterMap(tickets, func(idx int, src domain.Ticket) (int, bool) {
+		if src.Process.InstanceId <= 0 {
+			return 0, false
+		}
+		return src.Process.InstanceId, true
 	})
 
 	processTasks, err := h.engineSvc.ListPendingStepsOfMyTask(ctx.Context, procInstIds, username)
@@ -347,6 +368,11 @@ func (h *Handler) StartUser(ctx *ginx.Context, req StartUserReq) (ginx.Result, e
 	tasks, err := h.toVoEngineTicket(ctx.Context, processTasks)
 	if err != nil {
 		return systemErrorResult, err
+	}
+	for _, failed := range tickets {
+		if failed.Status == domain.START_FAILED || failed.Status == domain.START {
+			tasks = append(tasks, h.toVoTicket(failed))
+		}
 	}
 
 	return ginx.Result{
@@ -526,17 +552,19 @@ func (h *Handler) toDomain(req CreateTicketReq) domain.Ticket {
 
 func (h *Handler) toVoTicket(req domain.Ticket) Ticket {
 	return Ticket{
-		Id:                req.Id,
-		TemplateId:        req.TemplateId,
-		Starter:           req.CreateBy,
-		ProcessInstanceId: req.Process.InstanceId,
-		Provide:           req.Provide.ToUint8(),
-		Status:            req.Status.ToUint8(),
-		WorkflowId:        req.WorkflowId,
-		Ctime:             time.Unix(req.Ctime/1000, 0).Format("2006-01-02 15:04:05"),
-		Wtime:             time.Unix(req.Wtime/1000, 0).Format("2006-01-02 15:04:05"),
-		Data:              req.Data,
-		RevokeReason:      req.RevokeReason,
+		Id:                   req.Id,
+		TemplateId:           req.TemplateId,
+		Starter:              req.CreateBy,
+		ProcessInstanceId:    req.Process.InstanceId,
+		Provide:              req.Provide.ToUint8(),
+		Status:               req.Status.ToUint8(),
+		WorkflowId:           req.WorkflowId,
+		Ctime:                time.Unix(req.Ctime/1000, 0).Format("2006-01-02 15:04:05"),
+		Wtime:                time.Unix(req.Wtime/1000, 0).Format("2006-01-02 15:04:05"),
+		Data:                 req.Data,
+		RevokeReason:         req.RevokeReason,
+		ProcessStartError:    req.ProcessStartError,
+		ProcessStartAttempts: req.ProcessStartAttempts,
 	}
 }
 
@@ -664,18 +692,20 @@ func (h *Handler) toVoEngineTicket(ctx context.Context, instances []domain.Insta
 		}
 
 		return Ticket{
-			Id:                 val.Id,
-			TaskId:             src.TaskID,
-			ProcessInstanceId:  src.ProcInstID,
-			Starter:            starter,
-			CurrentStep:        src.CurrentNodeName,
-			ApprovedBy:         approved,
-			ProcInstCreateTime: createTimeStr,
-			Provide:            val.Provide.ToUint8(),
-			Status:             val.Status.ToUint8(),
-			TemplateId:         val.TemplateId,
-			WorkflowId:         val.WorkflowId,
-			Ctime:              ctime,
+			Id:                   val.Id,
+			TaskId:               src.TaskID,
+			ProcessInstanceId:    src.ProcInstID,
+			Starter:              starter,
+			CurrentStep:          src.CurrentNodeName,
+			ApprovedBy:           approved,
+			ProcInstCreateTime:   createTimeStr,
+			Provide:              val.Provide.ToUint8(),
+			Status:               val.Status.ToUint8(),
+			TemplateId:           val.TemplateId,
+			WorkflowId:           val.WorkflowId,
+			Ctime:                ctime,
+			ProcessStartError:    val.ProcessStartError,
+			ProcessStartAttempts: val.ProcessStartAttempts,
 		}
 	}), nil
 }
