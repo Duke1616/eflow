@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Duke1616/eflow/internal/event"
@@ -36,14 +35,9 @@ func NewProcessEventConsumer(workFlowSvc workflowSvc.Service, ticketSvc ticketSv
 
 // Start 启动后台反射消费监听协程
 func (c *ProcessEventConsumer) Start(ctx context.Context) {
-	go func() {
-		for {
-			if err := c.Consume(ctx); err != nil {
-				c.logger.Error("流程引擎反射事件消费处理失败", elog.FieldErr(err))
-				time.Sleep(time.Second)
-			}
-		}
-	}()
+	go mqx.ConsumeLoop(ctx, c.Consume, func(err error) {
+		c.logger.Error("流程引擎反射事件消费处理失败", elog.FieldErr(err))
+	})
 }
 
 // Consume 消费 Kafka 中的单条工单创建流程事件并触发引擎启动

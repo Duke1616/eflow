@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
@@ -42,15 +41,9 @@ func NewWechatApprovalCallbackConsumer(svc templateSvc.Service, consumer mq.Cons
 
 // Start 启动消息队列消费监听协程
 func (c *WechatApprovalCallbackConsumer) Start(ctx context.Context) {
-	go func() {
-		for {
-			err := c.Consume(ctx)
-			if err != nil {
-				c.logger.Error("创建企业微信工单事件失败", elog.Any("err", err))
-				time.Sleep(time.Second)
-			}
-		}
-	}()
+	go mqx.ConsumeLoop(ctx, c.Consume, func(err error) {
+		c.logger.Error("创建企业微信工单事件失败", elog.Any("err", err))
+	})
 }
 
 // Consume 监听获取企业微信 OA 审批流回调事件，完成模板自愈绑定并触发详情拉取

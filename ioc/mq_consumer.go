@@ -10,6 +10,7 @@ import (
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
+	"github.com/Duke1616/eflow/pkg/mqx"
 	"github.com/ecodeclub/mq-api"
 	"github.com/xen0n/go-workwx"
 )
@@ -19,18 +20,12 @@ func InitProcessEventConsumer(
 	workFlowSvc workflowSvc.Service,
 	ticketSvc ticketSvc.Service,
 ) (*process.ProcessEventConsumer, error) {
-	consumer, err := q.Consumer(event.CreateProcessEventName, "create_process_instance")
-	if err != nil {
-		return nil, err
-	}
+	consumer := mqx.NewResilientConsumer(q, event.CreateProcessEventName, "create_process_instance")
 	return process.NewProcessEventConsumer(workFlowSvc, ticketSvc, consumer), nil
 }
 
 func InitExecuteResultConsumer(q mq.MQ, svc taskSvc.Service) (*taskEvent.ExecuteResultConsumer, error) {
-	consumer, err := q.Consumer(event.ExecuteResultEventName, "task_receive_execute")
-	if err != nil {
-		return nil, err
-	}
+	consumer := mqx.NewResilientConsumer(q, event.ExecuteResultEventName, "task_receive_execute")
 	return taskEvent.NewExecuteResultConsumer(consumer, svc), nil
 }
 
@@ -40,10 +35,7 @@ func InitWechatTicketConsumer(
 	userSvc ticketEvent.UserService,
 	q mq.MQ,
 ) (*ticketEvent.WechatTicketConsumer, error) {
-	consumer, err := q.Consumer(ticketEvent.WechatTicketEventName, "wechat_create_ticket")
-	if err != nil {
-		return nil, err
-	}
+	consumer := mqx.NewResilientConsumer(q, ticketEvent.WechatTicketEventName, "wechat_create_ticket")
 	return ticketEvent.NewWechatTicketConsumer(svc, templateSvc, userSvc, consumer), nil
 }
 
@@ -53,9 +45,6 @@ func InitWechatApprovalCallbackConsumer(
 	p templateEvent.WechatTicketEventProducer,
 	workApp *workwx.WorkwxApp,
 ) (*templateEvent.WechatApprovalCallbackConsumer, error) {
-	consumer, err := q.Consumer(templateEvent.WechatCallbackEventName, "wechat_oa_callback")
-	if err != nil {
-		return nil, err
-	}
+	consumer := mqx.NewResilientConsumer(q, templateEvent.WechatCallbackEventName, "wechat_oa_callback")
 	return templateEvent.NewWechatApprovalCallbackConsumer(svc, consumer, p, workApp), nil
 }

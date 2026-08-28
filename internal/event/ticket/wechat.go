@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
@@ -39,15 +38,9 @@ func NewWechatTicketConsumer(svc ticketSvc.Service, templateSvc templateSvc.Serv
 
 // Start 启动企业微信工单同步事件消费协程
 func (c *WechatTicketConsumer) Start(ctx context.Context) {
-	go func() {
-		for {
-			err := c.Consume(ctx)
-			if err != nil {
-				c.logger.Error("同步企业微信工单创建工单事件失败", elog.Any("err", err))
-				time.Sleep(time.Second)
-			}
-		}
-	}()
+	go mqx.ConsumeLoop(ctx, c.Consume, func(err error) {
+		c.logger.Error("同步企业微信工单创建工单事件失败", elog.Any("err", err))
+	})
 }
 
 // Consume 监听消费单条企业微信 OA 同步消息

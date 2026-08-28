@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/event"
@@ -32,17 +31,9 @@ func NewExecuteResultConsumer(consumer mq.Consumer, svc taskSvc.Service) *Execut
 
 // Start 启动后台消费循环。
 func (c *ExecuteResultConsumer) Start(ctx context.Context) {
-	go func() {
-		for {
-			if err := c.Consume(ctx); err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				c.logger.Error("处理自动化执行结果失败", elog.FieldErr(err))
-				time.Sleep(time.Second)
-			}
-		}
-	}()
+	go mqx.ConsumeLoop(ctx, c.Consume, func(err error) {
+		c.logger.Error("处理自动化执行结果失败", elog.FieldErr(err))
+	})
 }
 
 // Consume 处理一条 etask 完成事件。
