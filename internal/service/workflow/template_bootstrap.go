@@ -22,17 +22,51 @@ func NewTemplateBootstrapTask(templateClient templatev1.TemplateServiceClient) *
 	}
 }
 
-// Start 启动后台模板自愈检查（微延时异步执行，不阻塞应用主启动流程）
+// Start 启动后台模板自愈检查
 func (t *TemplateBootstrapTask) Start(ctx context.Context) {
 	go func() {
-		// 延迟 3 秒，等底层网络与存储连接完全准备就绪
-		time.Sleep(3 * time.Second)
+		// 初始延迟 3 秒，等底层网络与存储连接完全准备就绪
+		timer := time.NewTimer(3 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
 
-		// 注入系统根租户 ID (母体租户 = 1)，供底层的多租户 GORM 插件和 gRPC 拦截器使用
 		systemCtx := ctxutil.WithTenantID(ctx, ctxutil.SystemTenantID)
 
-		if err := t.syncer.SyncAll(systemCtx); err != nil {
-			elog.Error("运行工单消息通知模板自愈任务失败", elog.FieldErr(err))
+		// 指数退避重试策略：若 ealert 未启动，以 5s 起始退避重试；首次成功后每 30 分钟定期巡检
+		backoff := 5 * time.Second
+		const maxBackoff = 5 * time.Minute
+		const regularInterval = 30 * time.Minute
+
+		synced := false
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+			if err := t.syncer.SyncAll(systemCtx); err != nil {
+				elog.Warn("工单消息通知模板自愈同步未完成，稍后重试",
+					elog.FieldErr(err), elog.Duration("next_retry", backoff))
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(backoff):
+					backoff = min(backoff*2, maxBackoff)
+				}
+			} else {
+				if !synced {
+					elog.Info("工单消息通知模板首次全量自愈同步成功")
+					synced = true
+				}
+				backoff = 5 * time.Second // 重置退避
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(regularInterval):
+				}
+			}
 		}
 	}()
 }
