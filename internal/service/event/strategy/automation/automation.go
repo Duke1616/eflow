@@ -13,6 +13,7 @@ import (
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
 	"github.com/Duke1616/enotify/notify/feishu"
 	"github.com/ecodeclub/ekit/slice"
+	"github.com/gotomicro/ego/core/elog"
 )
 
 const (
@@ -52,11 +53,21 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 	}
 
 	if !property.IsNotify {
-		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), "【自动化节点】未开启消息通知"), fmt.Errorf("%w", errs.ErrNodeNotConfigured)
+		n.Logger().Debug("【自动化节点】未开启消息通知，正常跳过",
+			elog.Int("instID", info.InstID),
+			elog.Int64("ticketID", info.Ticket.Id),
+			elog.String("nodeID", info.CurrentNode.NodeID),
+			elog.String("nodeName", info.CurrentNode.NodeName))
+		return notification.NewSuccessResponse(0, "【自动化节点】未开启消息通知，跳过发送"), nil
 	}
 
 	if !containsAutoNotifyMethod(property.NotifyMethod, ProcessNowSend) {
-		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), "【自动化节点】节点未开启消息通知模式"), fmt.Errorf("%w", errs.ErrNodeNotConfigured)
+		n.Logger().Debug("【自动化节点】未开启即时发送通知模式，正常跳过",
+			elog.Int("instID", info.InstID),
+			elog.Int64("ticketID", info.Ticket.Id),
+			elog.String("nodeID", info.CurrentNode.NodeID),
+			elog.String("nodeName", info.CurrentNode.NodeName))
+		return notification.NewSuccessResponse(0, "【自动化节点】未开启即时发送通知模式，跳过发送"), nil
 	}
 
 	// 3. 获取元数据与自动化任务结果

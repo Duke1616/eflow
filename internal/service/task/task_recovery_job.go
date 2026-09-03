@@ -58,7 +58,7 @@ func (j *TaskRecoveryJob) run(ctx context.Context) error {
 			if now.Before(time.UnixMilli(task.UTime).Add(j.staleAfter)) {
 				return
 			}
-			if handleErr := current.handle(ctx, task.ID); handleErr != nil {
+			if handleErr := current.handle(tenantContext(ctx, task.TenantID), task.ID); handleErr != nil {
 				j.logger.Error(current.log, elog.Int64("taskID", task.ID), elog.FieldErr(handleErr))
 			}
 		})

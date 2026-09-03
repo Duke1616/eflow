@@ -52,6 +52,11 @@ const (
 	START_FAILED Status = 6
 )
 
+// AllowsProcessRestart 判断工单状态是否处于允许重新启动底层流程引擎的阶段（未终态启动或启动失败）
+func (s Status) AllowsProcessRestart() bool {
+	return s == START || s == START_FAILED
+}
+
 // Provide 工单的发起/同步来源提供者
 type Provide uint8
 
@@ -139,9 +144,20 @@ func (o *Ticket) Validate() error {
 	return nil
 }
 
+// CanRestartProcess 判断工单是否具备重新启动底层流程引擎的资格。
+// 仅允许未绑定流程实例且状态处于允许重启集（START / START_FAILED）的工单重新触发流程启动。
+func (t Ticket) CanRestartProcess() bool {
+	return !t.Process.IsBound() && t.Status.AllowsProcessRestart()
+}
+
 // Process 承载流程引擎对于该工单底层流转的实例映射信息
 type Process struct {
 	InstanceId int // 绑定的流程执行引擎实例 ID (即 proc_inst 表中的 ID)
+}
+
+// IsBound 判断是否已成功绑定流程引擎实例
+func (p Process) IsBound() bool {
+	return p.InstanceId > 0
 }
 
 // NotificationParams 发送消息通知携带的特定业务参数字典

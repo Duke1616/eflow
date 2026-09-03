@@ -1,3 +1,4 @@
+//go:generate mockgen -source=./template.go -package=repomocks -destination=./mocks/template_repo.mock.go -typed ITemplateRepository
 package repository
 
 import (
@@ -7,7 +8,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/pkg/sqlx"
-	"github.com/ecodeclub/ekit/slice"
+	"github.com/samber/lo"
 	"github.com/xen0n/go-workwx"
 	"gorm.io/gorm"
 )
@@ -144,7 +145,7 @@ func (repo *templateRepository) ListTemplate(ctx context.Context, groupId int64,
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(ts, func(idx int, src dao.Template) domain.Template {
+	return lo.Map(ts, func(src dao.Template, _ int) domain.Template {
 		return repo.toDomain(src)
 	}), nil
 }
@@ -158,7 +159,7 @@ func (repo *templateRepository) FindByTemplateIds(ctx context.Context, ids []int
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(ts, func(idx int, src dao.Template) domain.Template {
+	return lo.Map(ts, func(src dao.Template, _ int) domain.Template {
 		return repo.toDomain(src)
 	}), nil
 }
@@ -168,7 +169,7 @@ func (repo *templateRepository) GetByWorkflowId(ctx context.Context, workflowId 
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(ts, func(idx int, src dao.Template) domain.Template {
+	return lo.Map(ts, func(src dao.Template, _ int) domain.Template {
 		return repo.toDomain(src)
 	}), nil
 }
@@ -208,7 +209,7 @@ func (repo *templateRepository) ListGroup(ctx context.Context, offset, limit int
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(gs, func(idx int, src dao.TemplateGroup) domain.TemplateGroup {
+	return lo.Map(gs, func(src dao.TemplateGroup, _ int) domain.TemplateGroup {
 		return repo.toGroupDomain(src)
 	}), nil
 }
@@ -232,7 +233,7 @@ func (repo *templateRepository) ListGroupSummaries(ctx context.Context) ([]domai
 		countByGroupId[count.GroupId] = count.Total
 	}
 
-	return slice.Map(groups, func(idx int, src dao.TemplateGroup) domain.TemplateGroupSummary {
+	return lo.Map(groups, func(src dao.TemplateGroup, _ int) domain.TemplateGroupSummary {
 		return domain.TemplateGroupSummary{
 			Id:    src.Id,
 			Name:  src.Name,
@@ -245,7 +246,7 @@ func (repo *templateRepository) ListGroupSummaries(ctx context.Context) ([]domai
 // --- 实体与领域防腐映射辅助转换 ---
 
 func (repo *templateRepository) toEntity(req domain.Template) dao.Template {
-	rules := slice.Map(req.Rules, func(idx int, src domain.Rule) dao.Rule {
+	rules := lo.Map(req.Rules, func(src domain.Rule, _ int) dao.Rule {
 		return dao.Rule(src)
 	})
 
@@ -267,7 +268,7 @@ func (repo *templateRepository) toEntity(req domain.Template) dao.Template {
 }
 
 func (repo *templateRepository) toDomain(req dao.Template) domain.Template {
-	rules := slice.Map(req.Rules.Val, func(idx int, src dao.Rule) domain.Rule {
+	rules := lo.Map(req.Rules.Val, func(src dao.Rule, _ int) domain.Rule {
 		return domain.Rule(src)
 	})
 

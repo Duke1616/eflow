@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/event"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
@@ -18,8 +17,8 @@ import (
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
-	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
+	"github.com/samber/lo"
 	"github.com/xen0n/go-workwx"
 	"golang.org/x/sync/errgroup"
 )
@@ -68,6 +67,8 @@ type Service interface {
 	Pass(ctx context.Context, taskId int, comment string, extraData map[string]interface{}) error
 	// Reject 驳回当前节点审批，触发驳回分支逻辑并对物理工单流转状态进行合理回滚
 	Reject(ctx context.Context, taskId int, comment string) error
+	// GetTaskFormConfig 获取指定任务节点在当时流程版本中定义的表单字段列表
+	GetTaskFormConfig(ctx context.Context, taskId int, workflowId int64) ([]easyflow.Field, error)
 }
 
 type ticketService struct {
@@ -114,14 +115,15 @@ func (s *ticketService) CreateBizTicket(ctx context.Context, ticket domain.Ticke
 				elog.Int64("bizId", ticket.BizID),
 				elog.String("key", ticket.Key))
 
-			// 异步发送追加告警通知（不阻塞主流程）
+			// 异步发送追加告警通知（不阻塞主流程，使用 WithoutCancel 避免请求结束导致 context canceled）
+			asyncCtx := context.WithoutCancel(ctx)
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
 						s.l.Error("发送追加告警通知发生panic", elog.Any("recover", r))
 					}
 				}()
-				if err := s.sendAppendAlertNotification(ctx, existingTicket, ticket); err != nil {
+				if err := s.sendAppendAlertNotification(asyncCtx, existingTicket, ticket); err != nil {
 					s.l.Error("发送追加告警通知失败",
 						elog.FieldErr(err),
 						elog.Int64("ticketId", existingTicket.Id))
@@ -151,28 +153,20 @@ func (s *ticketService) CreateTicket(ctx context.Context, req domain.Ticket) err
 		return err
 	}
 
-	var (
-		eg       errgroup.Group
-		ticketId int64
-		dTm      domain.Template
-	)
-	eg.Go(func() error {
-		var err error
-		ticketId, err = s.repo.CreateTicket(ctx, req)
-		return err
-	})
-
-	eg.Go(func() error {
-		var err error
-		dTm, err = s.templateSvc.DetailTemplate(ctx, req.TemplateId)
-		return err
-	})
-	if err := eg.Wait(); err != nil {
-		return err
+	// 1. 前置校验模板合法性并读取模板名称，避免写库成功后因模板异常残留无绑定的孤儿工单
+	dTm, err := s.templateSvc.DetailTemplate(ctx, req.TemplateId)
+	if err != nil {
+		return fmt.Errorf("读取工单模板失败: %w", err)
 	}
 
-	err := s.sendGenerateFlowEvent(ctx, req, ticketId, dTm.Name)
+	// 2. 持久化工单主表记录
+	ticketId, err := s.repo.CreateTicket(ctx, req)
 	if err != nil {
+		return fmt.Errorf("创建工单失败: %w", err)
+	}
+
+	// 3. 异步投递启动流程事件
+	if err = s.sendGenerateFlowEvent(ctx, req, ticketId, dTm.Name); err != nil {
 		_ = s.MarkProcessStartFailed(ctx, ticketId, err.Error())
 		return nil
 	}
@@ -200,13 +194,13 @@ func (s *ticketService) MarkProcessStartFailed(ctx context.Context, id int64, re
 	return s.repo.MarkProcessStartFailed(ctx, id, reason)
 }
 
-// RestartProcess 校验失败工单后使用原始数据重新发送流程启动事件。
+// RestartProcess 校验失败或停滞工单后使用原始数据重新发送流程启动事件。
 func (s *ticketService) RestartProcess(ctx context.Context, id int64) error {
 	ticket, err := s.repo.Detail(ctx, id)
 	if err != nil {
 		return err
 	}
-	if ticket.Status != domain.START_FAILED || ticket.Process.InstanceId != 0 {
+	if !ticket.CanRestartProcess() {
 		return fmt.Errorf("工单 %d 当前不是可重新启动状态", id)
 	}
 	if err = s.repo.PrepareProcessRestart(ctx, id); err != nil {
@@ -349,7 +343,7 @@ func (s *ticketService) Pass(ctx context.Context, taskId int, comment string, ex
 
 	// 4. 解析 node 节点数据并定位当前执行节点
 	nodes, _ := easyflow.ParseNodes(snapshot.FlowData.Nodes)
-	node, ok := slice.Find(nodes, func(node easyflow.Node) bool {
+	node, ok := lo.Find(nodes, func(node easyflow.Node) bool {
 		return node.ID == taskInfo.NodeID
 	})
 	if !ok {
@@ -363,7 +357,7 @@ func (s *ticketService) Pass(ctx context.Context, taskId int, comment string, ex
 
 	// 5. 若无表单字段需要录入，则直接触发引擎通过
 	if len(property.Fields) == 0 {
-		return engine.TaskPass(taskId, comment, "", false)
+		return s.engineSvc.Pass(ctx, taskId, comment)
 	}
 
 	// 6. 执行必填与格式正则校验，汇总合并更新项及快照数据
@@ -419,7 +413,7 @@ func (s *ticketService) Pass(ctx context.Context, taskId int, comment string, ex
 		return fmt.Errorf("物理归档任务快照失败: %w", err)
 	}
 
-	return engine.TaskPass(taskId, comment, "", false)
+	return s.engineSvc.Pass(ctx, taskId, comment)
 }
 
 // Reject 审批节点驳回
@@ -436,7 +430,44 @@ func (s *ticketService) Reject(ctx context.Context, taskId int, comment string) 
 		return fmt.Errorf("节点ID%d: %w", taskId, ErrTaskAlreadyFinished)
 	}
 
-	return engine.TaskReject(taskId, comment, "")
+	return s.engineSvc.Reject(ctx, taskId, comment)
+}
+
+// GetTaskFormConfig 获取指定任务节点在流程版本中定义的表单字段配置
+func (s *ticketService) GetTaskFormConfig(ctx context.Context, taskId int, workflowId int64) ([]easyflow.Field, error) {
+	info, err := s.engineSvc.TaskInfo(ctx, taskId)
+	if err != nil {
+		return nil, err
+	}
+
+	inst, err := s.engineSvc.GetInstanceByID(ctx, info.ProcInstID)
+	if err != nil {
+		return nil, err
+	}
+
+	wf, err := s.workflowSvc.FindInstanceFlow(ctx, workflowId, inst.ProcID, inst.ProcVersion)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes, err := easyflow.ParseNodes(wf.FlowData.Nodes)
+	if err != nil {
+		return nil, err
+	}
+
+	targetNode, found := lo.Find(nodes, func(node easyflow.Node) bool {
+		return node.ID == info.NodeID
+	})
+	if !found {
+		return []easyflow.Field{}, nil
+	}
+
+	property, err1 := easyflow.ToNodeProperty[easyflow.UserProperty](targetNode)
+	if err1 != nil {
+		return nil, err1
+	}
+
+	return property.Fields, nil
 }
 
 // validateField 校验表单字段的规则约束
@@ -594,7 +625,7 @@ func convert(data []event.Variables, oaData workwx.OAApprovalDetail) []event.Var
 					Value: contents.Value.Selector.Options[0].Value[0].Text,
 				})
 			case "multi":
-				value := slice.Map(contents.Value.Selector.Options, func(idx int, src workwx.OAContentSelectorOption) string {
+				value := lo.Map(contents.Value.Selector.Options, func(src workwx.OAContentSelectorOption, _ int) string {
 					return src.Value[0].Text
 				})
 
@@ -608,8 +639,8 @@ func convert(data []event.Variables, oaData workwx.OAApprovalDetail) []event.Var
 				Key:   key,
 				Value: contents.Value.Text,
 			})
-		case "default":
-			fmt.Println("不符合筛选规则")
+		default:
+			continue
 		}
 	}
 

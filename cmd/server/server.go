@@ -5,6 +5,7 @@ import (
 
 	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Duke1616/eflow/ioc"
+	"github.com/Duke1616/eiam/pkg/gormx"
 	"github.com/gotomicro/ego"
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/spf13/cobra"
@@ -30,8 +31,8 @@ func startServer() {
 	// 注册流程引擎驱动事件
 	engine.RegisterEvents(app.Event)
 
-	// 启动后台任务
-	ctx := context.Background()
+	// 启动后台任务（后台长任务采用系统级根 Context 启动）
+	ctx := gormx.IgnoreTenantContext(context.Background())
 	app.StartBackgroundTasks(ctx)
 
 	if err = ego.New().Serve(app.GetServers()...).Run(); err != nil {

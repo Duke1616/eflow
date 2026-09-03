@@ -4,10 +4,10 @@ go 1.26
 
 require (
 	github.com/Bunny3th/easy-workflow v1.0.0
-	github.com/Duke1616/ecmdb v1.11.0
-	github.com/Duke1616/eiam v0.0.21
+	github.com/Duke1616/ecmdb v1.11.1
+	github.com/Duke1616/eiam v0.0.22
 	github.com/Duke1616/enotify v0.1.25-0.20260311115016-f762700e83e9
-	github.com/Duke1616/etask v0.0.7
+	github.com/Duke1616/etask v1.12.0
 	github.com/chromedp/chromedp v0.15.1
 	github.com/ecodeclub/ekit v0.0.10
 	github.com/ecodeclub/ginx v0.0.3-0.20250724125208-2ec06fc61450
@@ -17,7 +17,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/google/wire v0.7.0
 	github.com/gotomicro/ego v1.2.6
-	github.com/hashicorp/go-multierror v1.1.1
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.3
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/pressly/goose/v3 v3.27.0
@@ -85,7 +84,6 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/gotomicro/logrotate v0.0.0-20211108034117-46d53eedc960 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.7 // indirect
-	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
@@ -157,4 +155,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/Bunny3th/easy-workflow v1.0.0 => github.com/Duke1616/easy-workflow v1.0.5
+replace github.com/Bunny3th/easy-workflow v1.0.0 => github.com/Duke1616/easy-workflow v1.0.6

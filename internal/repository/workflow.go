@@ -1,3 +1,4 @@
+//go:generate mockgen -source=./workflow.go -package=repomocks -destination=./mocks/workflow_repo.mock.go -typed IWorkflowRepository
 package repository
 
 import (
@@ -6,7 +7,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/pkg/sqlx"
-	"github.com/ecodeclub/ekit/slice"
+	"github.com/samber/lo"
 )
 
 // IWorkflowCoreRepository 工作流核心定义仓储子接口
@@ -69,7 +70,7 @@ func (repo *workflowRepository) List(ctx context.Context, offset, limit int64) (
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(ws, func(idx int, src dao.Workflow) domain.Workflow {
+	return lo.Map(ws, func(src dao.Workflow, _ int) domain.Workflow {
 		return repo.toDomain(src)
 	}), nil
 }
@@ -103,7 +104,7 @@ func (repo *workflowRepository) FindByIds(ctx context.Context, ids []int64) ([]d
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(ws, func(idx int, src dao.Workflow) domain.Workflow {
+	return lo.Map(ws, func(src dao.Workflow, _ int) domain.Workflow {
 		return repo.toDomain(src)
 	}), nil
 }
@@ -113,7 +114,7 @@ func (repo *workflowRepository) FindByKeyword(ctx context.Context, keyword strin
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(ws, func(idx int, src dao.Workflow) domain.Workflow {
+	return lo.Map(ws, func(src dao.Workflow, _ int) domain.Workflow {
 		return repo.toDomain(src)
 	}), nil
 }

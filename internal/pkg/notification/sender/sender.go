@@ -56,10 +56,20 @@ func (d *sender) BatchSend(ctx context.Context, notifications []notification.Not
 	var wg sync.WaitGroup
 	for i := range notifications {
 		n := notifications[i]
+		select {
+		case d.sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return notification.Response{}, ctx.Err()
+		}
 		wg.Add(1)
-		d.sem <- struct{}{} // Acquire semaphore
 		go func() {
 			defer func() {
+				if r := recover(); r != nil {
+					d.logger.Error("批量通知发送发生 panic",
+						elog.Any("recover", r),
+						elog.String("receiver", n.Receiver))
+				}
 				<-d.sem // Release semaphore
 				wg.Done()
 			}()

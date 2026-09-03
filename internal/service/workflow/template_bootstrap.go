@@ -25,6 +25,11 @@ func NewTemplateBootstrapTask(templateClient templatev1.TemplateServiceClient) *
 // Start 启动后台模板自愈检查
 func (t *TemplateBootstrapTask) Start(ctx context.Context) {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				elog.DefaultLogger.Error("后台模板自愈巡检任务发生 panic", elog.Any("recover", r))
+			}
+		}()
 		// 初始延迟 3 秒，等底层网络与存储连接完全准备就绪
 		timer := time.NewTimer(3 * time.Second)
 		defer timer.Stop()

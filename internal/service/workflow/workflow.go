@@ -2,12 +2,15 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
+	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/service/engine"
+	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -37,6 +40,8 @@ type IWorkflowCoreService interface {
 	GetWorkflowSnapshot(ctx context.Context, processID, version int) (domain.Workflow, error)
 	// FindInstanceFlow 获取流程实例运行时所绑定版本的流程定义，提供特定历史快照回溯与降级解析
 	FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error)
+	// GetHighlightedGraph 根据审批轨迹流转情况计算并点亮画布图
+	GetHighlightedGraph(ctx context.Context, workflowId int64, processInstanceId int, status domain.Status) (domain.Workflow, error)
 }
 
 // Service 工作流大业务服务接口
@@ -165,13 +170,14 @@ func (s *workflowService) GetAutomationProperty(workflow easyflow.Workflow, node
 		return easyflow.AutomationProperty{}, err
 	}
 
-	for _, node := range nodes {
-		if node.ID == nodeId {
-			return easyflow.ToNodeProperty[easyflow.AutomationProperty](node)
-		}
+	targetNode, found := lo.Find(nodes, func(node easyflow.Node) bool {
+		return node.ID == nodeId
+	})
+	if !found {
+		return easyflow.AutomationProperty{}, errors.New("node not found")
 	}
 
-	return easyflow.AutomationProperty{}, errors.New("node not found")
+	return easyflow.ToNodeProperty[easyflow.AutomationProperty](targetNode)
 }
 
 func (s *workflowService) GetAutomationNodes(ctx context.Context, workflowId int64) ([]easyflow.AutomationNodeRef, error) {
@@ -187,7 +193,7 @@ func (s *workflowService) GetAutomationNodes(ctx context.Context, workflowId int
 
 	refs := make([]easyflow.AutomationNodeRef, 0, len(nodes))
 	for _, node := range nodes {
-		if node.Type != "automation" {
+		if node.Type != easyflow.NodeTypeAuto {
 			continue
 		}
 		property, err := easyflow.ToNodeProperty[easyflow.AutomationProperty](node)
@@ -229,4 +235,54 @@ func (s *workflowService) FindInstanceFlow(ctx context.Context, workflowID int64
 	}
 
 	return latest, nil
+}
+
+func (s *workflowService) GetHighlightedGraph(ctx context.Context, workflowId int64, processInstanceId int, status domain.Status) (domain.Workflow, error) {
+	// 1. 获取当前流转实例详情
+	inst, err := s.engineSvc.GetInstanceByID(ctx, processInstanceId)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+
+	// 2. 根据实例运行时的版本信息，从物理快照层回溯读取锁定的画布拓扑 FlowData
+	flow, err := s.FindInstanceFlow(ctx, workflowId, inst.ProcID, inst.ProcVersion)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+
+	// 3. 全量提取流转过的审批任务记录
+	tasks, _, err := s.engineSvc.TaskRecord(ctx, processInstanceId, 0, 1000)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+
+	// 4. 将审批记录整理生成 NodeID -> Status 最新状态的聚合 Map
+	nodeStatusMap := lo.Associate(tasks, func(task model.Task) (string, int) {
+		return task.NodeID, task.Status
+	})
+
+	// 5. 根据审批轨迹流转情况，计算出被点亮激活的边路径映射集
+	edgeMap, err := s.engineSvc.GetTraversedEdges(ctx, tasks, processInstanceId, flow.ProcessId, status.ToUint8())
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+
+	// 6. 将原始 LogicFlow 中的 Edges 转换为 easyflow.Edge
+	edgesJSON, err := json.Marshal(flow.FlowData.Edges)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	var edges []easyflow.Edge
+	if err = json.Unmarshal(edgesJSON, &edges); err != nil {
+		return domain.Workflow{}, err
+	}
+
+	edges = easyflow.UpdateEdgeProperties(edges, edgeMap, nodeStatusMap)
+
+	// 7. 使用 EdgeToMap 直接构建 FlowEdge，避免低效的二次 json.Marshal/Unmarshal
+	flow.FlowData.Edges = lo.Map(edges, func(edge easyflow.Edge, _ int) domain.FlowEdge {
+		return domain.FlowEdge(easyflow.EdgeToMap(edge))
+	})
+
+	return flow, nil
 }

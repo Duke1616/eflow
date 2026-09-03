@@ -11,6 +11,7 @@ import (
 	"github.com/Duke1616/eflow/internal/web/ticket"
 	"github.com/Duke1616/eflow/internal/web/workflow"
 	"github.com/Duke1616/eiam/pkg/web/capability"
+	"github.com/Duke1616/eiam/pkg/web/capability/syncer"
 	"github.com/Duke1616/eiam/pkg/web/middleware"
 	"github.com/Duke1616/eiam/pkg/web/sdk"
 	"github.com/gin-gonic/gin"
@@ -20,7 +21,7 @@ import (
 
 // InitGinWebServer 初始化并装载 Gin Web Server，显式挂载工单模板和工作流的 API 私有路由
 func InitGinWebServer(mdls []gin.HandlerFunc, sdk *sdk.SDK,
-	syncer capability.Syncer, providers []capability.PermissionProvider,
+	syncer syncer.Syncer, providers []capability.PermissionProvider,
 	templateHdl *template.Handler, workflowHdl *workflow.Handler,
 	taskHdl *task.Handler,
 	ticketHdl *ticket.Handler, dispatchHdl *dispatch.Handler,

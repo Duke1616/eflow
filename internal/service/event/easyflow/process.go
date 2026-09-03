@@ -19,9 +19,15 @@ import (
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eflow/pkg/mqx"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
+	"github.com/Duke1616/eiam/pkg/gormx"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
 	"golang.org/x/sync/errgroup"
+)
+
+var (
+	variablePattern    = regexp.MustCompile(`[$]\w+`)
+	jsonArrayInPattern = regexp.MustCompile(`'(\[.*?])'\s+(?i)in\s+\(\s*'([^']+)'\s*\)`)
 )
 
 const (
@@ -75,27 +81,32 @@ func (e *ProcessEvent) EventStart(instID int, node *model.Node, prevNode model.N
 		return err
 	}
 
-	// 1. 发送开始通知
+	// 1. 优先绑定工单与流程实例（确立核心领域状态基石）
+	if err = e.ticketSvc.BindProcessInstanceID(ctx, fCtx.Ticket.Id, instID); err != nil {
+		e.logger.Error("【EventStart】绑定工单与流程实例失败", elog.FieldErr(err), elog.Int("instID", instID))
+		return err
+	}
+
+	// 2. 发送开始通知
 	if err = e.dispatchNotify(ctx, fCtx, strategy.Start); err != nil {
 		e.logger.Error("【EventStart】消息通知分发失败", elog.FieldErr(err), elog.Int("instID", instID))
 	}
 
-	// 2. 绑定工单与流程实例
-	return e.ticketSvc.BindProcessInstanceID(ctx, fCtx.Ticket.Id, instID)
+	return nil
 }
 
 // EventAutomation 自动化网关节点处理：同步向任务表单写入自动化任务并异步调度
 func (e *ProcessEvent) EventAutomation(instID int, node *model.Node, prevNode model.Node) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
-	orderId, err := e.engineSvc.GetTicketIdByVariable(ctx, instID)
+	ctx, fCtx, err := e.LoadContext(ctx, instID, node)
 	if err != nil {
+		e.logger.Error("【EventAutomation】加载流程上下文失败", elog.Int("instID", instID), elog.FieldErr(err))
 		return err
 	}
 
-	orderID, _ := strconv.ParseInt(orderId, 10, 64)
-	_, err = e.taskSvc.CreateTask(ctx, orderID, instID, node.NodeID, node.NodeName)
+	_, err = e.taskSvc.CreateTask(ctx, fCtx.Ticket.Id, instID, node.NodeID, node.NodeName)
 	if err != nil {
 		e.logger.Error("创建自动化任务失败", elog.Int("instID", instID), elog.FieldErr(err))
 	}
@@ -164,7 +175,7 @@ func (e *ProcessEvent) EventNotify(instID int, node *model.Node, prevNode model.
 
 	// 2. 处理系统代理节点
 	if len(node.UserIDs) > 0 && node.UserIDs[0] == SysAutoUser {
-		go e.autoPassNode(instID, node.NodeID, "Sys Auto Pass")
+		go e.autoPassNode(ctx, instID, node.NodeID, "Sys Auto Pass")
 		return nil
 	}
 
@@ -179,20 +190,37 @@ func (e *ProcessEvent) EventNotify(instID int, node *model.Node, prevNode model.
 		nodeName = strategy.Automation
 	}
 
-	if err = e.dispatchNotify(ctx, fCtx, nodeName); err != nil {
-		e.logger.Error("【EventNotify】消息发送失败", elog.FieldErr(err), elog.Int("instID", instID))
-	}
-
+	_ = e.dispatchNotify(ctx, fCtx, nodeName)
 	return nil
 }
 
-// dispatchNotify 统一的消息分发方法
+// dispatchNotify 统一的消息分发方法，统一封装全景结构化日志
 func (e *ProcessEvent) dispatchNotify(ctx context.Context, fCtx *strategy.FlowContext, name strategy.NodeName) error {
-	_, err := e.strategy.Send(ctx, strategy.Info{
+	resp, err := e.strategy.Send(ctx, strategy.Info{
 		NodeName:    name,
 		FlowContext: *fCtx,
 	})
-	return err
+	if err != nil {
+		e.logger.Error("【EventNotify】消息发送失败",
+			elog.FieldErr(err),
+			elog.Int("instID", fCtx.InstID),
+			elog.Int64("ticketID", fCtx.Ticket.Id),
+			elog.Int64("workflowID", fCtx.Workflow.Id),
+			elog.String("workflow", fCtx.Workflow.Name),
+			elog.String("nodeID", fCtx.CurrentNode.NodeID),
+			elog.String("nodeName", fCtx.CurrentNode.NodeName),
+			elog.String("strategy", string(name)))
+		return err
+	}
+
+	e.logger.Debug("【EventNotify】消息发送处理完成",
+		elog.Int("instID", fCtx.InstID),
+		elog.Int64("ticketID", fCtx.Ticket.Id),
+		elog.String("nodeID", fCtx.CurrentNode.NodeID),
+		elog.String("nodeName", fCtx.CurrentNode.NodeName),
+		elog.String("strategy", string(name)),
+		elog.String("status", resp.Status))
+	return nil
 }
 
 // LoadContext 并发加载流程运行所需的元数据上下文
@@ -203,20 +231,23 @@ func (e *ProcessEvent) LoadContext(ctx context.Context, instID int, node *model.
 		inst      domain.Instance
 	)
 
+	// 使用系统级提权 Context 拉取工单与流程实例基础信息，以便准确提取工单所属的真实 TenantID
+	baseCtx := gormx.IgnoreTenantContext(ctx)
+
 	// 并发获取基础信息
 	eg.Go(func() error {
-		orderIdStr, err := e.engineSvc.GetTicketIdByVariable(ctx, instID)
+		orderIdStr, err := e.engineSvc.GetTicketIdByVariable(baseCtx, instID)
 		if err != nil {
 			return err
 		}
 		id, _ := strconv.ParseInt(orderIdStr, 10, 64)
-		orderInfo, err = e.ticketSvc.GetByID(ctx, id)
+		orderInfo, err = e.ticketSvc.GetByID(baseCtx, id)
 		return err
 	})
 
 	eg.Go(func() error {
 		var err error
-		inst, err = e.engineSvc.GetInstanceByID(ctx, instID)
+		inst, err = e.engineSvc.GetInstanceByID(baseCtx, instID)
 		return err
 	})
 
@@ -326,8 +357,7 @@ func (e *ProcessEvent) EventSelectiveGatewaySplit(instID int, node *model.Node, 
 }
 
 func (e *ProcessEvent) evaluateExpression(instID int, expr string) (bool, error) {
-	reg := regexp.MustCompile(`[$]\w+`)
-	variables := reg.FindAllString(expr, -1)
+	variables := variablePattern.FindAllString(expr, -1)
 	if len(variables) > 0 {
 		kv, err := engine.ResolveVariables(instID, variables)
 		if err != nil {
@@ -339,7 +369,6 @@ func (e *ProcessEvent) evaluateExpression(instID int, expr string) (bool, error)
 		}
 	}
 
-	jsonArrayInPattern := regexp.MustCompile(`'(\[.*?])'\s+(?i)in\s+\(\s*'([^']+)'\s*\)`)
 	if jsonArrayInPattern.MatchString(expr) {
 		expr = jsonArrayInPattern.ReplaceAllString(expr, `JSON_CONTAINS('$1', '"$2"')`)
 	}
@@ -555,8 +584,14 @@ func (e *ProcessEvent) EventRevoke(instID int, RevokeUserID string) error {
 	return nil
 }
 
-func (e *ProcessEvent) autoPassNode(instID int, nodeID string, comment string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (e *ProcessEvent) autoPassNode(parentCtx context.Context, instID int, nodeID string, comment string) {
+	defer func() {
+		if r := recover(); r != nil {
+			e.logger.Error("自动流转节点发生 panic", elog.Any("recover", r))
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), 10*time.Second)
 	defer cancel()
 
 	ticker := time.NewTicker(500 * time.Millisecond)

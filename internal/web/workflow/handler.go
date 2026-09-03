@@ -1,17 +1,18 @@
 package workflow
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
+	"github.com/Duke1616/eflow/pkg/contract/model"
+	"github.com/Duke1616/eflow/pkg/contract/perm"
 	"github.com/Duke1616/eiam/pkg/web/capability"
-	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/ginx"
 	"github.com/gin-gonic/gin"
+	"github.com/samber/lo"
 )
 
 // Handler 整合工作流定义设计与流转地图的 Web 控制层路由器
@@ -35,46 +36,47 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/workflow")
 
 	// 流程主实体写动作防护
-	g.POST("/create", h.Capability("创建流程", "add").
-		Needs("iam:user:view").
-		Handle(ginx.B[CreateReq](h.Create)),
+	g.POST("/create", h.Define("创建流程", "add").
+		Needs(perm.Workflow.Get, "iam:user:view").
+		Bind(ginx.B[CreateReq](h.Create)),
 	)
-	g.POST("/update", h.Capability("修改流程", "edit").
-		Needs("ticket:workflow:get", "iam:user:view").
-		Handle(ginx.B[UpdateReq](h.Update)),
+	g.POST("/update", h.Define("修改流程", "edit").
+		Needs(perm.Workflow.Get, "iam:user:view").
+		Bind(ginx.B[UpdateReq](h.Update)),
 	)
-	g.DELETE("/delete/:id", h.Capability("删除流程", "delete").
-		Handle(ginx.W(h.Delete)),
+	g.DELETE("/delete/:id", h.Define("删除流程", "delete").
+		Bind(ginx.W(h.Delete)),
 	)
-	g.POST("/deploy", h.Capability("流程发布", "deploy").
-		Handle(ginx.B[DeployReq](h.Deploy)),
+	g.POST("/deploy", h.Define("流程发布", "deploy").
+		Needs(perm.Workflow.Get).
+		Bind(ginx.B[DeployReq](h.Deploy)),
 	)
 
 	// 流程主实体读动作及模糊搜索
-	g.POST("/list", h.Capability("流程列表", "view").
+	g.POST("/list", h.Define("流程列表", "view").
 		Needs("iam:user:view").
-		Handle(ginx.B[ListReq](h.List)),
+		Bind(ginx.B[ListReq](h.List)),
 	)
-	g.POST("/list/by_keyword", h.Capability("模糊检索流程模板", "view_by_keyword").
+	g.POST("/list/by_keyword", h.Define("模糊检索流程模板", "view_by_keyword").
 		NoSync().
-		Handle(ginx.B[ByKeywordReq](h.ByKeyword)),
+		Bind(ginx.B[ByKeywordReq](h.ByKeyword)),
 	)
-	g.POST("/by_ids", h.Capability("批量获取流程详情", "view_by_ids").
+	g.POST("/by_ids", h.Define("批量获取流程详情", "view_by_ids").
 		NoSync().
-		Handle(ginx.B[FindByIdsReq](h.FindByIds)),
+		Bind(ginx.B[FindByIdsReq](h.FindByIds)),
 	)
-	g.POST("/automation/nodes", h.Capability("查询流程自动化节点", "view_automation_nodes").
+	g.POST("/automation/nodes", h.Define("查询流程自动化节点", "view_automation_nodes").
 		NoSync().
-		Handle(ginx.B[AutomationNodesReq](h.AutomationNodes)),
+		Bind(ginx.B[AutomationNodesReq](h.AutomationNodes)),
 	)
-	g.GET("/detail/:id", h.Capability("流程详情", "get").
-		Handle(ginx.W(h.Detail)),
+	g.GET("/detail/:id", h.Define("流程详情", "get").
+		Bind(ginx.W(h.Detail)),
 	)
-	// 工单审批流转状态轨迹轨迹地图
-	g.POST("/graph", h.Capability("流程轨迹图", "graph").
-		Module("center").
+
+	// 工单审批流转状态轨迹地图（跨领域挂载到 ticket:manager 领域）
+	g.POST("/graph", h.For(model.Manager).Define("流程轨迹图", "graph").
 		Group("工单中心/工单详情").
-		Handle(ginx.B[OrderGraphReq](h.FindOrderGraph)),
+		Bind(ginx.B[OrderGraphReq](h.FindOrderGraph)),
 	)
 }
 
@@ -101,7 +103,7 @@ func (h *Handler) List(ctx *ginx.Context, req ListReq) (ginx.Result, error) {
 		Msg: "查询流程模版列表成功",
 		Data: RetrieveWorkflows{
 			Total: total,
-			Workflows: slice.Map(ws, func(idx int, src domain.Workflow) Workflow {
+			Workflows: lo.Map(ws, func(src domain.Workflow, _ int) Workflow {
 				return h.toWorkflowVo(src)
 			}),
 		},
@@ -119,7 +121,7 @@ func (h *Handler) ByKeyword(ctx *ginx.Context, req ByKeywordReq) (ginx.Result, e
 		Msg: "根据关键字搜索流程成功",
 		Data: RetrieveWorkflows{
 			Total: total,
-			Workflows: slice.Map(ws, func(idx int, src domain.Workflow) Workflow {
+			Workflows: lo.Map(ws, func(src domain.Workflow, _ int) Workflow {
 				return h.toWorkflowVo(src)
 			}),
 		},
@@ -146,7 +148,7 @@ func (h *Handler) FindByIds(ctx *ginx.Context, req FindByIdsReq) (ginx.Result, e
 		Msg: "批量查询流程成功",
 		Data: RetrieveWorkflows{
 			Total: int64(len(ws)),
-			Workflows: slice.Map(ws, func(idx int, src domain.Workflow) Workflow {
+			Workflows: lo.Map(ws, func(src domain.Workflow, _ int) Workflow {
 				return h.toWorkflowVo(src)
 			}),
 		},
@@ -163,7 +165,7 @@ func (h *Handler) AutomationNodes(ctx *ginx.Context, req AutomationNodesReq) (gi
 	return ginx.Result{
 		Msg: "查询流程自动化节点成功",
 		Data: RetrieveAutomationNodes{
-			AutomationNodes: slice.Map(nodes, func(_ int, src easyflow.AutomationNodeRef) AutomationNodeVO {
+			AutomationNodes: lo.Map(nodes, func(src easyflow.AutomationNodeRef, _ int) AutomationNodeVO {
 				return AutomationNodeVO{
 					ID: src.ID, Name: src.Name, CodebookID: src.CodebookID, RunnerID: src.RunnerID,
 				}
@@ -237,50 +239,10 @@ func (h *Handler) Delete(ctx *ginx.Context) (ginx.Result, error) {
 
 // FindOrderGraph 计算解析并生成已部署流程的流转地图，通过快照历史和任务记录点亮流转路径连线
 func (h *Handler) FindOrderGraph(ctx *ginx.Context, req OrderGraphReq) (ginx.Result, error) {
-	// 1. 获取当前流转实例详情，以读取绑定的引擎模板 Process ID 及当前的 ProcVersion 版本
-	inst, err := h.engineSvc.GetInstanceByID(ctx.Context, req.ProcessInstanceId)
+	flow, err := h.svc.GetHighlightedGraph(ctx.Context, req.Id, req.ProcessInstanceId, domain.Status(req.Status))
 	if err != nil {
 		return SystemErrorResult, err
 	}
-
-	// 2. 根据实例运行时的版本信息，从物理快照层回溯读取锁死的画布拓扑 FlowData (保障版本敏感)
-	flow, err := h.svc.FindInstanceFlow(ctx.Context, req.Id, inst.ProcID, inst.ProcVersion)
-	if err != nil {
-		return SystemErrorResult, err
-	}
-
-	// 3. 全量提取流转过的审批任务记录，用于追溯辨识 status = 5 被系统抛弃/自动跳过的流转分支
-	tasks, _, err := h.engineSvc.TaskRecord(ctx.Context, req.ProcessInstanceId, 0, 1000)
-	if err != nil {
-		return SystemErrorResult, err
-	}
-
-	// 4. 将审批记录整理生成 NodeID -> Status 最新状态的聚合 Map
-	nodeStatusMap := make(map[string]int)
-	for _, task := range tasks {
-		nodeStatusMap[task.NodeID] = task.Status
-	}
-
-	// 5. 根据审批轨迹流转情况，计算出被点亮激活的边路径映射集
-	edgeMap, err := h.engineSvc.GetTraversedEdges(ctx.Context, tasks, req.ProcessInstanceId, flow.ProcessId, req.Status)
-	if err != nil {
-		return SystemErrorResult, err
-	}
-
-	// 6. 将原始 LogicFlow 中的 Edges 序列化，使用 easyflow 画布算法根据轨迹状态点亮目标连线
-	edgesJSON, _ := json.Marshal(flow.FlowData.Edges)
-	var edges []easyflow.Edge
-	if err = json.Unmarshal(edgesJSON, &edges); err != nil {
-		return SystemErrorResult, err
-	}
-
-	edges = easyflow.UpdateEdgeProperties(edges, edgeMap, nodeStatusMap)
-
-	// 7. 将更新好点亮轨迹属性后的 Edges 重新解包转换回前端渲染所需的 domain.FlowEdge 结构并呈递
-	var newEdges []domain.FlowEdge
-	newEdgesJSON, _ := json.Marshal(edges)
-	_ = json.Unmarshal(newEdgesJSON, &newEdges)
-	flow.FlowData.Edges = newEdges
 
 	return ginx.Result{
 		Data: RetrieveOrderGraph{

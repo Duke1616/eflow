@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eiam/pkg/gormx"
 	"gorm.io/gorm"
 )
 
@@ -131,7 +132,9 @@ func (g *gormTaskDAO) List(ctx context.Context, offset, limit int64) ([]Task, er
 func (g *gormTaskDAO) ListByStatusAfterID(ctx context.Context, status uint8,
 	afterID, limit int64) ([]Task, error) {
 	var tasks []Task
-	err := g.db.WithContext(ctx).Where("status = ? AND id > ?", status, afterID).
+	err := g.db.WithContext(ctx).
+		Scopes(gormx.IgnoreTenant()).
+		Where("status = ? AND id > ?", status, afterID).
 		Order("id ASC").Limit(int(limit)).Find(&tasks).Error
 	return tasks, err
 }
@@ -158,6 +161,7 @@ func (g *gormTaskDAO) CountByInstanceID(ctx context.Context, instanceID int) (in
 func (g *gormTaskDAO) ListReady(ctx context.Context, limit int64) ([]Task, error) {
 	var tasks []Task
 	err := g.db.WithContext(ctx).
+		Scopes(gormx.IgnoreTenant()).
 		Where("status = ? AND scheduled_at <= ?", domain.TaskStatusWaiting.ToUint8(), time.Now().UnixMilli()).
 		Order("scheduled_at ASC, ctime ASC").Limit(int(limit)).Find(&tasks).Error
 	return tasks, err
@@ -166,6 +170,7 @@ func (g *gormTaskDAO) ListReady(ctx context.Context, limit int64) ([]Task, error
 func (g *gormTaskDAO) ListSucceededUnadvanced(ctx context.Context, limit, afterID int64) ([]Task, error) {
 	var tasks []Task
 	err := g.db.WithContext(ctx).
+		Scopes(gormx.IgnoreTenant()).
 		Where("status = ? AND advanced_at = 0 AND id > ?", domain.TaskStatusSuccess.ToUint8(), afterID).
 		Order("id ASC").Limit(int(limit)).Find(&tasks).Error
 	return tasks, err
@@ -173,6 +178,8 @@ func (g *gormTaskDAO) ListSucceededUnadvanced(ctx context.Context, limit, afterI
 
 func (g *gormTaskDAO) MarkAdvanced(ctx context.Context, id int64) error {
 	now := time.Now().UnixMilli()
-	return g.db.WithContext(ctx).Model(&Task{}).Where("id = ? AND advanced_at = 0", id).
+	return g.db.WithContext(ctx).Model(&Task{}).
+		Scopes(gormx.IgnoreTenant()).
+		Where("id = ? AND advanced_at = 0", id).
 		Updates(map[string]any{"advanced_at": now, "utime": now}).Error
 }

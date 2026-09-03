@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eiam/pkg/gormx"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -190,6 +191,7 @@ func (g *gormWithdrawalDAO) ListStale(ctx context.Context, before int64,
 	afterID, limit int64) ([]WithdrawalCandidate, error) {
 	var candidates []WithdrawalCandidate
 	err := g.db.WithContext(ctx).Model(&Ticket{}).
+		Scopes(gormx.IgnoreTenant()).
 		Select(`ticket.id AS ticket_id, ticket.tenant_id, ticket.process_instance_id,
 			EXISTS(SELECT 1 FROM proc_inst pi WHERE pi.id = ticket.process_instance_id) AS engine_active,
 			EXISTS(SELECT 1 FROM hist_proc_inst hpi

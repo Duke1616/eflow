@@ -8,11 +8,12 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
+	"github.com/Duke1616/eflow/pkg/contract/perm"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/Duke1616/eiam/pkg/web/capability"
-	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/ginx"
 	"github.com/gin-gonic/gin"
+	"github.com/samber/lo"
 )
 
 // Handler 整合工单模板及分类分组的 Web 路由处理器
@@ -33,66 +34,71 @@ func NewHandler(svc templateSvc.Service) *Handler {
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	// --- Template 工单模板业务路由 ---
 	g := server.Group("/api/template")
-	g.GET("/detail/:id", h.Capability("工单模板详情", "get").
-		Handle(ginx.W(h.DetailTemplate)),
+	g.GET("/detail/:id", h.Define("工单模板详情", "get").
+		Bind(ginx.W(h.DetailTemplate)),
 	)
-	g.POST("/list", h.Capability("工单模板列表", "view").
-		Needs("ticket:workflow:view_by_ids", "ticket:template:view_group_summary").
-		Handle(ginx.B[ListTemplateReq](h.ListTemplate)),
+	g.POST("/list", h.Define("工单模板列表", "view").
+		Needs(perm.Workflow.ViewByIds, perm.Template.ViewGroupSummary).
+		Bind(ginx.B[ListTemplateReq](h.ListTemplate)),
 	)
 
-	g.POST("/by_ids", h.Capability("批量获取模板详情", "view_by_ids").
+	g.POST("/by_ids", h.Define("批量获取模板详情", "view_by_ids").
 		NoSync().
-		Handle(ginx.B[FindByTemplateIds](h.FindByTemplateIds)),
+		Bind(ginx.B[FindByTemplateIds](h.FindByTemplateIds)),
 	)
-	g.POST("/get_by_workflow_id", h.Capability("根据流程获取模板", "view_by_workflow_id").
+	g.POST("/get_by_workflow_id", h.Define("根据流程获取模板", "view_by_workflow_id").
 		NoSync().
-		Handle(ginx.B[GetTemplatesByWorkFlowIdReq](h.GetTemplatesByWorkflowId)),
+		Bind(ginx.B[GetTemplatesByWorkFlowIdReq](h.GetTemplatesByWorkflowId)),
 	)
-	g.POST("/rules/by_workflow_id", h.Capability("获取流程绑定模板校验链", "rules_by_workflow_id").
+	g.POST("/rules/by_workflow_id", h.Define("获取流程绑定模板校验链", "rules_by_workflow_id").
 		NoSync().
-		Handle(ginx.B[GetRulesByWorkFlowIdReq](h.GetRulesByWorkFlowId)),
+		Bind(ginx.B[GetRulesByWorkFlowIdReq](h.GetRulesByWorkFlowId)),
 	)
-	g.POST("/create", h.Capability("创建工单模板", "add").
-		Needs("ticket:template:view_group", "ticket:workflow:view").
-		Handle(ginx.B[CreateTemplateReq](h.CreateTemplate)),
+	g.POST("/create", h.Define("创建工单模板", "add").
+		Needs(perm.Template.ViewGroup, perm.Workflow.View, perm.Workflow.Get).
+		Bind(ginx.B[CreateTemplateReq](h.CreateTemplate)),
 	)
-	g.POST("/update", h.Capability("修改工单模板", "edit").
-		Needs("ticket:template:view_group", "ticket:workflow:view").
-		Handle(ginx.B[UpdateTemplateReq](h.UpdateTemplate)),
+	g.POST("/update", h.Define("修改工单模板", "edit").
+		Needs(perm.Template.Get, perm.Template.ViewGroup, perm.Workflow.View, perm.Workflow.Get).
+		Bind(ginx.B[UpdateTemplateReq](h.UpdateTemplate)),
 	)
-	g.DELETE("/delete/:id", h.Capability("删除工单模板", "delete").
-		Handle(ginx.W(h.DeleteTemplate)),
+	g.DELETE("/delete/:id", h.Define("删除工单模板", "delete").
+		Bind(ginx.W(h.DeleteTemplate)),
 	)
 
 	// 收藏功能
-	g.POST("/favorite/toggle", h.Capability("收藏状态变更", "toggle_favorite").
+	g.POST("/favorite/toggle", h.Define("收藏状态变更", "toggle_favorite").
 		NoSync().
-		Handle(ginx.B[ToggleFavoriteReq](h.ToggleFavorite)),
+		Bind(ginx.B[ToggleFavoriteReq](h.ToggleFavorite)),
 	)
-	g.POST("/favorite/list", h.Capability("模板收藏夹", "view_favorite").
+	g.POST("/favorite/list", h.Define("模板收藏夹", "view_favorite").
 		NoSync().
-		Handle(ginx.W(h.ListFavoriteTemplates)),
+		Bind(ginx.W(h.ListFavoriteTemplates)),
 	)
 
 	// --- TemplateGroup 工单分类分组路由 ---
 	gg := server.Group("/api/template/group")
-	gg.POST("/list", h.Capability("查询模板分组列表", "view_group").
+	gg.POST("/list", h.Define("查询模板分组列表", "view_group").
+		Group("工单模板/模板分类").
 		NoSync().
-		Handle(ginx.B[Page](h.ListTemplateGroup)),
+		Bind(ginx.B[Page](h.ListTemplateGroup)),
 	)
-	gg.POST("/summary", h.Capability("查询模板分组摘要", "view_group_summary").
+	gg.POST("/summary", h.Define("查询模板分组摘要", "view_group_summary").
+		Group("工单模板/模板分类").
 		NoSync().
-		Handle(ginx.W(h.ListTemplateGroupSummary)),
+		Bind(ginx.W(h.ListTemplateGroupSummary)),
 	)
-	gg.POST("/create", h.Capability("创建模板分类", "add_group").
-		Handle(ginx.B[CreateTemplateGroupReq](h.CreateTemplateGroup)),
+	gg.POST("/create", h.Define("创建模板分类", "add_group").
+		Group("工单模板/模板分类").
+		Bind(ginx.B[CreateTemplateGroupReq](h.CreateTemplateGroup)),
 	)
-	gg.POST("/update", h.Capability("修改模板分类", "edit_group").
-		Handle(ginx.B[UpdateTemplateGroupReq](h.UpdateTemplateGroup)),
+	gg.POST("/update", h.Define("修改模板分类", "edit_group").
+		Group("工单模板/模板分类").
+		Bind(ginx.B[UpdateTemplateGroupReq](h.UpdateTemplateGroup)),
 	)
-	gg.DELETE("/delete/:id", h.Capability("删除模板分类", "delete_group").
-		Handle(ginx.W(h.DeleteTemplateGroup)),
+	gg.DELETE("/delete/:id", h.Define("删除模板分类", "delete_group").
+		Group("工单模板/模板分类").
+		Bind(ginx.W(h.DeleteTemplateGroup)),
 	)
 }
 
@@ -128,7 +134,7 @@ func (h *Handler) FindByTemplateIds(ctx *ginx.Context, req FindByTemplateIds) (g
 		Msg: "获取多个模板信息成功",
 		Data: RetrieveTemplates{
 			Total: int64(len(ts)),
-			Templates: slice.Map(ts, func(idx int, src domain.Template) TemplateJson {
+			Templates: lo.Map(ts, func(src domain.Template, _ int) TemplateJson {
 				return h.toTemplateJsonVo(src)
 			}),
 		},
@@ -162,9 +168,9 @@ func (h *Handler) GetRulesByWorkFlowId(ctx *ginx.Context, req GetRulesByWorkFlow
 	return ginx.Result{
 		Msg: "查询流程绑定的表单规则成功",
 		Data: RetrieveTemplateRules{
-			TemplateRules: slice.Map(wfs, func(idx int, src domain.Template) TemplateRules {
+			TemplateRules: lo.Map(wfs, func(src domain.Template, _ int) TemplateRules {
 				rs, _ := rule.ParseRules(src.Rules)
-				r := slice.Map(rs, func(idx int, src rule.Rule) Rule {
+				r := lo.Map(rs, func(src rule.Rule, _ int) Rule {
 					return Rule{
 						Type:  src.Type,
 						Field: src.Field,
@@ -193,7 +199,7 @@ func (h *Handler) GetTemplatesByWorkflowId(ctx *ginx.Context, req GetTemplatesBy
 	return ginx.Result{
 		Msg: "查询流程绑定的工单模板成功",
 		Data: RetrieveTemplates{
-			Templates: slice.Map(wfs, func(idx int, src domain.Template) TemplateJson {
+			Templates: lo.Map(wfs, func(src domain.Template, _ int) TemplateJson {
 				return h.toTemplateJsonVo(src)
 			}),
 		},
@@ -211,7 +217,7 @@ func (h *Handler) ListTemplate(ctx *ginx.Context, req ListTemplateReq) (ginx.Res
 		Msg: "查询工单模板列表成功",
 		Data: RetrieveTemplateList{
 			Total: total,
-			Templates: slice.Map(ts, func(idx int, src domain.Template) TemplateListItem {
+			Templates: lo.Map(ts, func(src domain.Template, _ int) TemplateListItem {
 				return h.toTemplateListItemVo(src)
 			}),
 		},
@@ -295,7 +301,7 @@ func (h *Handler) ListFavoriteTemplates(ctx *ginx.Context) (ginx.Result, error) 
 		Msg: "获取收藏的工单模板成功",
 		Data: TemplateCombination{
 			Total: int64(len(templates)),
-			Templates: slice.Map(templates, func(idx int, src domain.Template) Template {
+			Templates: lo.Map(templates, func(src domain.Template, _ int) Template {
 				return h.toTemplateVo(src)
 			}),
 		},
@@ -369,7 +375,7 @@ func (h *Handler) ListTemplateGroup(ctx *ginx.Context, req Page) (ginx.Result, e
 		Msg: "查询工单模板组列表成功",
 		Data: RetrieveTemplateGroup{
 			Total: total,
-			TemplateGroups: slice.Map(gs, func(idx int, src domain.TemplateGroup) TemplateGroup {
+			TemplateGroups: lo.Map(gs, func(src domain.TemplateGroup, _ int) TemplateGroup {
 				return TemplateGroup{
 					Id:   src.Id,
 					Name: src.Name,
@@ -391,7 +397,7 @@ func (h *Handler) ListTemplateGroupSummary(ctx *ginx.Context) (ginx.Result, erro
 		Msg: "查询工单模板组摘要成功",
 		Data: RetrieveTemplateGroupSummary{
 			Total: int64(len(summaries)),
-			TemplateGroups: slice.Map(summaries, func(idx int, src domain.TemplateGroupSummary) TemplateGroupSummary {
+			TemplateGroups: lo.Map(summaries, func(src domain.TemplateGroupSummary, _ int) TemplateGroupSummary {
 				return TemplateGroupSummary{
 					Id:    src.Id,
 					Name:  src.Name,
@@ -434,7 +440,7 @@ func (h *Handler) toDomain(req CreateTemplateReq) (domain.Template, error) {
 		}
 	}
 
-	rules := slice.Map(rulesData, func(idx int, src map[string]interface{}) domain.Rule {
+	rules := lo.Map(rulesData, func(src map[string]interface{}, _ int) domain.Rule {
 		return domain.Rule(src)
 	})
 
@@ -469,7 +475,7 @@ func (h *Handler) toTemplateVo(req domain.Template) Template {
 }
 
 func (h *Handler) toTemplateJsonVo(req domain.Template) TemplateJson {
-	rules := slice.Map(req.Rules, func(idx int, src domain.Rule) map[string]interface{} {
+	rules := lo.Map(req.Rules, func(src domain.Rule, _ int) map[string]interface{} {
 		return src
 	})
 
@@ -513,7 +519,7 @@ func (h *Handler) toUpdateDomain(req UpdateTemplateReq) (domain.Template, error)
 		}
 	}
 
-	rules := slice.Map(rulesData, func(idx int, src map[string]interface{}) domain.Rule {
+	rules := lo.Map(rulesData, func(src map[string]interface{}, _ int) domain.Rule {
 		return src
 	})
 

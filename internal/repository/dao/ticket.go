@@ -8,8 +8,10 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/ticketpbac"
 	"github.com/Duke1616/eflow/pkg/sqlx"
+	"github.com/Duke1616/eiam/pkg/gormx"
 	pbacgorm "github.com/Duke1616/eiam/pkg/pbac/gormx"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Ticket 工单记录实体
@@ -107,7 +109,10 @@ func (g *gormTicketDAO) CreateTicket(ctx context.Context, req Ticket) (int64, er
 
 func (g *gormTicketDAO) DetailByProcessInstId(ctx context.Context, instanceId int) (Ticket, error) {
 	var res Ticket
-	err := g.db.WithContext(ctx).Where("process_instance_id = ?", instanceId).First(&res).Error
+	err := g.db.WithContext(ctx).
+		Scopes(gormx.IgnoreTenant()).
+		Where("process_instance_id = ?", instanceId).
+		First(&res).Error
 	return res, err
 }
 
@@ -146,8 +151,9 @@ func (g *gormTicketDAO) MarkProcessStartFailed(ctx context.Context, id int64, re
 		reason = string([]rune(reason)[:1000])
 	}
 	return g.db.WithContext(ctx).Model(&Ticket{}).
+		Scopes(gormx.IgnoreTenant()).
 		Where("id = ? AND process_instance_id = 0 AND status IN ?", id,
-			[]uint8{domain.START.ToUint8(), domain.START_FAILED.ToUint8()}).
+			[]int{domain.START.ToInt(), domain.START_FAILED.ToInt()}).
 		Updates(map[string]interface{}{
 			"status":                 domain.START_FAILED.ToUint8(),
 			"process_start_error":    reason,
@@ -156,10 +162,11 @@ func (g *gormTicketDAO) MarkProcessStartFailed(ctx context.Context, id int64, re
 		}).Error
 }
 
-// PrepareProcessRestart 将流程启动失败工单原子切换回启动中状态。
+// PrepareProcessRestart 将尚未绑定流程实例的工单原子切换回启动中状态。
 func (g *gormTicketDAO) PrepareProcessRestart(ctx context.Context, id int64) error {
 	result := g.db.WithContext(ctx).Model(&Ticket{}).
-		Where("id = ? AND process_instance_id = 0 AND status = ?", id, domain.START_FAILED.ToUint8()).
+		Where("id = ? AND process_instance_id = 0 AND status IN ?", id,
+			[]int{domain.START.ToInt(), domain.START_FAILED.ToInt()}).
 		Updates(map[string]interface{}{
 			"status":              domain.START.ToUint8(),
 			"process_start_error": "",
@@ -192,7 +199,10 @@ func (g *gormTicketDAO) ListTicketByProcessInstanceIds(ctx context.Context, inst
 	if len(instanceIds) == 0 {
 		return res, nil
 	}
-	err := g.db.WithContext(ctx).Where("process_instance_id IN ?", instanceIds).Find(&res).Error
+	err := g.db.WithContext(ctx).
+		Scopes(gormx.IgnoreTenant()).
+		Where("process_instance_id IN ?", instanceIds).
+		Find(&res).Error
 	return res, err
 }
 
@@ -266,20 +276,21 @@ func (g *gormTicketDAO) FindByBizIdAndKey(ctx context.Context, bizId int64, key 
 }
 
 func (g *gormTicketDAO) MergeTicketData(ctx context.Context, id int64, data map[string]interface{}) error {
-	var t Ticket
-	err := g.db.WithContext(ctx).Where("id = ?", id).First(&t).Error
-	if err != nil {
-		return err
-	}
-	if t.Data.Val == nil {
-		t.Data.Val = make(map[string]interface{})
-	}
-	for k, v := range data {
-		t.Data.Val[k] = v
-	}
-	t.Utime = time.Now().UnixMilli()
-	return g.db.WithContext(ctx).Model(&Ticket{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"data":  t.Data,
-		"utime": t.Utime,
-	}).Error
+	return g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var t Ticket
+		// 使用行级排他锁锁定该记录，防止并发会签或多节点审批产生覆盖写丢失
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&t).Error; err != nil {
+			return err
+		}
+		if t.Data.Val == nil {
+			t.Data.Val = make(map[string]interface{})
+		}
+		for k, v := range data {
+			t.Data.Val[k] = v
+		}
+		return tx.Model(&Ticket{}).Where("id = ?", id).Updates(map[string]interface{}{
+			"data":  t.Data,
+			"utime": time.Now().UnixMilli(),
+		}).Error
+	})
 }

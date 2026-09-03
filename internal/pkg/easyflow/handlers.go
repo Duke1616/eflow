@@ -19,7 +19,7 @@ func (h *StartNodeHandler) Handle(ctx *Context, node Node) ([]model.Node, error)
 	n := model.Node{
 		NodeID:        node.ID,
 		NodeName:      nodeName,
-		NodeType:      0,
+		NodeType:      model.RootNode,
 		UserIDs:       []string{UserStarter},
 		NodeEndEvents: []string{EventStart},
 	}
@@ -39,7 +39,7 @@ func (h *EndNodeHandler) Handle(ctx *Context, node Node) ([]model.Node, error) {
 	n := model.Node{
 		NodeID:          node.ID,
 		NodeName:        nodeName,
-		NodeType:        3,
+		NodeType:        model.EndNode,
 		PrevNodeIDs:     ctx.GetPrevNodeIDs(node.ID),
 		NodeStartEvents: []string{EventNotify},
 	}
@@ -70,7 +70,7 @@ func (h *UserNodeHandler) Handle(ctx *Context, node Node) ([]model.Node, error) 
 	n := model.Node{
 		NodeID:          node.ID,
 		NodeName:        nodeName,
-		NodeType:        1,
+		NodeType:        model.TaskNode,
 		PrevNodeIDs:     findAndProxySrcNodes(ctx, node),
 		UserIDs:         userIDs,
 		IsCosigned:      0,
@@ -105,7 +105,7 @@ func (h *ParallelHandler) Handle(ctx *Context, node Node) ([]model.Node, error) 
 	n := model.Node{
 		NodeID:      node.ID,
 		NodeName:    DefaultNameParallel,
-		NodeType:    2,
+		NodeType:    model.GateWayNode,
 		GWConfig:    gw,
 		PrevNodeIDs: findAndProxySrcNodesForGateway(ctx, node),
 	}
@@ -129,7 +129,7 @@ func (h *InclusionHandler) Handle(ctx *Context, node Node) ([]model.Node, error)
 	n := model.Node{
 		NodeID:      node.ID,
 		NodeName:    DefaultNameInclusion,
-		NodeType:    2,
+		NodeType:    model.GateWayNode,
 		GWConfig:    gw,
 		PrevNodeIDs: findAndProxySrcNodesForGateway(ctx, node),
 	}
@@ -153,7 +153,7 @@ func (h *SelectiveHandler) Handle(ctx *Context, node Node) ([]model.Node, error)
 	n := model.Node{
 		NodeID:          node.ID,
 		NodeName:        DefaultNameSelective,
-		NodeType:        2,
+		NodeType:        model.GateWayNode,
 		GWConfig:        gw,
 		PrevNodeIDs:     findAndProxySrcNodesForGateway(ctx, node),
 		NodeStartEvents: []string{EventSelectiveGatewaySplit},
@@ -187,7 +187,7 @@ func (h *ConditionHandler) Handle(ctx *Context, node Node) ([]model.Node, error)
 	n := model.Node{
 		NodeID:      node.ID,
 		NodeName:    property.Name,
-		NodeType:    2,
+		NodeType:    model.GateWayNode,
 		GWConfig:    gw,
 		PrevNodeIDs: ctx.GetPrevNodeIDs(node.ID),
 	}
@@ -218,7 +218,7 @@ func (h *AutomationNodeHandler) Handle(ctx *Context, node Node) ([]model.Node, e
 	n := model.Node{
 		NodeID:          node.ID,
 		NodeName:        property.Name,
-		NodeType:        1,
+		NodeType:        model.TaskNode,
 		PrevNodeIDs:     ctx.GetPrevNodeIDs(node.ID),
 		UserIDs:         []string{AutomationApproval},
 		NodeStartEvents: []string{EventAutomation},
@@ -235,7 +235,7 @@ func (h *ChatGroupNodeHandler) Handle(ctx *Context, node Node) ([]model.Node, er
 	n := model.Node{
 		NodeID:          node.ID,
 		NodeName:        property.Name,
-		NodeType:        1,
+		NodeType:        model.TaskNode,
 		PrevNodeIDs:     ctx.GetPrevNodeIDs(node.ID),
 		UserIDs:         []string{ChatGroupApproval},
 		NodeStartEvents: []string{EventChatGroup},

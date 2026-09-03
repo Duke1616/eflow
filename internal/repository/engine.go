@@ -7,7 +7,7 @@ import (
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository/dao"
-	"github.com/ecodeclub/ekit/slice"
+	"github.com/samber/lo"
 )
 
 // IEngineRepository 流程引擎仓储接口
@@ -149,7 +149,7 @@ func (repo *engineRepository) ListTasksByProcInstIds(ctx context.Context, proces
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(ts, func(idx int, src model.Task) domain.Instance {
+	return lo.Map(ts, func(src model.Task, _ int) domain.Instance {
 		return repo.toDomainByTask(src)
 	}), nil
 }
@@ -175,7 +175,7 @@ func (repo *engineRepository) TodoList(ctx context.Context, userId, processName 
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(ts, func(idx int, src dao.Instance) domain.Instance {
+	return lo.Map(ts, func(src dao.Instance, _ int) domain.Instance {
 		return repo.toDomainByInstance(src)
 	}), nil
 }
@@ -186,7 +186,7 @@ func (repo *engineRepository) ListStartUser(ctx context.Context, userId, process
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(ts, func(idx int, src dao.Instance) domain.Instance {
+	return lo.Map(ts, func(src dao.Instance, _ int) domain.Instance {
 		return repo.toDomainByInstance(src)
 	}), nil
 }
@@ -201,7 +201,7 @@ func (repo *engineRepository) TodoAllList(ctx context.Context, userId, processNa
 	if err != nil {
 		return nil, err
 	}
-	return slice.Map(ts, func(idx int, src dao.Instance) domain.Instance { return repo.toDomainByInstance(src) }), nil
+	return lo.Map(ts, func(src dao.Instance, _ int) domain.Instance { return repo.toDomainByInstance(src) }), nil
 }
 
 // CountAllTodo 统计经 PBAC 决策允许访问的全部待办任务。

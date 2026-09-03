@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Duke1616/eflow/pkg/sqlx"
+	"github.com/samber/lo"
 	"gorm.io/gorm"
 )
 
@@ -68,17 +69,16 @@ func (g *gormTaskFormDAO) FindByTaskIds(ctx context.Context, taskIds []int) ([]T
 }
 
 func (g *gormTaskFormDAO) FindByTicketID(ctx context.Context, ticketID int64) ([]TaskForm, error) {
-	var res []TaskForm
-	subQuery := g.db.Model(&TaskForm{}).
-		Select("`key`, MAX(ctime) as max_ctime").
-		Where("ticket_id = ?", ticketID).
-		Group("`key`")
-
+	var list []TaskForm
 	err := g.db.WithContext(ctx).
-		Table("ticket_task_form as task_form").
-		Joins("INNER JOIN (?) as t2 ON task_form.key = t2.key AND task_form.ctime = t2.max_ctime", subQuery).
-		Where("task_form.ticket_id = ?", ticketID).
-		Find(&res).Error
+		Where("ticket_id = ?", ticketID).
+		Order("ctime desc").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
 
-	return res, err
+	return lo.UniqBy(list, func(item TaskForm) string {
+		return item.Key
+	}), nil
 }

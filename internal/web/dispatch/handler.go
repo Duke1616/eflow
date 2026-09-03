@@ -3,10 +3,11 @@ package dispatch
 import (
 	"github.com/Duke1616/eflow/internal/domain"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
+	"github.com/Duke1616/eflow/pkg/contract/perm"
 	"github.com/Duke1616/eiam/pkg/web/capability"
-	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/ginx"
 	"github.com/gin-gonic/gin"
+	"github.com/samber/lo"
 )
 
 var systemErrorResult = ginx.Result{Code: 500, Msg: "系统内部错误"}
@@ -29,25 +30,25 @@ func (h *Handler) PublicRoutes(server *gin.Engine) {
 
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/dispatch")
-	g.POST("/create", h.Capability("创建执行单元路由", "add").
-		Needs("ticket:workflow:view_automation_nodes", "task:runner:view_by_ids").
-		Handle(ginx.B[CreateDispatchReq](h.Create)),
+	g.POST("/create", h.Define("创建执行单元路由", "add").
+		Needs(perm.Workflow.ViewAutomationNodes, "task:runner:view_by_ids").
+		Bind(ginx.B[CreateDispatchReq](h.Create)),
 	)
-	g.POST("/update", h.Capability("修改执行单元路由", "edit").
-		Needs("ticket:workflow:view_automation_nodes", "task:runner:view_by_ids").
-		Handle(ginx.B[UpdateDispatchReq](h.Update)),
+	g.POST("/update", h.Define("修改执行单元路由", "edit").
+		Needs(perm.Workflow.ViewAutomationNodes, "task:runner:view_by_ids").
+		Bind(ginx.B[UpdateDispatchReq](h.Update)),
 	)
-	g.POST("/delete", h.Capability("删除执行单元路由", "delete").
-		Handle(ginx.B[DeleteDispatchReq](h.Delete)),
+	g.POST("/delete", h.Define("删除执行单元路由", "delete").
+		Bind(ginx.B[DeleteDispatchReq](h.Delete)),
 	)
-	g.POST("/sync", h.Capability("复制执行单元路由", "sync").
-		Needs("ticket:template:view_by_workflow_id").
-		Handle(ginx.B[SyncDispatchReq](h.Sync)),
+	g.POST("/sync", h.Define("复制执行单元路由", "sync").
+		Needs(perm.Template.ViewByWorkflowId).
+		Bind(ginx.B[SyncDispatchReq](h.Sync)),
 	)
-	g.POST("/list/by_template_id", h.Capability("执行单元路由列表", "view").
-		Needs("ticket:template:get", "task:runner:view_by_ids", "task:runner:view_by_codebook_id",
-			"ticket:workflow:view_automation_nodes").
-		Handle(ginx.B[ListByTemplateId](h.ListByTemplateId)),
+	g.POST("/list/by_template_id", h.Define("执行单元路由列表", "view").
+		Needs(perm.Template.Get, "task:runner:view_by_ids", "task:runner:view_by_codebook_id",
+			perm.Workflow.ViewAutomationNodes).
+		Bind(ginx.B[ListByTemplateId](h.ListByTemplateId)),
 	)
 }
 
@@ -85,7 +86,7 @@ func (h *Handler) ListByTemplateId(ctx *ginx.Context, req ListByTemplateId) (gin
 		Msg: "查询执行单元路由规则成功",
 		Data: RetrieveDispatches{
 			Total: total,
-			Dispatches: slice.Map(rts, func(idx int, src domain.Dispatch) Dispatch {
+			Dispatches: lo.Map(rts, func(src domain.Dispatch, _ int) Dispatch {
 				return h.toDispatchVo(src)
 			}),
 		},

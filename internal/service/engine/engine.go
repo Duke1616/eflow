@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
 	"github.com/Bunny3th/easy-workflow/workflow/database"
 	"github.com/Bunny3th/easy-workflow/workflow/engine"
@@ -10,7 +11,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
-	"github.com/ecodeclub/ekit/slice"
+	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -40,6 +41,8 @@ type Service interface {
 	ForceUpdateIsFinishedByNodeId(ctx context.Context, processInstId int, nodeId string, status int, comment string) error
 	// Pass 审批通过当前代办的流程节点，推进流程至下一层级
 	Pass(ctx context.Context, taskId int, comment string) error
+	// Reject 驳回当前代办的流程节点，触发流程回退或终止
+	Reject(ctx context.Context, taskId int, comment string) error
 	// ListPendingStepsOfMyTask 列出由当前用户发起的指定流程实例列表中当前仍待处理的步骤信息
 	ListPendingStepsOfMyTask(ctx context.Context, processInstIds []int, starter string) ([]domain.Instance, error)
 	// GetAutomationTask 获取流程实例中等待自动触发执行的脚本或系统节点任务
@@ -177,6 +180,10 @@ func (s *engineService) ForceUpdateIsFinishedByNodeId(ctx context.Context, proce
 
 func (s *engineService) Pass(ctx context.Context, taskId int, comment string) error {
 	return engine.TaskPass(taskId, comment, "", false)
+}
+
+func (s *engineService) Reject(ctx context.Context, taskId int, comment string) error {
+	return engine.TaskReject(taskId, comment, "")
 }
 
 func (s *engineService) UpdateTaskPrevNodeID(ctx context.Context, taskId int, prevNodeId string) error {
@@ -415,7 +422,7 @@ func (s *engineService) GetTraversedEdges(ctx context.Context, record []model.Ta
 	}
 
 	var rootID string
-	nodesMap := slice.ToMap(define.Nodes, func(element model.Node) string {
+	nodesMap := lo.KeyBy(define.Nodes, func(element model.Node) string {
 		if element.NodeType == model.RootNode {
 			rootID = element.NodeID
 		}
@@ -636,16 +643,11 @@ func (s *engineService) resolveRealPrevs(node model.Node, nodesMap map[string]mo
 }
 
 func (s *engineService) isProxyNode(node model.Node) bool {
-	for _, uid := range node.UserIDs {
-		if uid == easyflow.SysAutoUser {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(node.UserIDs, easyflow.SysAutoUser)
 }
 
 func uniqueAppend(m map[string][]string, key, val string) {
-	if !slice.Contains(m[key], val) {
+	if !slices.Contains(m[key], val) {
 		m[key] = append(m[key], val)
 	}
 }

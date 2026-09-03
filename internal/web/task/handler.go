@@ -4,11 +4,15 @@ import (
 	"fmt"
 	"strings"
 
+	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
+	"github.com/Duke1616/eflow/pkg/contract/model"
+	"github.com/Duke1616/eflow/pkg/contract/perm"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ginx"
 	"github.com/gin-gonic/gin"
+	"github.com/samber/lo"
 )
 
 const (
@@ -32,21 +36,26 @@ func NewHandler(svc taskSvc.Service) *Handler {
 // PrivateRoutes 注册自动化任务私有接口。
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	group := server.Group("/api/task")
-	group.POST("/list", h.Capability("自动化任务列表", "view").
-		Handle(ginx.B[ListTaskReq](h.ListTask)))
-	group.POST("/list/by_instance_id", h.Capability("关联自动化任务", "view_tasks").
-		Module("manager").Group("工单中心/工单详情").
-		Handle(ginx.B[ListTaskByInstanceIDReq](h.ListTaskByInstanceID)))
-	group.POST("/retry", h.Capability("重试自动化任务", "retry").
-		Handle(ginx.B[RetryReq](h.Retry)))
-	group.POST("/terminate", h.Capability("强制终止自动化任务", "terminate").
-		Handle(ginx.B[TerminateReq](h.Terminate)))
-	group.POST("/attempt/list", h.Capability("执行尝试列表", "view_attempts").
-		Needs("ticket:task:logs", "task:execution:logs").
-		Handle(ginx.B[ListAttemptsReq](h.ListAttempts)))
-	group.POST("/attempt/logs", h.Capability("执行尝试日志", "logs").
+	group.POST("/list", h.Define("自动化任务列表", "view").
+		Bind(ginx.B[ListTaskReq](h.ListTask)))
+
+	group.POST("/list/by_instance_id", h.For(model.Manager).Define("关联自动化任务", "view_tasks").
+		Group("工单中心/工单详情").
+		Bind(ginx.B[ListTaskByInstanceIDReq](h.ListTaskByInstanceID)))
+
+	group.POST("/retry", h.Define("重试自动化任务", "retry").
+		Bind(ginx.B[RetryReq](h.Retry)))
+
+	group.POST("/terminate", h.Define("强制终止自动化任务", "terminate").
+		Bind(ginx.B[TerminateReq](h.Terminate)))
+
+	group.POST("/attempt/list", h.Define("执行尝试列表", "view_attempts").
+		Needs(perm.Task.Logs, "task:execution:logs").
+		Bind(ginx.B[ListAttemptsReq](h.ListAttempts)))
+
+	group.POST("/attempt/logs", h.Define("执行尝试日志", "logs").
 		NoSync().
-		Handle(ginx.B[LogsReq](h.Logs)))
+		Bind(ginx.B[LogsReq](h.Logs)))
 }
 func (h *Handler) ListTask(ctx *ginx.Context, req ListTaskReq) (ginx.Result, error) {
 	if err := normalizePage(&req.Page); err != nil {
@@ -103,10 +112,9 @@ func (h *Handler) ListAttempts(ctx *ginx.Context, req ListAttemptsReq) (ginx.Res
 	if err != nil {
 		return systemErrorResult, err
 	}
-	result := make([]Attempt, 0, len(attempts))
-	for _, attempt := range attempts {
-		result = append(result, toAttemptVO(attempt))
-	}
+	result := lo.Map(attempts, func(attempt domain.TaskAttempt, _ int) Attempt {
+		return toAttemptVO(attempt)
+	})
 	return ginx.Result{Msg: "success", Data: ListAttemptsResp{Attempts: result}}, nil
 }
 
@@ -125,10 +133,9 @@ func (h *Handler) Logs(ctx *ginx.Context, req LogsReq) (ginx.Result, error) {
 	if err != nil {
 		return systemErrorResult, err
 	}
-	result := make([]ExecutionLog, 0, len(logs))
-	for _, log := range logs {
-		result = append(result, ExecutionLog{ID: log.ID, Time: log.Time, Content: log.Content})
-	}
+	result := lo.Map(logs, func(log etaskclient.ExecutionLog, _ int) ExecutionLog {
+		return ExecutionLog{ID: log.ID, Time: log.Time, Content: log.Content}
+	})
 	return ginx.Result{Msg: "success", Data: LogsResp{Logs: result, MaxID: maxID}}, nil
 }
 
@@ -146,9 +153,8 @@ func normalizePage(page *Page) error {
 }
 
 func mapTasks(tasks []domain.Task) []Task {
-	result := make([]Task, 0, len(tasks))
-	for _, task := range tasks {
-		result = append(result, Task{
+	return lo.Map(tasks, func(task domain.Task, _ int) Task {
+		return Task{
 			ID: task.ID, TicketID: task.TicketID, ProcessInstanceID: task.ProcessInstanceID,
 			NodeID: task.NodeID, NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
 			Status: task.Status.ToUint8(), Phase: string(task.Phase),
@@ -158,9 +164,8 @@ func mapTasks(tasks []domain.Task) []Task {
 			CurrentAttemptID:   task.CurrentAttemptID, AdvancedAt: task.AdvancedAt,
 			CancelledAt: task.CancelledAt, LastError: task.LastError,
 			CTime: task.CTime, UTime: task.UTime,
-		})
-	}
-	return result
+		}
+	})
 }
 
 func toAttemptVO(attempt domain.TaskAttempt) Attempt {

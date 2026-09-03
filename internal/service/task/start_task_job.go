@@ -52,10 +52,11 @@ func (j *StartTaskJob) run(ctx context.Context) error {
 	group.SetLimit(j.concurrency)
 	for _, task := range tasks {
 		taskID := task.ID
+		tenantID := task.TenantID
 		group.Go(func() error {
 			taskCtx, cancel := context.WithTimeout(ctx, j.taskTimeout)
 			defer cancel()
-			if startErr := j.svc.StartTask(taskCtx, taskID); startErr != nil {
+			if startErr := j.svc.StartTask(tenantContext(taskCtx, tenantID), taskID); startErr != nil {
 				j.logger.Error("任务启动失败", elog.FieldErr(startErr), elog.Int64("taskID", taskID))
 			}
 			return nil

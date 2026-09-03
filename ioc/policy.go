@@ -2,6 +2,8 @@ package ioc
 
 import (
 	"github.com/Duke1616/eiam/pkg/web/capability"
+	"github.com/Duke1616/eiam/pkg/web/capability/syncer"
+	httpreporter "github.com/Duke1616/eiam/pkg/web/capability/syncer/http"
 	"github.com/Duke1616/eiam/pkg/web/sdk"
 )
 
@@ -9,8 +11,8 @@ func InitPolicySDK() *sdk.SDK {
 	return sdk.NewSDK()
 }
 
-func InitPermSyncer() capability.Syncer {
-	return capability.NewSyncer(capability.NewHttpReporter())
+func InitPermSyncer() syncer.Syncer {
+	return syncer.New(httpreporter.New())
 }
 
 // InitProviders 注册逻辑权限供应源。

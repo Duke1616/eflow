@@ -9,18 +9,19 @@ import (
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/pkg/ticketpbac"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	ratingSvc "github.com/Duke1616/eflow/internal/service/rating"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	withdrawalSvc "github.com/Duke1616/eflow/internal/service/withdrawal"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
+	"github.com/Duke1616/eflow/pkg/contract/perm"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/Duke1616/eiam/pkg/web/capability"
-	"github.com/ecodeclub/ekit/slice"
 	"github.com/ecodeclub/ginx"
 	"github.com/gin-gonic/gin"
+	"github.com/gotomicro/ego/core/elog"
+	"github.com/samber/lo"
 )
 
 var systemErrorResult = ginx.Result{Code: 500, Msg: "系统内部错误"}
@@ -34,6 +35,7 @@ type Handler struct {
 	workflowSvc   workflowSvc.Service
 	withdrawalSvc withdrawalSvc.Service
 	ratingSvc     ratingSvc.Service
+	logger        *elog.Component
 }
 
 func NewHandler(svc ticketSvc.Service, engineSvc engineSvc.Service, userSvc userv1.UserServiceClient,
@@ -45,6 +47,7 @@ func NewHandler(svc ticketSvc.Service, engineSvc engineSvc.Service, userSvc user
 		workflowSvc:   workflowSvc,
 		withdrawalSvc: withdrawalSvc,
 		ratingSvc:     ratingSvc,
+		logger:        elog.DefaultLogger,
 		IRegistry:     capability.NewRegistry("ticket", "manager", "工单中心"),
 	}
 }
@@ -56,123 +59,89 @@ func (h *Handler) PublicRoutes(server *gin.Engine) {
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/ticket")
 
-	op := func(name, code string) *capability.Builder {
-		return h.Capability(name, code).Group("工单中心/工单操作")
-	}
-	detail := func(name, code string) *capability.Builder {
-		return h.Capability(name, code).Group("工单中心/工单详情")
-	}
-	list := func(name, code string) *capability.Builder {
-		return h.Capability(name, code).Group("工单中心/工单列表")
-	}
-
-	g.POST("/submit", op("提交工单", "submit").
-		Needs("ticket:template:get", "ticket:template:toggle_favorite", "ticket:template:view_favorite",
-			"ticket:template:view", "ticket:template:view_group_summary", "cmdb:tools:upload").
-		Handle(ginx.B[CreateTicketReq](h.CreateTicket)),
+	g.POST("/submit", h.Define("提交工单", "submit").
+		Group("工单中心/工单操作").
+		Needs(perm.Template.Get, perm.Template.ToggleFavorite, perm.Template.ViewFavorite,
+			perm.Template.View, perm.Template.ViewGroupSummary, "cmdb:tools:upload").
+		Bind(ginx.B[CreateTicketReq](h.CreateTicket)),
 	)
-	g.POST("/process/restart", op("重新启动流程", "process_restart").
-		Handle(ginx.B[RestartProcessReq](h.RestartProcess)),
+	g.POST("/process/restart", h.Define("重新启动流程", "process_restart").
+		Group("工单中心/工单操作").
+		Bind(ginx.B[RestartProcessReq](h.RestartProcess)),
 	)
-	g.POST("/detail/process_inst_id", detail("工单详情", "get").
-		Needs("cmdb:tools:download").
+	g.POST("/detail/process_inst_id", h.Define("工单详情", "get").
+		Group("工单中心/工单详情").
+		Needs(perm.Manager.Graph, perm.Manager.Timeline, "cmdb:tools:download").
 		AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
-		Handle(ginx.B[DetailProcessInstIdReq](h.Detail)),
+		Bind(ginx.B[DetailProcessInstIdReq](h.Detail)),
 	)
-	// 已由按节点批次聚合的 /task/timeline 替代；保留原始任务查询实现，
-	// 供流程内部审计逻辑继续复用，但不再暴露逐任务的 HTTP 接口。
-	// g.POST("/task/record", detail("流转记录", "record").
-	// 	AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
-	// 	Handle(ginx.B[RecordTaskReq](h.TaskRecord)),
-	// )
-	g.POST("/task/timeline", detail("流转时间线", "timeline").
+	g.POST("/task/timeline", h.Define("流转时间线", "timeline").
+		Group("工单中心/工单详情").
 		AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
-		Handle(ginx.B[TaskTimelineReq](h.TaskTimeline)),
+		Bind(ginx.B[TaskTimelineReq](h.TaskTimeline)),
 	)
-	g.POST("/todo", list("所有待办工单", "todo").
-		Needs("ticket:template:view_by_ids").
+	g.POST("/todo", h.Define("所有待办工单", "todo").
+		Group("工单中心/工单列表").
+		Needs(perm.Template.ViewByIds, perm.Manager.Get).
 		AccessScope(ticketpbac.TodoProfile, ticketpbac.TodoPresets...).
-		Handle(ginx.B[Todo](h.TodoAll)),
+		Bind(ginx.B[Todo](h.TodoAll)),
 	)
-	g.POST("/todo/user", list("我的待办工单", "my_todo").
-		Needs("ticket:template:view_by_ids").
-		Handle(ginx.B[Todo](h.TodoByUser)),
+	g.POST("/todo/user", h.Define("我的待办工单", "my_todo").
+		Group("工单中心/工单列表").
+		Needs(perm.Template.ViewByIds, perm.Manager.Get).
+		Bind(ginx.B[Todo](h.TodoByUser)),
 	)
-	g.POST("/history", list("历史工单", "history").
-		Needs("ticket:template:view_by_ids", "ticket:manager:rate").
+	g.POST("/history", h.Define("历史工单", "history").
+		Group("工单中心/工单列表").
+		Needs(perm.Template.ViewByIds, perm.Manager.Get, perm.Manager.Rate).
 		AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
-		Handle(ginx.B[HistoryReq](h.History)),
+		Bind(ginx.B[HistoryReq](h.History)),
 	)
-	g.POST("/start/user", list("我发起的工单", "my_start").
-		Needs("ticket:template:view_by_ids").
-		Handle(ginx.B[StartUserReq](h.StartUser)),
+	g.POST("/start/user", h.Define("我发起的工单", "my_start").
+		Group("工单中心/工单列表").
+		Needs(perm.Template.ViewByIds, perm.Manager.Get).
+		Bind(ginx.B[StartUserReq](h.StartUser)),
 	)
-	g.POST("/pass", op("同意审批", "pass").
-		Handle(ginx.B[PassOrderReq](h.Pass)),
+	g.POST("/pass", h.Define("同意审批", "pass").
+		Group("工单中心/工单操作").
+		Needs(perm.Manager.FormConfig).
+		Bind(ginx.B[PassOrderReq](h.Pass)),
 	)
-	g.POST("/reject", op("驳回审批", "reject").
-		Handle(ginx.B[RejectOrderReq](h.Reject)),
+	g.POST("/reject", h.Define("驳回审批", "reject").
+		Group("工单中心/工单操作").
+		Needs(perm.Manager.FormConfig).
+		Bind(ginx.B[RejectOrderReq](h.Reject)),
 	)
-	g.POST("/transfer", op("转交审批人", "transfer").
+	g.POST("/transfer", h.Define("转交审批人", "transfer").
+		Group("工单中心/工单操作").
 		Needs("iam:user:view").
-		Handle(ginx.B[TransferReq](h.Transfer)),
+		Bind(ginx.B[TransferReq](h.Transfer)),
 	)
-	g.POST("/revoke", op("撤销工单", "revoke").
-		Handle(ginx.B[RevokeOrderReq](h.Revoke)),
+	g.POST("/revoke", h.Define("撤销工单", "revoke").
+		Group("工单中心/工单操作").
+		Bind(ginx.B[RevokeOrderReq](h.Revoke)),
 	)
-	g.POST("/rating/submit", op("评价工单", "rate").
+	g.POST("/rating/submit", h.Define("评价工单", "rate").
+		Group("工单中心/工单操作").
 		NoSync().
-		Handle(ginx.B[SubmitRatingReq](h.SubmitRating)),
+		Bind(ginx.B[SubmitRatingReq](h.SubmitRating)),
 	)
-	g.POST("/task/form_config", detail("任务节点表单配置", "form_config").
-		Needs("ticket:template:get", "ticket:manager:get").
-		Handle(ginx.B[TaskFormConfigReq](h.GetTaskFormConfig)),
+	g.POST("/task/form_config", h.Define("任务节点表单配置", "form_config").
+		Group("工单中心/工单详情").
+		Needs(perm.Template.Get, perm.Manager.Get).
+		Bind(ginx.B[TaskFormConfigReq](h.GetTaskFormConfig)),
 	)
-	//g.POST("/upstream/:task_id", detail("查询上游处理节点", "upstream").
-	//	Handle(ginx.W(h.Upstream)),
-	//)
 }
 
 func (h *Handler) GetTaskFormConfig(ctx *ginx.Context, req TaskFormConfigReq) (ginx.Result, error) {
-	info, err := h.engineSvc.TaskInfo(ctx.Context, req.TaskId)
+	fields, err := h.svc.GetTaskFormConfig(ctx.Context, req.TaskId, req.WorkflowId)
 	if err != nil {
 		return systemErrorResult, err
-	}
-
-	inst, err := h.engineSvc.GetInstanceByID(ctx.Context, info.ProcInstID)
-	if err != nil {
-		return systemErrorResult, err
-	}
-
-	wf, err := h.workflowSvc.FindInstanceFlow(ctx.Context, req.WorkflowId, inst.ProcID, inst.ProcVersion)
-	if err != nil {
-		return systemErrorResult, err
-	}
-
-	nodes, err := easyflow.ParseNodes(wf.FlowData.Nodes)
-	if err != nil {
-		return systemErrorResult, err
-	}
-
-	for _, node := range nodes {
-		if node.ID != info.NodeID {
-			continue
-		}
-
-		property, err1 := easyflow.ToNodeProperty[easyflow.UserProperty](node)
-		if err1 != nil {
-			return systemErrorResult, err1
-		}
-
-		return ginx.Result{
-			Data: property.Fields,
-			Msg:  "获取任务表单配置成功",
-		}, nil
 	}
 
 	return ginx.Result{
-		Data: []easyflow.Field{},
-		Msg:  "未找到对应任务配置",
+		Data: fields,
+		Msg:  "获取任务表单配置成功",
 	}, nil
 }
 
@@ -353,11 +322,8 @@ func (h *Handler) StartUser(ctx *ginx.Context, req StartUserReq) (ginx.Result, e
 		return systemErrorResult, err
 	}
 
-	procInstIds := slice.FilterMap(tickets, func(idx int, src domain.Ticket) (int, bool) {
-		if src.Process.InstanceId <= 0 {
-			return 0, false
-		}
-		return src.Process.InstanceId, true
+	procInstIds := lo.FilterMap(tickets, func(src domain.Ticket, _ int) (int, bool) {
+		return src.Process.InstanceId, src.Process.InstanceId > 0
 	})
 
 	processTasks, err := h.engineSvc.ListPendingStepsOfMyTask(ctx.Context, procInstIds, username)
@@ -474,24 +440,16 @@ func (h *Handler) TaskTimeline(ctx *ginx.Context, req TaskTimelineReq) (ginx.Res
 }
 
 func (h *Handler) toTaskRecords(ctx context.Context, ts []model.Task) []TaskRecord {
-
-	userIDs := slice.Map(ts, func(idx int, src model.Task) string {
+	uniqueUserIDs := lo.Uniq(lo.Map(ts, func(src model.Task, _ int) string {
 		return src.UserID
-	})
-
-	uniqueUserIDs := make([]string, 0, len(userIDs))
-	for _, uid := range userIDs {
-		if !slice.Contains(uniqueUserIDs, uid) {
-			uniqueUserIDs = append(uniqueUserIDs, uid)
-		}
-	}
+	}))
 
 	uMap, err := h.getUserMap(ctx, uniqueUserIDs)
 	if err != nil {
 		uMap = make(map[string]string)
 	}
 
-	taskIds := slice.Map(ts, func(idx int, src model.Task) int {
+	taskIds := lo.Map(ts, func(src model.Task, _ int) int {
 		return src.TaskID
 	})
 	taskDataMap, err := h.svc.ListTaskFormsByTaskIDs(ctx, taskIds)
@@ -499,7 +457,7 @@ func (h *Handler) toTaskRecords(ctx context.Context, ts []model.Task) []TaskReco
 		taskDataMap = make(map[int][]domain.FormValue)
 	}
 
-	return slice.Map(ts, func(idx int, src model.Task) TaskRecord {
+	return lo.Map(ts, func(src model.Task, _ int) TaskRecord {
 		userName := uMap[src.UserID]
 		if userName == "" {
 			userName = src.UserID
@@ -513,12 +471,12 @@ func (h *Handler) toTaskRecords(ctx context.Context, ts []model.Task) []TaskReco
 			Comment:      src.Comment,
 			IsFinished:   src.IsFinished,
 			FinishedTime: src.FinishedTime,
-			FormValues: slice.Map(taskDataMap[src.TaskID], func(idx int, src domain.FormValue) FormValue {
+			FormValues: lo.Map(taskDataMap[src.TaskID], func(val domain.FormValue, _ int) FormValue {
 				return FormValue{
-					Name:  src.Name,
-					Key:   src.Key,
-					Type:  src.Type,
-					Value: src.Value,
+					Name:  val.Name,
+					Key:   val.Key,
+					Type:  val.Type,
+					Value: val.Value,
 				}
 			}),
 		}
@@ -526,17 +484,12 @@ func (h *Handler) toTaskRecords(ctx context.Context, ts []model.Task) []TaskReco
 }
 
 func timelineActors(records []TaskRecord) []string {
-	actors := make([]string, 0, len(records))
-	for _, record := range records {
-		// 1 和 2 分别表示人工通过、人工驳回；系统联动状态不作为主处理人。
-		if record.Status != 1 && record.Status != 2 {
-			continue
-		}
-		if !slice.Contains(actors, record.ApprovedBy) {
-			actors = append(actors, record.ApprovedBy)
-		}
-	}
-	return actors
+	filtered := lo.Filter(records, func(r TaskRecord, _ int) bool {
+		return r.Status == 1 || r.Status == 2
+	})
+	return lo.Uniq(lo.Map(filtered, func(r TaskRecord, _ int) string {
+		return r.ApprovedBy
+	}))
 }
 
 func (h *Handler) toDomain(req CreateTicketReq) domain.Ticket {
@@ -577,21 +530,15 @@ func (h *Handler) History(ctx *ginx.Context, req HistoryReq) (ginx.Result, error
 	if err != nil {
 		return systemErrorResult, err
 	}
-	ticketIDs := slice.Map(os, func(_ int, ticket domain.Ticket) int64 { return ticket.Id })
+	ticketIDs := lo.Map(os, func(ticket domain.Ticket, _ int) int64 { return ticket.Id })
 	ratings, err := h.ratingSvc.ListByTicketIDs(ctx.Context, ticketIDs)
 	if err != nil {
 		return systemErrorResult, err
 	}
 
-	uniqueMap := make(map[string]bool)
-	uns := slice.FilterMap(os, func(idx int, src domain.Ticket) (string, bool) {
-		if !uniqueMap[src.CreateBy] {
-			uniqueMap[src.CreateBy] = true
-			return src.CreateBy, true
-		}
-
-		return src.CreateBy, false
-	})
+	uns := lo.Uniq(lo.Map(os, func(ticket domain.Ticket, _ int) string {
+		return ticket.CreateBy
+	}))
 
 	uMap, err := h.getUserMap(ctx.Context, uns)
 	if err != nil {
@@ -601,7 +548,7 @@ func (h *Handler) History(ctx *ginx.Context, req HistoryReq) (ginx.Result, error
 	return ginx.Result{
 		Data: RetrieveTickets{
 			Total: total,
-			Tasks: slice.Map(os, func(idx int, src domain.Ticket) Ticket {
+			Tasks: lo.Map(os, func(src domain.Ticket, _ int) Ticket {
 				starter, ok := uMap[src.CreateBy]
 				if !ok {
 					starter = src.CreateBy
@@ -647,15 +594,9 @@ func (h *Handler) toVoEngineTicket(ctx context.Context, instances []domain.Insta
 		return nil, nil
 	}
 
-	uniqueProcInstIds := make(map[int]bool)
-	procInstIds := slice.FilterMap(instances, func(idx int, src domain.Instance) (int, bool) {
-		if !uniqueProcInstIds[src.ProcInstID] {
-			uniqueProcInstIds[src.ProcInstID] = true
-			return src.ProcInstID, true
-		}
-
-		return src.ProcInstID, false
-	})
+	procInstIds := lo.Uniq(lo.Map(instances, func(inst domain.Instance, _ int) int {
+		return inst.ProcInstID
+	}))
 
 	us, err := h.getUsers(ctx, instances)
 	if err != nil {
@@ -666,12 +607,12 @@ func (h *Handler) toVoEngineTicket(ctx context.Context, instances []domain.Insta
 	if err != nil {
 		return nil, err
 	}
-	m := slice.ToMap(os, func(element domain.Ticket) int {
+	m := lo.KeyBy(os, func(element domain.Ticket) int {
 		return element.Process.InstanceId
 	})
 
-	return slice.Map(instances, func(idx int, src domain.Instance) Ticket {
-		val, _ := m[src.ProcInstID]
+	return lo.Map(instances, func(src domain.Instance, _ int) Ticket {
+		val := m[src.ProcInstID]
 		starter, ok := us[src.Starter]
 		if !ok {
 			starter = src.Starter
@@ -711,29 +652,13 @@ func (h *Handler) toVoEngineTicket(ctx context.Context, instances []domain.Insta
 }
 
 func (h *Handler) getUsers(ctx context.Context, instances []domain.Instance) (map[string]string, error) {
-	var uns []string
-	uniqueMap := make(map[string]bool)
-
-	approved := slice.FilterMap(instances, func(idx int, src domain.Instance) (string, bool) {
-		if src.ApprovedBy != "" && !uniqueMap[src.ApprovedBy] {
-			uniqueMap[src.ApprovedBy] = true
-			return src.ApprovedBy, true
-		}
-		return "", false
+	users := lo.FlatMap(instances, func(inst domain.Instance, _ int) []string {
+		return []string{inst.ApprovedBy, inst.Starter}
 	})
-
-	starter := slice.FilterMap(instances, func(idx int, src domain.Instance) (string, bool) {
-		if src.Starter != "" && !uniqueMap[src.Starter] {
-			uniqueMap[src.Starter] = true
-			return src.Starter, true
-		}
-		return "", false
+	nonEmptyUsers := lo.Filter(users, func(u string, _ int) bool {
+		return u != ""
 	})
-
-	uns = append(uns, approved...)
-	uns = append(uns, starter...)
-
-	return h.getUserMap(ctx, uns)
+	return h.getUserMap(ctx, lo.Uniq(nonEmptyUsers))
 }
 
 func (h *Handler) getSessUsername(ctx *ginx.Context) (string, error) {
@@ -776,9 +701,13 @@ func (h *Handler) verifyUser(ctx *ginx.Context, taskId int) error {
 		return fmt.Errorf("无法操作，当前审批任务指派处理人与您账号不一致")
 	}
 
-	// 记录 admin 操作别人任务的日志
+	// 记录 admin 操作别人任务的审计日志
 	if resp.User.IsAdmin && tInfo.UserID != resp.User.Username {
-		fmt.Printf("Admin %s 操作了非自己提交的任务 taskId=%d, 原指派人=%s\n", resp.User.Username, taskId, tInfo.UserID)
+		h.logger.Info("管理员代办他人任务",
+			elog.String("admin", resp.User.Username),
+			elog.Int("taskId", taskId),
+			elog.String("originalAssignee", tInfo.UserID),
+		)
 	}
 
 	return nil
@@ -795,7 +724,7 @@ func (h *Handler) getUserMap(ctx context.Context, uns []string) (map[string]stri
 		return nil, err
 	}
 
-	return slice.ToMapV(resp.Users, func(element *userv1.User) (string, string) {
+	return lo.Associate(resp.Users, func(element *userv1.User) (string, string) {
 		return element.Username, element.DisplayName
 	}), nil
 }

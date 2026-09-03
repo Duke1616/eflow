@@ -130,7 +130,13 @@ func (h *larkCallbackHandler) OnCardAction(ctx context.Context, cte *larkcallbac
 
 	// 异步调用业务处理器的 Handle 方法，面向接口，零耦合瞬间流转工单！
 	go func() {
-		localCtx := context.Background()
+		defer func() {
+			if r := recover(); r != nil {
+				h.logger.Error("本地异步驱动飞书卡片事件发生 panic", elog.Any("recover", r))
+			}
+		}()
+		localCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		h.logger.Info("已触发本地异步驱动工单实例流转流程", elog.Any("evt", evt))
 		if err := h.Handle(localCtx, evt); err != nil {
 			h.logger.Error("本地异步驱动飞书卡片事件流转失败", elog.FieldErr(err))
