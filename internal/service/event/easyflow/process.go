@@ -166,7 +166,8 @@ func (e *ProcessEvent) EventNotify(instID int, node *model.Node, prevNode model.
 	if node.NodeType == model.EndNode {
 		e.logger.Info("【EventNotify】检测到流转至结束节点，自动归档并关闭工单",
 			elog.Int("instID", instID))
-		if err := e.ticketSvc.UpdateStatusByProcessInstanceID(ctx, instID, domain.END.ToUint8()); err != nil {
+		baseCtx := gormx.IgnoreTenantContext(ctx)
+		if err := e.ticketSvc.UpdateStatusByProcessInstanceID(baseCtx, instID, domain.END.ToUint8()); err != nil {
 			e.logger.Error("EventNotify 关闭工单失败：", elog.FieldErr(err), elog.Int("instID", instID))
 			return fmt.Errorf("关闭工单失败: %w", err)
 		}
@@ -563,7 +564,8 @@ func (e *ProcessEvent) EventRevoke(instID int, RevokeUserID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	ticketIDValue, err := e.engineSvc.GetTicketIdByVariable(ctx, instID)
+	baseCtx := gormx.IgnoreTenantContext(ctx)
+	ticketIDValue, err := e.engineSvc.GetTicketIdByVariable(baseCtx, instID)
 	if err != nil {
 		return fmt.Errorf("查询撤回流程关联工单失败: %w", err)
 	}
@@ -571,7 +573,7 @@ func (e *ProcessEvent) EventRevoke(instID int, RevokeUserID string) error {
 	if err != nil || ticketID <= 0 {
 		return fmt.Errorf("撤回流程关联工单 ID 非法: %q", ticketIDValue)
 	}
-	ticket, err := e.ticketSvc.GetByID(ctx, ticketID)
+	ticket, err := e.ticketSvc.GetByID(baseCtx, ticketID)
 	if err != nil {
 		return fmt.Errorf("查询撤回工单失败: %w", err)
 	}
@@ -580,6 +582,8 @@ func (e *ProcessEvent) EventRevoke(instID int, RevokeUserID string) error {
 	}
 	e.logger.Info("【EventRevoke】流程撤回前置检查完成",
 		elog.Int("instID", instID),
+		elog.Int64("ticketID", ticketID),
+		elog.Int64("tenantID", ticket.TenantID),
 		elog.String("RevokeUserID", RevokeUserID))
 	return nil
 }

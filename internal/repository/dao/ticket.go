@@ -208,7 +208,9 @@ func (g *gormTicketDAO) ListTicketByProcessInstanceIds(ctx context.Context, inst
 
 func (g *gormTicketDAO) UpdateStatusByInstanceId(ctx context.Context, instanceId int, status uint8) error {
 	now := time.Now().UnixMilli()
-	return g.db.WithContext(ctx).Model(&Ticket{}).Where("process_instance_id = ?", instanceId).Updates(map[string]interface{}{
+	return g.db.WithContext(ctx).Model(&Ticket{}).
+		Scopes(gormx.IgnoreTenant()).
+		Where("process_instance_id = ?", instanceId).Updates(map[string]interface{}{
 		"status": status,
 		"utime":  now,
 		"wtime":  now,

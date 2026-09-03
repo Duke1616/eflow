@@ -48,10 +48,12 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 	}
 
 	// 2. 解析审批人
-	users, err := n.ResolveAssignees(ctx, &info, property.NormalizeAssignees())
-	if err != nil {
-		n.Logger().Error("解析审批人规则失败", elog.FieldErr(err), elog.String("node", info.CurrentNode.NodeID))
-		return notification.NewErrorResponse(string(errs.ErrorCodeResolveRuleFailed), err.Error()), err
+	users, _ := n.ResolveAssignees(ctx, &info, property.NormalizeAssignees())
+	if len(users) == 0 {
+		n.Logger().Warn("未解析到有效审批通知接收人，跳过本次通知发送",
+			elog.String("nodeID", info.CurrentNode.NodeID),
+			elog.String("workflow", info.Workflow.Name))
+		return notification.NewSuccessResponse(0, "skip_notification_no_recipients"), nil
 	}
 
 	// 3. 构建通知元数据
