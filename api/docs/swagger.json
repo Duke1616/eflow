@@ -1,0 +1,2331 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "EFlow API Documentation",
+    "description": "基于 AST 与反射契约混合自适应生成的 OpenAPI 3.0 规范，支持导入 Apifox / Postman 进行全量接口联调。",
+    "version": "1.0.0"
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/dispatch/create": {
+      "post": {
+        "tags": [
+          "工单模板/执行单元路由"
+        ],
+        "summary": "创建执行单元路由",
+        "description": "权限标识: add",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDispatchReq"
+              },
+              "example": {
+                "automation_node_id": "string",
+                "field": "string",
+                "priority": 0,
+                "runner_id": 1,
+                "template_id": 1,
+                "value": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/dispatch/delete": {
+      "post": {
+        "tags": [
+          "工单模板/执行单元路由"
+        ],
+        "summary": "删除执行单元路由",
+        "description": "权限标识: delete",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteDispatchReq"
+              },
+              "example": {
+                "id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/dispatch/list/by_template_id": {
+      "post": {
+        "tags": [
+          "工单模板/执行单元路由"
+        ],
+        "summary": "执行单元路由列表",
+        "description": "权限标识: view",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListByTemplateId"
+              },
+              "example": {
+                "template_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/dispatch/sync": {
+      "post": {
+        "tags": [
+          "工单模板/执行单元路由"
+        ],
+        "summary": "复制执行单元路由",
+        "description": "权限标识: sync",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncDispatchReq"
+              },
+              "example": {
+                "sync_template_id": 1,
+                "template_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/dispatch/update": {
+      "post": {
+        "tags": [
+          "工单模板/执行单元路由"
+        ],
+        "summary": "修改执行单元路由",
+        "description": "权限标识: edit",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDispatchReq"
+              },
+              "example": {
+                "automation_node_id": "string",
+                "field": "string",
+                "id": 1,
+                "priority": 0,
+                "runner_id": 1,
+                "template_id": 1,
+                "value": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/task/attempt/list": {
+      "post": {
+        "tags": [
+          "工单中心/自动化任务"
+        ],
+        "summary": "执行尝试列表",
+        "description": "权限标识: view_attempts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListAttemptsReq"
+              },
+              "example": {
+                "task_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/task/attempt/logs": {
+      "post": {
+        "tags": [
+          "工单中心/自动化任务"
+        ],
+        "summary": "执行尝试日志",
+        "description": "权限标识: logs",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogsReq"
+              },
+              "example": {
+                "attempt_id": 1,
+                "limit": 10,
+                "min_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/task/list": {
+      "post": {
+        "tags": [
+          "工单中心/自动化任务"
+        ],
+        "summary": "自动化任务列表",
+        "description": "权限标识: view",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListTaskReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/task/list/by_instance_id": {
+      "post": {
+        "tags": [
+          "工单中心/自动化任务"
+        ],
+        "summary": "关联自动化任务",
+        "description": "权限标识: view_tasks",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListTaskByInstanceIDReq"
+              },
+              "example": {
+                "instance_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/task/retry": {
+      "post": {
+        "tags": [
+          "工单中心/自动化任务"
+        ],
+        "summary": "重试自动化任务",
+        "description": "权限标识: retry",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryReq"
+              },
+              "example": {
+                "id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/task/terminate": {
+      "post": {
+        "tags": [
+          "工单中心/自动化任务"
+        ],
+        "summary": "强制终止自动化任务",
+        "description": "权限标识: terminate",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TerminateReq"
+              },
+              "example": {
+                "id": 1,
+                "reason": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/by_ids": {
+      "post": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "批量获取模板详情",
+        "description": "权限标识: view_by_ids",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FindByTemplateIds"
+              },
+              "example": {
+                "ids": [
+                  1,
+                  2,
+                  3
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/create": {
+      "post": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "创建工单模板",
+        "description": "权限标识: add",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTemplateReq"
+              },
+              "example": {
+                "desc": "相关业务描述信息",
+                "group_id": 1,
+                "icon": "string",
+                "name": "示例名称",
+                "options": "string",
+                "rules": "string",
+                "schedule_overrides": "string",
+                "workflow_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/delete/{id}": {
+      "delete": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "删除工单模板",
+        "description": "权限标识: delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "唯一数字标识 ID",
+            "schema": {
+              "type": "integer",
+              "example": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/detail/{id}": {
+      "get": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "工单模板详情",
+        "description": "权限标识: get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "唯一数字标识 ID",
+            "schema": {
+              "type": "integer",
+              "example": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/favorite/list": {
+      "post": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "模板收藏夹",
+        "description": "权限标识: view_favorite",
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/favorite/toggle": {
+      "post": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "收藏状态变更",
+        "description": "权限标识: toggle_favorite",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToggleFavoriteReq"
+              },
+              "example": {
+                "template_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/get_by_workflow_id": {
+      "post": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "根据流程获取模板",
+        "description": "权限标识: view_by_workflow_id",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetTemplatesByWorkFlowIdReq"
+              },
+              "example": {
+                "workflow_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/group/create": {
+      "post": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "创建模板分类",
+        "description": "权限标识: add_group",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTemplateGroupReq"
+              },
+              "example": {
+                "icon": "string",
+                "name": "示例名称"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/group/delete/{id}": {
+      "delete": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "删除模板分类",
+        "description": "权限标识: delete_group",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "唯一数字标识 ID",
+            "schema": {
+              "type": "integer",
+              "example": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/group/list": {
+      "post": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "查询模板分组列表",
+        "description": "权限标识: view_group",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Page"
+              },
+              "example": {
+                "limit": 10,
+                "offset": 0
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/group/summary": {
+      "post": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "查询模板分组摘要",
+        "description": "权限标识: view_group_summary",
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/group/update": {
+      "post": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "修改模板分类",
+        "description": "权限标识: edit_group",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTemplateGroupReq"
+              },
+              "example": {
+                "icon": "string",
+                "id": 1,
+                "name": "示例名称"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/list": {
+      "post": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "工单模板列表",
+        "description": "权限标识: view",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListTemplateReq"
+              },
+              "example": {
+                "group_id": 1,
+                "keyword": "search_key"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/rules/by_workflow_id": {
+      "post": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "获取流程绑定模板校验链",
+        "description": "权限标识: rules_by_workflow_id",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetRulesByWorkFlowIdReq"
+              },
+              "example": {
+                "workflow_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/template/update": {
+      "post": {
+        "tags": [
+          "工单模板"
+        ],
+        "summary": "修改工单模板",
+        "description": "权限标识: edit",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTemplateReq"
+              },
+              "example": {
+                "desc": "相关业务描述信息",
+                "group_id": 1,
+                "icon": "string",
+                "id": 1,
+                "name": "示例名称",
+                "options": "string",
+                "rules": "string",
+                "schedule_overrides": "string",
+                "workflow_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/detail/process_inst_id": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "工单详情",
+        "description": "权限标识: get",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DetailProcessInstIdReq"
+              },
+              "example": {
+                "process_instance_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/history": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "历史工单",
+        "description": "权限标识: history",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HistoryReq"
+              },
+              "example": {
+                "limit": 10,
+                "offset": 0,
+                "user_id": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/pass": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "同意审批",
+        "description": "权限标识: pass",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PassOrderReq"
+              },
+              "example": {
+                "comment": "string",
+                "extra_data": "string",
+                "task_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/process/restart": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "重新启动流程",
+        "description": "权限标识: process_restart",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestartProcessReq"
+              },
+              "example": {
+                "ticket_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/rating/submit": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "评价工单",
+        "description": "权限标识: rate",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitRatingReq"
+              },
+              "example": {
+                "comment": "string",
+                "score": 0,
+                "ticket_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/reject": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "驳回审批",
+        "description": "权限标识: reject",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectOrderReq"
+              },
+              "example": {
+                "comment": "string",
+                "task_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/revoke": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "撤销工单",
+        "description": "权限标识: revoke",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeOrderReq"
+              },
+              "example": {
+                "force": true,
+                "instance_id": 1,
+                "reason": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/start/user": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "我发起的工单",
+        "description": "权限标识: my_start",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartUserReq"
+              },
+              "example": {
+                "limit": 10,
+                "offset": 0
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/submit": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "提交工单",
+        "description": "权限标识: submit",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTicketReq"
+              },
+              "example": {
+                "create_by": "string",
+                "data": "string",
+                "template_id": 1,
+                "workflow_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/task/form_config": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "任务节点表单配置",
+        "description": "权限标识: form_config",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskFormConfigReq"
+              },
+              "example": {
+                "task_id": 1,
+                "workflow_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/task/timeline": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "流转时间线",
+        "description": "权限标识: timeline",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskTimelineReq"
+              },
+              "example": {
+                "limit": 10,
+                "offset": 0,
+                "process_inst_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/todo": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "所有待办工单",
+        "description": "权限标识: todo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Todo"
+              },
+              "example": {
+                "limit": 10,
+                "offset": 0,
+                "process_name": "示例名称",
+                "sort_by_asc": true,
+                "user_id": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/todo/user": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "我的待办工单",
+        "description": "权限标识: my_todo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Todo"
+              },
+              "example": {
+                "limit": 10,
+                "offset": 0,
+                "process_name": "示例名称",
+                "sort_by_asc": true,
+                "user_id": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/ticket/transfer": {
+      "post": {
+        "tags": [
+          "工单中心"
+        ],
+        "summary": "转交审批人",
+        "description": "权限标识: transfer",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferReq"
+              },
+              "example": {
+                "task_id": 1,
+                "usernames": [
+                  "admin",
+                  "guest"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/workflow/automation/nodes": {
+      "post": {
+        "tags": [
+          "流程管理"
+        ],
+        "summary": "查询流程自动化节点",
+        "description": "权限标识: view_automation_nodes",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomationNodesReq"
+              },
+              "example": {
+                "workflow_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/workflow/by_ids": {
+      "post": {
+        "tags": [
+          "流程管理"
+        ],
+        "summary": "批量获取流程详情",
+        "description": "权限标识: view_by_ids",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FindByIdsReq"
+              },
+              "example": {
+                "ids": [
+                  1,
+                  2,
+                  3
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/workflow/create": {
+      "post": {
+        "tags": [
+          "流程管理"
+        ],
+        "summary": "创建流程",
+        "description": "权限标识: add",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReq"
+              },
+              "example": {
+                "desc": "相关业务描述信息",
+                "flow_data": "string",
+                "icon": "string",
+                "is_notify": true,
+                "name": "示例名称",
+                "notify_method": 0,
+                "owner": "string",
+                "template_id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/workflow/delete/{id}": {
+      "delete": {
+        "tags": [
+          "流程管理"
+        ],
+        "summary": "删除流程",
+        "description": "权限标识: delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "唯一数字标识 ID",
+            "schema": {
+              "type": "integer",
+              "example": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/workflow/deploy": {
+      "post": {
+        "tags": [
+          "流程管理"
+        ],
+        "summary": "流程发布",
+        "description": "权限标识: deploy",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeployReq"
+              },
+              "example": {
+                "id": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/workflow/detail/{id}": {
+      "get": {
+        "tags": [
+          "流程管理"
+        ],
+        "summary": "流程详情",
+        "description": "权限标识: get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "唯一数字标识 ID",
+            "schema": {
+              "type": "integer",
+              "example": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/workflow/graph": {
+      "post": {
+        "tags": [
+          "流程管理"
+        ],
+        "summary": "流程轨迹图",
+        "description": "权限标识: graph",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderGraphReq"
+              },
+              "example": {
+                "id": 1,
+                "process_instance_id": 1,
+                "status": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/workflow/list": {
+      "post": {
+        "tags": [
+          "流程管理"
+        ],
+        "summary": "流程列表",
+        "description": "权限标识: view",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/workflow/list/by_keyword": {
+      "post": {
+        "tags": [
+          "流程管理"
+        ],
+        "summary": "模糊检索流程模板",
+        "description": "权限标识: view_by_keyword",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ByKeywordReq"
+              },
+              "example": {
+                "keyword": "search_key"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    },
+    "/api/workflow/update": {
+      "post": {
+        "tags": [
+          "流程管理"
+        ],
+        "summary": "修改流程",
+        "description": "权限标识: edit",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateReq"
+              },
+              "example": {
+                "desc": "相关业务描述信息",
+                "flow_data": "string",
+                "id": 1,
+                "is_notify": true,
+                "name": "示例名称",
+                "notify_method": 0,
+                "owner": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "请求成功"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "工单中心"
+    },
+    {
+      "name": "工单中心/自动化任务"
+    },
+    {
+      "name": "工单模板"
+    },
+    {
+      "name": "工单模板/执行单元路由"
+    },
+    {
+      "name": "流程管理"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "AutomationNodesReq": {
+        "type": "object",
+        "properties": {
+          "workflow_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "workflow_id": 1
+        }
+      },
+      "ByKeywordReq": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "模糊查询关键字 (匹配名字或描述)",
+            "example": "search_key"
+          }
+        },
+        "example": {
+          "keyword": "search_key"
+        }
+      },
+      "CreateDispatchReq": {
+        "type": "object",
+        "properties": {
+          "automation_node_id": {
+            "type": "string",
+            "example": "string"
+          },
+          "field": {
+            "type": "string",
+            "example": "string"
+          },
+          "priority": {
+            "type": "integer",
+            "example": 0
+          },
+          "runner_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "template_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "value": {
+            "type": "string",
+            "example": "string"
+          }
+        },
+        "example": {
+          "automation_node_id": "string",
+          "field": "string",
+          "priority": 0,
+          "runner_id": 1,
+          "template_id": 1,
+          "value": "string"
+        }
+      },
+      "CreateReq": {
+        "type": "object",
+        "properties": {
+          "desc": {
+            "type": "string",
+            "description": "流程作用详细描述",
+            "example": "相关业务描述信息"
+          },
+          "flow_data": {
+            "type": "string",
+            "description": "画布原始图结构数据 (可选)",
+            "example": "string"
+          },
+          "icon": {
+            "type": "string",
+            "description": "画布展现图标",
+            "example": "string"
+          },
+          "is_notify": {
+            "type": "boolean",
+            "description": "节点流转时是否触发推送通知",
+            "example": true
+          },
+          "name": {
+            "type": "string",
+            "description": "工作流展示名字",
+            "example": "示例名称"
+          },
+          "notify_method": {
+            "type": "integer",
+            "description": "流程的默认第一通知渠道类型",
+            "example": 0
+          },
+          "owner": {
+            "type": "string",
+            "description": "流程负责人邮箱",
+            "example": "string"
+          },
+          "template_id": {
+            "type": "integer",
+            "description": "挂载绑定的工单模板 ID",
+            "example": 1
+          }
+        },
+        "example": {
+          "desc": "相关业务描述信息",
+          "flow_data": "string",
+          "icon": "string",
+          "is_notify": true,
+          "name": "示例名称",
+          "notify_method": 0,
+          "owner": "string",
+          "template_id": 1
+        }
+      },
+      "CreateTemplateGroupReq": {
+        "type": "object",
+        "properties": {
+          "icon": {
+            "type": "string",
+            "example": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "示例名称"
+          }
+        },
+        "example": {
+          "icon": "string",
+          "name": "示例名称"
+        }
+      },
+      "CreateTemplateReq": {
+        "type": "object",
+        "properties": {
+          "desc": {
+            "type": "string",
+            "example": "相关业务描述信息"
+          },
+          "group_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "icon": {
+            "type": "string",
+            "example": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "示例名称"
+          },
+          "options": {
+            "type": "string",
+            "example": "string"
+          },
+          "rules": {
+            "type": "string",
+            "example": "string"
+          },
+          "schedule_overrides": {
+            "type": "string",
+            "example": "string"
+          },
+          "workflow_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "desc": "相关业务描述信息",
+          "group_id": 1,
+          "icon": "string",
+          "name": "示例名称",
+          "options": "string",
+          "rules": "string",
+          "schedule_overrides": "string",
+          "workflow_id": 1
+        }
+      },
+      "CreateTicketReq": {
+        "type": "object",
+        "properties": {
+          "create_by": {
+            "type": "string",
+            "example": "string"
+          },
+          "data": {
+            "type": "string",
+            "example": "string"
+          },
+          "template_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "workflow_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "create_by": "string",
+          "data": "string",
+          "template_id": 1,
+          "workflow_id": 1
+        }
+      },
+      "DeleteDispatchReq": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "id": 1
+        }
+      },
+      "DeployReq": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "流程模板定义的主键 ID",
+            "example": 1
+          }
+        },
+        "example": {
+          "id": 1
+        }
+      },
+      "DetailProcessInstIdReq": {
+        "type": "object",
+        "properties": {
+          "process_instance_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "process_instance_id": 1
+        }
+      },
+      "FindByIdsReq": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "example": [
+              1,
+              2,
+              3
+            ]
+          }
+        },
+        "example": {
+          "ids": [
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "FindByTemplateIds": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "example": [
+              1,
+              2,
+              3
+            ]
+          }
+        },
+        "example": {
+          "ids": [
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "GetRulesByWorkFlowIdReq": {
+        "type": "object",
+        "properties": {
+          "workflow_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "workflow_id": 1
+        }
+      },
+      "GetTemplatesByWorkFlowIdReq": {
+        "type": "object",
+        "properties": {
+          "workflow_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "workflow_id": 1
+        }
+      },
+      "HistoryReq": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "example": 10
+          },
+          "offset": {
+            "type": "integer",
+            "example": 0
+          },
+          "user_id": {
+            "type": "string",
+            "example": "string"
+          }
+        },
+        "example": {
+          "limit": 10,
+          "offset": 0,
+          "user_id": "string"
+        }
+      },
+      "ListAttemptsReq": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "task_id": 1
+        }
+      },
+      "ListByTemplateId": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "template_id": 1
+        }
+      },
+      "ListTaskByInstanceIDReq": {
+        "type": "object",
+        "properties": {
+          "instance_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "instance_id": 1
+        }
+      },
+      "ListTemplateReq": {
+        "type": "object",
+        "properties": {
+          "group_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "keyword": {
+            "type": "string",
+            "example": "search_key"
+          }
+        },
+        "example": {
+          "group_id": 1,
+          "keyword": "search_key"
+        }
+      },
+      "LogsReq": {
+        "type": "object",
+        "properties": {
+          "attempt_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "limit": {
+            "type": "integer",
+            "example": 10
+          },
+          "min_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "attempt_id": 1,
+          "limit": 10,
+          "min_id": 1
+        }
+      },
+      "OrderGraphReq": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "流程定义 ID",
+            "example": 1
+          },
+          "process_instance_id": {
+            "type": "integer",
+            "description": "底层流程引擎执行实例的 ProcessInstanceId",
+            "example": 1
+          },
+          "status": {
+            "type": "integer",
+            "description": "实例当前的状态",
+            "example": 1
+          }
+        },
+        "example": {
+          "id": 1,
+          "process_instance_id": 1,
+          "status": 1
+        }
+      },
+      "Page": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "每页数据大小限制",
+            "example": 10
+          },
+          "offset": {
+            "type": "integer",
+            "description": "查询偏移量",
+            "example": 0
+          }
+        },
+        "example": {
+          "limit": 10,
+          "offset": 0
+        }
+      },
+      "PassOrderReq": {
+        "type": "object",
+        "properties": {
+          "comment": {
+            "type": "string",
+            "example": "string"
+          },
+          "extra_data": {
+            "type": "string",
+            "example": "string"
+          },
+          "task_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "comment": "string",
+          "extra_data": "string",
+          "task_id": 1
+        }
+      },
+      "RejectOrderReq": {
+        "type": "object",
+        "properties": {
+          "comment": {
+            "type": "string",
+            "example": "string"
+          },
+          "task_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "comment": "string",
+          "task_id": 1
+        }
+      },
+      "RestartProcessReq": {
+        "type": "object",
+        "properties": {
+          "ticket_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "ticket_id": 1
+        }
+      },
+      "RetryReq": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "id": 1
+        }
+      },
+      "RevokeOrderReq": {
+        "type": "object",
+        "properties": {
+          "force": {
+            "type": "boolean",
+            "example": true
+          },
+          "instance_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "reason": {
+            "type": "string",
+            "example": "string"
+          }
+        },
+        "example": {
+          "force": true,
+          "instance_id": 1,
+          "reason": "string"
+        }
+      },
+      "StartUserReq": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "example": 10
+          },
+          "offset": {
+            "type": "integer",
+            "example": 0
+          }
+        },
+        "example": {
+          "limit": 10,
+          "offset": 0
+        }
+      },
+      "SubmitRatingReq": {
+        "type": "object",
+        "properties": {
+          "comment": {
+            "type": "string",
+            "example": "string"
+          },
+          "score": {
+            "type": "integer",
+            "example": 0
+          },
+          "ticket_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "comment": "string",
+          "score": 0,
+          "ticket_id": 1
+        }
+      },
+      "SyncDispatchReq": {
+        "type": "object",
+        "properties": {
+          "sync_template_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "template_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "sync_template_id": 1,
+          "template_id": 1
+        }
+      },
+      "TaskFormConfigReq": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "workflow_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "task_id": 1,
+          "workflow_id": 1
+        }
+      },
+      "TaskTimelineReq": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "example": 10
+          },
+          "offset": {
+            "type": "integer",
+            "example": 0
+          },
+          "process_inst_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "limit": 10,
+          "offset": 0,
+          "process_inst_id": 1
+        }
+      },
+      "TerminateReq": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 1
+          },
+          "reason": {
+            "type": "string",
+            "example": "string"
+          }
+        },
+        "example": {
+          "id": 1,
+          "reason": "string"
+        }
+      },
+      "Todo": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "example": 10
+          },
+          "offset": {
+            "type": "integer",
+            "example": 0
+          },
+          "process_name": {
+            "type": "string",
+            "example": "示例名称"
+          },
+          "sort_by_asc": {
+            "type": "boolean",
+            "example": true
+          },
+          "user_id": {
+            "type": "string",
+            "example": "string"
+          }
+        },
+        "example": {
+          "limit": 10,
+          "offset": 0,
+          "process_name": "示例名称",
+          "sort_by_asc": true,
+          "user_id": "string"
+        }
+      },
+      "ToggleFavoriteReq": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "template_id": 1
+        }
+      },
+      "TransferReq": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "usernames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "admin",
+              "guest"
+            ]
+          }
+        },
+        "example": {
+          "task_id": 1,
+          "usernames": [
+            "admin",
+            "guest"
+          ]
+        }
+      },
+      "UpdateDispatchReq": {
+        "type": "object",
+        "properties": {
+          "automation_node_id": {
+            "type": "string",
+            "example": "string"
+          },
+          "field": {
+            "type": "string",
+            "example": "string"
+          },
+          "id": {
+            "type": "integer",
+            "example": 1
+          },
+          "priority": {
+            "type": "integer",
+            "example": 0
+          },
+          "runner_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "template_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "value": {
+            "type": "string",
+            "example": "string"
+          }
+        },
+        "example": {
+          "automation_node_id": "string",
+          "field": "string",
+          "id": 1,
+          "priority": 0,
+          "runner_id": 1,
+          "template_id": 1,
+          "value": "string"
+        }
+      },
+      "UpdateReq": {
+        "type": "object",
+        "properties": {
+          "desc": {
+            "type": "string",
+            "description": "流程描述",
+            "example": "相关业务描述信息"
+          },
+          "flow_data": {
+            "type": "string",
+            "description": "图画布原始节点拓扑 json",
+            "example": "string"
+          },
+          "id": {
+            "type": "integer",
+            "description": "更新的工作流唯一自增 ID",
+            "example": 1
+          },
+          "is_notify": {
+            "type": "boolean",
+            "description": "是否支持流转通知推送",
+            "example": true
+          },
+          "name": {
+            "type": "string",
+            "description": "流程名称",
+            "example": "示例名称"
+          },
+          "notify_method": {
+            "type": "integer",
+            "description": "推送渠道",
+            "example": 0
+          },
+          "owner": {
+            "type": "string",
+            "description": "流程管理员/设计者",
+            "example": "string"
+          }
+        },
+        "example": {
+          "desc": "相关业务描述信息",
+          "flow_data": "string",
+          "id": 1,
+          "is_notify": true,
+          "name": "示例名称",
+          "notify_method": 0,
+          "owner": "string"
+        }
+      },
+      "UpdateTemplateGroupReq": {
+        "type": "object",
+        "properties": {
+          "icon": {
+            "type": "string",
+            "example": "string"
+          },
+          "id": {
+            "type": "integer",
+            "example": 1
+          },
+          "name": {
+            "type": "string",
+            "example": "示例名称"
+          }
+        },
+        "example": {
+          "icon": "string",
+          "id": 1,
+          "name": "示例名称"
+        }
+      },
+      "UpdateTemplateReq": {
+        "type": "object",
+        "properties": {
+          "desc": {
+            "type": "string",
+            "example": "相关业务描述信息"
+          },
+          "group_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "icon": {
+            "type": "string",
+            "example": "string"
+          },
+          "id": {
+            "type": "integer",
+            "example": 1
+          },
+          "name": {
+            "type": "string",
+            "example": "示例名称"
+          },
+          "options": {
+            "type": "string",
+            "example": "string"
+          },
+          "rules": {
+            "type": "string",
+            "example": "string"
+          },
+          "schedule_overrides": {
+            "type": "string",
+            "example": "string"
+          },
+          "workflow_id": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "example": {
+          "desc": "相关业务描述信息",
+          "group_id": 1,
+          "icon": "string",
+          "id": 1,
+          "name": "示例名称",
+          "options": "string",
+          "rules": "string",
+          "schedule_overrides": "string",
+          "workflow_id": 1
+        }
+      }
+    },
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "请输入登录后获取的 JWT Bearer Token 进行接口调用鉴权"
+      }
+    }
+  }
+}

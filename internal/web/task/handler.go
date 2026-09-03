@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	etaskperm "github.com/Duke1616/etask/pkg/contract/perm"
+	etaskperm "github.com/Duke1616/etask/pkg/contract/permission"
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"

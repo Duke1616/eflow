@@ -1,7 +1,7 @@
 package dispatch
 
 import (
-	etaskperm "github.com/Duke1616/etask/pkg/contract/perm"
+	etaskperm "github.com/Duke1616/etask/pkg/contract/permission"
 	"github.com/Duke1616/eflow/internal/domain"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	"github.com/Duke1616/eflow/pkg/contract/permission"

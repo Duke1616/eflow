@@ -7,7 +7,7 @@ require (
 	github.com/Duke1616/ecmdb v1.11.1
 	github.com/Duke1616/eiam v0.0.22
 	github.com/Duke1616/enotify v0.1.25-0.20260311115016-f762700e83e9
-	github.com/Duke1616/etask v1.14.0
+	github.com/Duke1616/etask v1.14.1
 	github.com/chromedp/chromedp v0.15.1
 	github.com/ecodeclub/ekit v0.0.10
 	github.com/ecodeclub/ginx v0.0.3-0.20250724125208-2ec06fc61450
