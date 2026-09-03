@@ -8,7 +8,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
-	"github.com/Duke1616/eflow/pkg/contract/perm"
+	"github.com/Duke1616/eflow/pkg/contract/permission"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ginx"
@@ -38,7 +38,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Bind(ginx.W(h.DetailTemplate)),
 	)
 	g.POST("/list", h.Define("工单模板列表", "view").
-		Needs(perm.Workflow.ViewByIds, perm.Template.ViewGroupSummary).
+		Needs(permission.Workflow.ViewByIds, permission.Template.ViewGroupSummary).
 		Bind(ginx.B[ListTemplateReq](h.ListTemplate)),
 	)
 
@@ -55,11 +55,11 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Bind(ginx.B[GetRulesByWorkFlowIdReq](h.GetRulesByWorkFlowId)),
 	)
 	g.POST("/create", h.Define("创建工单模板", "add").
-		Needs(perm.Template.ViewGroup, perm.Workflow.View, perm.Workflow.Get).
+		Needs(permission.Template.ViewGroup, permission.Workflow.View, permission.Workflow.Get).
 		Bind(ginx.B[CreateTemplateReq](h.CreateTemplate)),
 	)
 	g.POST("/update", h.Define("修改工单模板", "edit").
-		Needs(perm.Template.Get, perm.Template.ViewGroup, perm.Workflow.View, perm.Workflow.Get).
+		Needs(permission.Template.Get, permission.Template.ViewGroup, permission.Workflow.View, permission.Workflow.Get).
 		Bind(ginx.B[UpdateTemplateReq](h.UpdateTemplate)),
 	)
 	g.DELETE("/delete/:id", h.Define("删除工单模板", "delete").

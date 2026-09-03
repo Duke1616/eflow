@@ -15,11 +15,11 @@
 
 | 操作名称 | 完整权限码 | 作用域 | 归属类型 | 暴露状态 | 联动包含权限 | 宿主源码位置 |
 |:---|:---|:---|:---|:---|:---|:---|
-| 创建执行单元路由 | `ticket:dispatch:add` | 租户级 | 本级 | 正常 | 查询流程自动化节点 · `ticket:workflow:view_automation_nodes`<br>`task:runner:view_by_ids` | `internal/web/dispatch/handler.go` 行 33 |
-| 删除执行单元路由 | `ticket:dispatch:delete` | 租户级 | 本级 | 正常 | - | `internal/web/dispatch/handler.go` 行 41 |
-| 修改执行单元路由 | `ticket:dispatch:edit` | 租户级 | 本级 | 正常 | 查询流程自动化节点 · `ticket:workflow:view_automation_nodes`<br>`task:runner:view_by_ids` | `internal/web/dispatch/handler.go` 行 37 |
-| 复制执行单元路由 | `ticket:dispatch:sync` | 租户级 | 本级 | 正常 | 根据流程获取模板 · `ticket:template:view_by_workflow_id` | `internal/web/dispatch/handler.go` 行 44 |
-| 执行单元路由列表 | `ticket:dispatch:view` | 租户级 | 本级 | 正常 | 工单模板详情 · `ticket:template:get`<br>`task:runner:view_by_ids`<br>`task:runner:view_by_codebook_id`<br>查询流程自动化节点 · `ticket:workflow:view_automation_nodes` | `internal/web/dispatch/handler.go` 行 48 |
+| 创建执行单元路由 | `ticket:dispatch:add` | 租户级 | 本级 | 正常 | 查询流程自动化节点 · `ticket:workflow:view_automation_nodes`<br>`task:runner:ids` | `internal/web/dispatch/handler.go` 行 34 |
+| 删除执行单元路由 | `ticket:dispatch:delete` | 租户级 | 本级 | 正常 | - | `internal/web/dispatch/handler.go` 行 42 |
+| 修改执行单元路由 | `ticket:dispatch:edit` | 租户级 | 本级 | 正常 | 查询流程自动化节点 · `ticket:workflow:view_automation_nodes`<br>`task:runner:ids` | `internal/web/dispatch/handler.go` 行 38 |
+| 复制执行单元路由 | `ticket:dispatch:sync` | 租户级 | 本级 | 正常 | 根据流程获取模板 · `ticket:template:view_by_workflow_id` | `internal/web/dispatch/handler.go` 行 45 |
+| 执行单元路由列表 | `ticket:dispatch:view` | 租户级 | 本级 | 正常 | 工单模板详情 · `ticket:template:get`<br>`task:runner:ids`<br>`task:runner:view_exclude_codebook_id`<br>查询流程自动化节点 · `ticket:workflow:view_automation_nodes` | `internal/web/dispatch/handler.go` 行 49 |
 
 ---
 
@@ -46,7 +46,7 @@
 | 流转时间线 | `ticket:manager:timeline` | 租户级 | 本级 | 正常 | - | `internal/web/ticket/handler.go` 行 78 |
 | 所有待办工单 | `ticket:manager:todo` | 租户级 | 本级 | 正常 | 批量获取模板详情 · `ticket:template:view_by_ids`<br>工单详情 · `ticket:manager:get` | `internal/web/ticket/handler.go` 行 83 |
 | 转交审批人 | `ticket:manager:transfer` | 租户级 | 本级 | 正常 | `iam:user:view` | `internal/web/ticket/handler.go` 行 115 |
-| 关联自动化任务 | `ticket:manager:view_tasks` | 租户级 | 跨域 (task) | 正常 | - | `internal/web/task/handler.go` 行 42 |
+| 关联自动化任务 | `ticket:manager:view_tasks` | 租户级 | 跨域 (task) | 正常 | - | `internal/web/task/handler.go` 行 43 |
 
 ---
 
@@ -58,11 +58,11 @@
 
 | 操作名称 | 完整权限码 | 作用域 | 归属类型 | 暴露状态 | 联动包含权限 | 宿主源码位置 |
 |:---|:---|:---|:---|:---|:---|:---|
-| 执行尝试日志 | `ticket:task:logs` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/task/handler.go` 行 56 |
-| 重试自动化任务 | `ticket:task:retry` | 租户级 | 本级 | 正常 | - | `internal/web/task/handler.go` 行 46 |
-| 强制终止自动化任务 | `ticket:task:terminate` | 租户级 | 本级 | 正常 | - | `internal/web/task/handler.go` 行 49 |
-| 自动化任务列表 | `ticket:task:view` | 租户级 | 本级 | 正常 | - | `internal/web/task/handler.go` 行 39 |
-| 执行尝试列表 | `ticket:task:view_attempts` | 租户级 | 本级 | 正常 | 执行尝试日志 · `ticket:task:logs`<br>`task:execution:logs` | `internal/web/task/handler.go` 行 52 |
+| 执行尝试日志 | `ticket:task:logs` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/task/handler.go` 行 57 |
+| 重试自动化任务 | `ticket:task:retry` | 租户级 | 本级 | 正常 | - | `internal/web/task/handler.go` 行 47 |
+| 强制终止自动化任务 | `ticket:task:terminate` | 租户级 | 本级 | 正常 | - | `internal/web/task/handler.go` 行 50 |
+| 自动化任务列表 | `ticket:task:view` | 租户级 | 本级 | 正常 | - | `internal/web/task/handler.go` 行 40 |
+| 执行尝试列表 | `ticket:task:view_attempts` | 租户级 | 本级 | 正常 | 执行尝试日志 · `ticket:task:logs`<br>`task:manager:logs` | `internal/web/task/handler.go` 行 53 |
 
 ---
 

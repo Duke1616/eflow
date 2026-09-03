@@ -8,7 +8,7 @@ import (
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eflow/pkg/contract/model"
-	"github.com/Duke1616/eflow/pkg/contract/perm"
+	"github.com/Duke1616/eflow/pkg/contract/permission"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ginx"
 	"github.com/gin-gonic/gin"
@@ -37,18 +37,18 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 
 	// 流程主实体写动作防护
 	g.POST("/create", h.Define("创建流程", "add").
-		Needs(perm.Workflow.Get, "iam:user:view").
+		Needs(permission.Workflow.Get, "iam:user:view").
 		Bind(ginx.B[CreateReq](h.Create)),
 	)
 	g.POST("/update", h.Define("修改流程", "edit").
-		Needs(perm.Workflow.Get, "iam:user:view").
+		Needs(permission.Workflow.Get, "iam:user:view").
 		Bind(ginx.B[UpdateReq](h.Update)),
 	)
 	g.DELETE("/delete/:id", h.Define("删除流程", "delete").
 		Bind(ginx.W(h.Delete)),
 	)
 	g.POST("/deploy", h.Define("流程发布", "deploy").
-		Needs(perm.Workflow.Get).
+		Needs(permission.Workflow.Get).
 		Bind(ginx.B[DeployReq](h.Deploy)),
 	)
 

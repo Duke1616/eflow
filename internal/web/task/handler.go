@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"strings"
 
+	etaskperm "github.com/Duke1616/etask/pkg/contract/perm"
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	"github.com/Duke1616/eflow/pkg/contract/model"
-	"github.com/Duke1616/eflow/pkg/contract/perm"
+	"github.com/Duke1616/eflow/pkg/contract/permission"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ginx"
 	"github.com/gin-gonic/gin"
@@ -50,7 +51,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Bind(ginx.B[TerminateReq](h.Terminate)))
 
 	group.POST("/attempt/list", h.Define("执行尝试列表", "view_attempts").
-		Needs(perm.Task.Logs, "task:execution:logs").
+		Needs(permission.Task.Logs, etaskperm.Manager.Logs).
 		Bind(ginx.B[ListAttemptsReq](h.ListAttempts)))
 
 	group.POST("/attempt/logs", h.Define("执行尝试日志", "logs").

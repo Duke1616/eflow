@@ -1,9 +1,10 @@
 package dispatch
 
 import (
+	etaskperm "github.com/Duke1616/etask/pkg/contract/perm"
 	"github.com/Duke1616/eflow/internal/domain"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
-	"github.com/Duke1616/eflow/pkg/contract/perm"
+	"github.com/Duke1616/eflow/pkg/contract/permission"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ginx"
 	"github.com/gin-gonic/gin"
@@ -31,23 +32,23 @@ func (h *Handler) PublicRoutes(server *gin.Engine) {
 func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	g := server.Group("/api/dispatch")
 	g.POST("/create", h.Define("创建执行单元路由", "add").
-		Needs(perm.Workflow.ViewAutomationNodes, "task:runner:view_by_ids").
+		Needs(permission.Workflow.ViewAutomationNodes, etaskperm.Runner.Ids).
 		Bind(ginx.B[CreateDispatchReq](h.Create)),
 	)
 	g.POST("/update", h.Define("修改执行单元路由", "edit").
-		Needs(perm.Workflow.ViewAutomationNodes, "task:runner:view_by_ids").
+		Needs(permission.Workflow.ViewAutomationNodes, etaskperm.Runner.Ids).
 		Bind(ginx.B[UpdateDispatchReq](h.Update)),
 	)
 	g.POST("/delete", h.Define("删除执行单元路由", "delete").
 		Bind(ginx.B[DeleteDispatchReq](h.Delete)),
 	)
 	g.POST("/sync", h.Define("复制执行单元路由", "sync").
-		Needs(perm.Template.ViewByWorkflowId).
+		Needs(permission.Template.ViewByWorkflowId).
 		Bind(ginx.B[SyncDispatchReq](h.Sync)),
 	)
 	g.POST("/list/by_template_id", h.Define("执行单元路由列表", "view").
-		Needs(perm.Template.Get, "task:runner:view_by_ids", "task:runner:view_by_codebook_id",
-			perm.Workflow.ViewAutomationNodes).
+		Needs(permission.Template.Get, etaskperm.Runner.Ids, etaskperm.Runner.ViewExcludeCodebookId,
+			permission.Workflow.ViewAutomationNodes).
 		Bind(ginx.B[ListByTemplateId](h.ListByTemplateId)),
 	)
 }

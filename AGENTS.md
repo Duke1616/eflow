@@ -13,10 +13,10 @@ $$\text{Transport (Web)} \longrightarrow \text{Service} \longrightarrow \text{Re
 ## 2. 权限契约与 EIAM 自发现规范
 - **声明式受控注入**：Handler 统一使用 `h.Define("名称", "编码").Bind(...)`；跨领域路由挂载必须使用 `h.For(model.Xxx)`。
 - **强类型权限依赖 (Needs)**：
-  - 本服务受控依赖**强制引用 `perm.Xxx.Yyy` 强类型常量**，禁止手写字面量字符串；外部服务依赖保留标准 URN。
+  - 本服务受控依赖**强制引用 `permission.Xxx.Yyy` 强类型常量**，禁止手写字面量字符串；外部服务依赖保留标准 URN。
   - 严格根据前端交互定义依赖，严禁过度授予运维级高危权限（如 ViewTasks）。
 - **工具链自动化**：路由或权限修改后，必须执行 `permgen` 自动化生成契约代码与权限文档：
-  - `pkg/contract/perm/zz_generated_perms.go`
+  - `pkg/contract/permission/zz_generated_perms.go`
   - `pkg/contract/model/zz_generated_models.go`
   - `docs/permissions.md`
 

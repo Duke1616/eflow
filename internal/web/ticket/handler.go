@@ -15,7 +15,7 @@ import (
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	withdrawalSvc "github.com/Duke1616/eflow/internal/service/withdrawal"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
-	"github.com/Duke1616/eflow/pkg/contract/perm"
+	"github.com/Duke1616/eflow/pkg/contract/permission"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/Duke1616/eiam/pkg/web/capability"
 	"github.com/ecodeclub/ginx"
@@ -61,8 +61,8 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 
 	g.POST("/submit", h.Define("提交工单", "submit").
 		Group("工单中心/工单操作").
-		Needs(perm.Template.Get, perm.Template.ToggleFavorite, perm.Template.ViewFavorite,
-			perm.Template.View, perm.Template.ViewGroupSummary, "cmdb:tools:upload").
+		Needs(permission.Template.Get, permission.Template.ToggleFavorite, permission.Template.ViewFavorite,
+			permission.Template.View, permission.Template.ViewGroupSummary, "cmdb:tools:upload").
 		Bind(ginx.B[CreateTicketReq](h.CreateTicket)),
 	)
 	g.POST("/process/restart", h.Define("重新启动流程", "process_restart").
@@ -71,7 +71,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	)
 	g.POST("/detail/process_inst_id", h.Define("工单详情", "get").
 		Group("工单中心/工单详情").
-		Needs(perm.Manager.Graph, perm.Manager.Timeline, "cmdb:tools:download").
+		Needs(permission.Manager.Graph, permission.Manager.Timeline, "cmdb:tools:download").
 		AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
 		Bind(ginx.B[DetailProcessInstIdReq](h.Detail)),
 	)
@@ -82,34 +82,34 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	)
 	g.POST("/todo", h.Define("所有待办工单", "todo").
 		Group("工单中心/工单列表").
-		Needs(perm.Template.ViewByIds, perm.Manager.Get).
+		Needs(permission.Template.ViewByIds, permission.Manager.Get).
 		AccessScope(ticketpbac.TodoProfile, ticketpbac.TodoPresets...).
 		Bind(ginx.B[Todo](h.TodoAll)),
 	)
 	g.POST("/todo/user", h.Define("我的待办工单", "my_todo").
 		Group("工单中心/工单列表").
-		Needs(perm.Template.ViewByIds, perm.Manager.Get).
+		Needs(permission.Template.ViewByIds, permission.Manager.Get).
 		Bind(ginx.B[Todo](h.TodoByUser)),
 	)
 	g.POST("/history", h.Define("历史工单", "history").
 		Group("工单中心/工单列表").
-		Needs(perm.Template.ViewByIds, perm.Manager.Get, perm.Manager.Rate).
+		Needs(permission.Template.ViewByIds, permission.Manager.Get, permission.Manager.Rate).
 		AccessScope(ticketpbac.HistoryProfile, ticketpbac.HistoryPresets...).
 		Bind(ginx.B[HistoryReq](h.History)),
 	)
 	g.POST("/start/user", h.Define("我发起的工单", "my_start").
 		Group("工单中心/工单列表").
-		Needs(perm.Template.ViewByIds, perm.Manager.Get).
+		Needs(permission.Template.ViewByIds, permission.Manager.Get).
 		Bind(ginx.B[StartUserReq](h.StartUser)),
 	)
 	g.POST("/pass", h.Define("同意审批", "pass").
 		Group("工单中心/工单操作").
-		Needs(perm.Manager.FormConfig).
+		Needs(permission.Manager.FormConfig).
 		Bind(ginx.B[PassOrderReq](h.Pass)),
 	)
 	g.POST("/reject", h.Define("驳回审批", "reject").
 		Group("工单中心/工单操作").
-		Needs(perm.Manager.FormConfig).
+		Needs(permission.Manager.FormConfig).
 		Bind(ginx.B[RejectOrderReq](h.Reject)),
 	)
 	g.POST("/transfer", h.Define("转交审批人", "transfer").
@@ -128,7 +128,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	)
 	g.POST("/task/form_config", h.Define("任务节点表单配置", "form_config").
 		Group("工单中心/工单详情").
-		Needs(perm.Template.Get, perm.Manager.Get).
+		Needs(permission.Template.Get, permission.Manager.Get).
 		Bind(ginx.B[TaskFormConfigReq](h.GetTaskFormConfig)),
 	)
 }

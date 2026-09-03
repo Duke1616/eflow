@@ -7,7 +7,7 @@ require (
 	github.com/Duke1616/ecmdb v1.11.1
 	github.com/Duke1616/eiam v0.0.22
 	github.com/Duke1616/enotify v0.1.25-0.20260311115016-f762700e83e9
-	github.com/Duke1616/etask v1.12.0
+	github.com/Duke1616/etask v1.14.0
 	github.com/chromedp/chromedp v0.15.1
 	github.com/ecodeclub/ekit v0.0.10
 	github.com/ecodeclub/ginx v0.0.3-0.20250724125208-2ec06fc61450
@@ -112,6 +112,7 @@ require (
 	github.com/segmentio/kafka-go v0.4.44 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/shirou/gopsutil/v3 v3.21.6 // indirect
+	github.com/smartystreets/goconvey v1.8.1 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
