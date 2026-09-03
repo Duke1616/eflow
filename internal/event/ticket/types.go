@@ -6,10 +6,10 @@ import (
 )
 
 const (
-	// WechatTicketEventName 接收企业微信 OA 审批的回调事件名 (变量名规范为 Ticket，底层 Kafka 保持 order 以兼容生产)
-	WechatTicketEventName = "wechat_order_events"
+	// WechatTicketEventName 接收企业微信 OA 审批的回调事件名
+	WechatTicketEventName = "wechat_ticket_create_events"
 	// LarkCallbackEventName 接收飞书审批消息卡片回调的事件名
-	LarkCallbackEventName = "lark_callback_events"
+	LarkCallbackEventName = "lark_card_callback_events"
 )
 
 // Action 飞书卡片交互行为

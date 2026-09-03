@@ -20,12 +20,12 @@ func InitProcessEventConsumer(
 	workFlowSvc workflowSvc.Service,
 	ticketSvc ticketSvc.Service,
 ) (*process.ProcessEventConsumer, error) {
-	consumer := mqx.NewResilientConsumer(q, event.CreateProcessEventName, "create_process_instance")
+	consumer := mqx.NewResilientConsumer(q, event.CreateProcessEventName, "process_instance_starter")
 	return process.NewProcessEventConsumer(workFlowSvc, ticketSvc, consumer), nil
 }
 
 func InitExecuteResultConsumer(q mq.MQ, svc taskSvc.Service) (*taskEvent.ExecuteResultConsumer, error) {
-	consumer := mqx.NewResilientConsumer(q, event.ExecuteResultEventName, "task_receive_execute")
+	consumer := mqx.NewResilientConsumer(q, event.ExecuteResultEventName, "task_execution_result_consumer")
 	return taskEvent.NewExecuteResultConsumer(consumer, svc), nil
 }
 
@@ -35,7 +35,7 @@ func InitWechatTicketConsumer(
 	userSvc ticketEvent.UserService,
 	q mq.MQ,
 ) (*ticketEvent.WechatTicketConsumer, error) {
-	consumer := mqx.NewResilientConsumer(q, ticketEvent.WechatTicketEventName, "wechat_create_ticket")
+	consumer := mqx.NewResilientConsumer(q, ticketEvent.WechatTicketEventName, "wechat_ticket_creator")
 	return ticketEvent.NewWechatTicketConsumer(svc, templateSvc, userSvc, consumer), nil
 }
 
@@ -45,6 +45,6 @@ func InitWechatApprovalCallbackConsumer(
 	p templateEvent.WechatTicketEventProducer,
 	workApp *workwx.WorkwxApp,
 ) (*templateEvent.WechatApprovalCallbackConsumer, error) {
-	consumer := mqx.NewResilientConsumer(q, templateEvent.WechatCallbackEventName, "wechat_oa_callback")
+	consumer := mqx.NewResilientConsumer(q, templateEvent.WechatCallbackEventName, "wechat_oa_callback_handler")
 	return templateEvent.NewWechatApprovalCallbackConsumer(svc, consumer, p, workApp), nil
 }

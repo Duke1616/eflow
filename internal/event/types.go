@@ -1,9 +1,10 @@
 package event
 
 const (
-	ExecuteResultEventName     = "complete_topic"
-	CreateProcessEventName     = "create_process_events"
-	OrderStatusModifyEventName = "order_status_modify_events"
+	ExecuteResultEventName      = "task_execution_complete_events"
+	CreateProcessEventName      = "ticket_process_start_events"
+	TicketStatusModifyEventName = "ticket_status_changed_events"
+	OrderStatusModifyEventName  = TicketStatusModifyEventName // 保持向后兼容别名
 )
 
 type Status uint8
