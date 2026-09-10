@@ -210,8 +210,16 @@ func extractStaticUsernames(assignees []easyflow.Assignee, createBy string) []st
 }
 
 func (s *service) SafeGo(ctx context.Context, timeout time.Duration, fn func(ctx context.Context)) {
+	// 继承外层上下文的所有键值（租户、链路追踪等），同时切断外层请求结束导致的取消信号
+	var baseCtx context.Context
+	if ctx != nil {
+		baseCtx = context.WithoutCancel(ctx)
+	} else {
+		baseCtx = context.Background()
+	}
+
 	go func() {
-		sendCtx, cancel := context.WithTimeout(context.Background(), timeout)
+		sendCtx, cancel := context.WithTimeout(baseCtx, timeout)
 		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
