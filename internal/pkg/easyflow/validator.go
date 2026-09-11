@@ -44,6 +44,7 @@ func ValidateAll(ctx *Context) error {
 		&validateSelectiveMinBranches{},
 		// 6. 节点与连接线配置完整性
 		&validateConditionEdgeExpression{},
+		&validateNoDuplicateConditionExpressions{},
 	}
 
 	for _, v := range validators {
@@ -611,6 +612,80 @@ func (v *validateConditionEdgeExpression) Validate(ctx *Context) error {
 					"否则表达式默认为恒真，会导致多个分支被同时激活",
 				getNodeDisplayName(node), getNodeDisplayName(target),
 			)
+		}
+	}
+	return nil
+}
+
+// validateNoDuplicateConditionExpressions 检测条件分支是否存在重复的条件表达式。
+//
+// 业务背景与原理：
+//  1. Selective 网关（条件并行网关）：其下游每个 condition 子分支必须具备互斥或区分度的条件表达式。
+//     若存在重复表达式（如分支A为 $env == 'prod'，分支B也为 $env == 'prod'），
+//     会导致两分支同时激活或同时跳过，通常属于设计者复制节点后未修改表达式的配置笔误。
+//  2. 多出边 Condition 网关（出边 ≥ 2）：同一个条件网关的多条出边若条件完全相同，
+//     违反条件分流路由语义，属于配置错误。
+type validateNoDuplicateConditionExpressions struct{}
+
+func (v *validateNoDuplicateConditionExpressions) Validate(ctx *Context) error {
+	for _, node := range ctx.NodesMap {
+		switch node.Type {
+		case NodeTypeSelective:
+			// 检查 selective 下所有 condition 分支的表达式
+			outEdges := ctx.GetTargetEdges(node.ID)
+			seenExpr := make(map[string]string) // normalizedExpr -> conditionNodeID
+			for _, e := range outEdges {
+				condNode := ctx.GetNodeInfo(e.TargetNodeId)
+				if condNode.Type != NodeTypeCondition {
+					continue
+				}
+				condOutEdges := ctx.GetTargetEdges(condNode.ID)
+				for _, ce := range condOutEdges {
+					prop, _ := ToEdgeProperty(ce)
+					rawExpr := strings.TrimSpace(prop.Expression)
+					if rawExpr == "" {
+						continue
+					}
+					// 空白归一化（将连续空格收敛为单空格，防止由于多打空格规避校验）
+					normExpr := strings.Join(strings.Fields(rawExpr), " ")
+					if prevCondID, exists := seenExpr[normExpr]; exists {
+						prevCondNode := ctx.GetNodeInfo(prevCondID)
+						return newValidateError(
+							"条件并行网关节点 [%s] 的多个条件分支配置了重复的条件表达式: '%s'（分支 [%s] 与 [%s] 重复）。\n"+
+								"同一网关下的各个条件分支表达式必须具有区分度，请检查是否存在配置错误或复制粘贴遗漏",
+							getNodeDisplayName(node), rawExpr,
+							getNodeDisplayName(prevCondNode), getNodeDisplayName(condNode),
+						)
+					}
+					seenExpr[normExpr] = condNode.ID
+				}
+			}
+
+		case NodeTypeCondition:
+			outEdges := ctx.GetTargetEdges(node.ID)
+			if len(outEdges) < 2 {
+				continue
+			}
+			seenExpr := make(map[string]string) // normalizedExpr -> targetNodeID
+			for _, e := range outEdges {
+				prop, _ := ToEdgeProperty(e)
+				rawExpr := strings.TrimSpace(prop.Expression)
+				if rawExpr == "" {
+					continue
+				}
+				normExpr := strings.Join(strings.Fields(rawExpr), " ")
+				if prevTargetID, exists := seenExpr[normExpr]; exists {
+					prevTarget := ctx.GetNodeInfo(prevTargetID)
+					currTarget := ctx.GetNodeInfo(e.TargetNodeId)
+					return newValidateError(
+						"条件网关节点 [%s] 流向不同目标的分支配置了重复的条件表达式: '%s'（流向 [%s] 与 [%s] 重复）。\n"+
+							"多分支条件网关的各个分支表达式不能相同，请检查是否存在配置错误",
+						getNodeDisplayName(node), rawExpr,
+						getNodeDisplayName(prevTarget), getNodeDisplayName(currTarget),
+					)
+				}
+				seenExpr[normExpr] = e.TargetNodeId
+			}
 		}
 	}
 	return nil

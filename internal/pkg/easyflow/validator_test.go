@@ -564,6 +564,90 @@ func TestValidator_TableDriven(t *testing.T) {
 			wantErr:   true,
 			wantErrKw: "只有 1 条出边，至少需要 2 条",
 		},
+		// ─────────────────────────────────────────────────────────────────────
+		// 重复条件表达式防呆规则测试
+		// ─────────────────────────────────────────────────────────────────────
+		{
+			name: "条件防呆: selective 下多个分支配置完全相同的条件表达式",
+			workflow: Workflow{
+				Name: "selective分支表达式重复",
+				FlowData: LogicFlow{
+					Nodes: []map[string]interface{}{
+						{"id": "start", "type": "start"},
+						{"id": "sel", "type": "selective", "properties": map[string]interface{}{"name": "条件网关"}},
+						{"id": "cond-1", "type": "condition", "properties": map[string]interface{}{"name": "分支1"}},
+						{"id": "cond-2", "type": "condition", "properties": map[string]interface{}{"name": "分支2"}},
+						{"id": "user-1", "type": "user", "properties": map[string]interface{}{"name": "审批1"}},
+						{"id": "user-2", "type": "user", "properties": map[string]interface{}{"name": "审批2"}},
+						{"id": "join", "type": "parallel"},
+						{"id": "end", "type": "end"},
+					},
+					Edges: []map[string]interface{}{
+						{"id": "e1", "sourceNodeId": "start", "targetNodeId": "sel"},
+						{"id": "e2", "sourceNodeId": "sel", "targetNodeId": "cond-1"},
+						{"id": "e3", "sourceNodeId": "sel", "targetNodeId": "cond-2"},
+						{"id": "e4", "sourceNodeId": "cond-1", "targetNodeId": "user-1", "properties": map[string]interface{}{"expression": "$env == 'prod'"}},
+						{"id": "e5", "sourceNodeId": "cond-2", "targetNodeId": "user-2", "properties": map[string]interface{}{"expression": "$env == 'prod'"}},
+						{"id": "e6", "sourceNodeId": "user-1", "targetNodeId": "join"},
+						{"id": "e7", "sourceNodeId": "user-2", "targetNodeId": "join"},
+						{"id": "e8", "sourceNodeId": "join", "targetNodeId": "end"},
+					},
+				},
+			},
+			wantErr:   true,
+			wantErrKw: "配置了重复的条件表达式",
+		},
+		{
+			name: "条件防呆: selective 下多个分支表达式多空格但归一化后重复",
+			workflow: Workflow{
+				Name: "selective分支表达式多空格重复",
+				FlowData: LogicFlow{
+					Nodes: []map[string]interface{}{
+						{"id": "start", "type": "start"},
+						{"id": "sel", "type": "selective"},
+						{"id": "cond-1", "type": "condition"},
+						{"id": "cond-2", "type": "condition"},
+						{"id": "user-1", "type": "user", "properties": map[string]interface{}{"name": "审批1"}},
+						{"id": "user-2", "type": "user", "properties": map[string]interface{}{"name": "审批2"}},
+						{"id": "join", "type": "parallel"},
+						{"id": "end", "type": "end"},
+					},
+					Edges: []map[string]interface{}{
+						{"id": "e1", "sourceNodeId": "start", "targetNodeId": "sel"},
+						{"id": "e2", "sourceNodeId": "sel", "targetNodeId": "cond-1"},
+						{"id": "e3", "sourceNodeId": "sel", "targetNodeId": "cond-2"},
+						{"id": "e4", "sourceNodeId": "cond-1", "targetNodeId": "user-1", "properties": map[string]interface{}{"expression": "$env == 'prod'"}},
+						{"id": "e5", "sourceNodeId": "cond-2", "targetNodeId": "user-2", "properties": map[string]interface{}{"expression": "  $env   ==   'prod'  "}},
+						{"id": "e6", "sourceNodeId": "user-1", "targetNodeId": "join"},
+						{"id": "e7", "sourceNodeId": "user-2", "targetNodeId": "join"},
+						{"id": "e8", "sourceNodeId": "join", "targetNodeId": "end"},
+					},
+				},
+			},
+			wantErr:   true,
+			wantErrKw: "配置了重复的条件表达式",
+		},
+		{
+			name: "条件防呆: 多出边 condition 网关出边配置相同表达式",
+			workflow: Workflow{
+				Name: "多出边condition表达式重复",
+				FlowData: LogicFlow{
+					Nodes: []map[string]interface{}{
+						{"id": "start", "type": "start"},
+						{"id": "cond", "type": "condition"},
+						{"id": "end-1", "type": "end"},
+						{"id": "end-2", "type": "end"},
+					},
+					Edges: []map[string]interface{}{
+						{"id": "e1", "sourceNodeId": "start", "targetNodeId": "cond"},
+						{"id": "e2", "sourceNodeId": "cond", "targetNodeId": "end-1", "properties": map[string]interface{}{"expression": "$score > 60"}},
+						{"id": "e3", "sourceNodeId": "cond", "targetNodeId": "end-2", "properties": map[string]interface{}{"expression": "$score > 60"}},
+					},
+				},
+			},
+			wantErr:   true,
+			wantErrKw: "配置了重复的条件表达式",
+		},
 	}
 
 	converter := NewDefaultConverterWithHandlers()
