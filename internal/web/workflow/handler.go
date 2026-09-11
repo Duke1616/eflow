@@ -183,7 +183,9 @@ func (h *Handler) Deploy(ctx *ginx.Context, req DeployReq) (ginx.Result, error) 
 
 	err = h.svc.Deploy(ctx.Context, flow)
 	if err != nil {
-		return SystemErrorResult, fmt.Errorf("发布流程失败: %w", err)
+		// 区分「流程图校验失败」（用户设计问题）与「系统内部错误」，
+		// 前者将具体原因透传给前端展示，后者统一返回系统错误
+		return toDeployResult(err), fmt.Errorf("发布流程失败: %w", err)
 	}
 
 	return ginx.Result{

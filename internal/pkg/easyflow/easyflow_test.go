@@ -255,32 +255,116 @@ func TestUserProperty_NormalizeAssignees(t *testing.T) {
 }
 
 func TestUpdateEdgeProperties(t *testing.T) {
-	edgeMap := map[string][]string{
-		"node1": {"node2", "node3"},
+	testCases := []struct {
+		name          string
+		edges         []Edge
+		edgeMap       map[string][]string
+		nodeStatusMap map[string]int
+		verify        func(t *testing.T, updated []Edge)
+	}{
+		{
+			name: "普通节点跳过: Target 节点状态为 5 (已跳过)",
+			edges: []Edge{
+				{SourceNodeId: "user1", TargetNodeId: "user2", Properties: map[string]interface{}{}},
+			},
+			edgeMap: map[string][]string{
+				"user1": {"user2"},
+			},
+			nodeStatusMap: map[string]int{
+				"user1": 1,
+				"user2": 5,
+			},
+			verify: func(t *testing.T, updated []Edge) {
+				require.Len(t, updated, 1)
+				props := updated[0].Properties.(map[string]interface{})
+				assert.True(t, props["is_skipped"].(bool))
+				assert.Nil(t, props["is_pass"])
+			},
+		},
+		{
+			name: "普通节点通过: 正常审批通过分支",
+			edges: []Edge{
+				{SourceNodeId: "user1", TargetNodeId: "user2", Properties: map[string]interface{}{}},
+			},
+			edgeMap: map[string][]string{
+				"user1": {"user2"},
+			},
+			nodeStatusMap: map[string]int{
+				"user1": 1,
+				"user2": 1,
+			},
+			verify: func(t *testing.T, updated []Edge) {
+				require.Len(t, updated, 1)
+				props := updated[0].Properties.(map[string]interface{})
+				assert.True(t, props["is_pass"].(bool))
+				assert.Nil(t, props["is_skipped"])
+			},
+		},
+		{
+			name: "网关直连场景被跳过: 条件网关直连并行网关，proxy 节点状态为 5",
+			edges: []Edge{
+				{SourceNodeId: "gateway_cond", TargetNodeId: "gateway_parallel", Properties: map[string]interface{}{}},
+			},
+			edgeMap: map[string][]string{
+				"gateway_cond": {"gateway_parallel"},
+			},
+			nodeStatusMap: map[string]int{
+				// 网关节点本身不在任务表中，但底层生成的虚拟代理节点记录了跳过状态
+				"proxy_gateway_cond_gateway_parallel": 5,
+			},
+			verify: func(t *testing.T, updated []Edge) {
+				require.Len(t, updated, 1)
+				props := updated[0].Properties.(map[string]interface{})
+				assert.True(t, props["is_skipped"].(bool))
+				assert.Nil(t, props["is_pass"])
+			},
+		},
+		{
+			name: "网关直连场景正常通过: 条件网关直连并行网关，proxy 节点状态为 1",
+			edges: []Edge{
+				{SourceNodeId: "gateway_cond", TargetNodeId: "gateway_parallel", Properties: map[string]interface{}{}},
+			},
+			edgeMap: map[string][]string{
+				"gateway_cond": {"gateway_parallel"},
+			},
+			nodeStatusMap: map[string]int{
+				// 虚拟代理节点正常执行流转完成
+				"proxy_gateway_cond_gateway_parallel": 1,
+			},
+			verify: func(t *testing.T, updated []Edge) {
+				require.Len(t, updated, 1)
+				props := updated[0].Properties.(map[string]interface{})
+				assert.True(t, props["is_pass"].(bool))
+				assert.Nil(t, props["is_skipped"])
+			},
+		},
+		{
+			name: "未流转分支: 边未在 edgeMap 中激活",
+			edges: []Edge{
+				{SourceNodeId: "node_a", TargetNodeId: "node_b", Properties: map[string]interface{}{}},
+			},
+			edgeMap: map[string][]string{
+				"node_a": {"node_c"},
+			},
+			nodeStatusMap: map[string]int{
+				"node_a": 1,
+				"node_b": 1,
+			},
+			verify: func(t *testing.T, updated []Edge) {
+				require.Len(t, updated, 1)
+				props := updated[0].Properties.(map[string]interface{})
+				assert.Nil(t, props["is_pass"])
+				assert.Nil(t, props["is_skipped"])
+			},
+		},
 	}
 
-	t.Run("SkipCase", func(t *testing.T) {
-		edges := []Edge{
-			{SourceNodeId: "node1", TargetNodeId: "node2", Properties: map[string]interface{}{}},
-			{SourceNodeId: "node1", TargetNodeId: "node3", Properties: map[string]interface{}{}},
-		}
-		nodeStatusMap := map[string]int{
-			"node1": 5, "node2": 2, "node3": 5,
-		}
-		updatedEdges := UpdateEdgeProperties(edges, edgeMap, nodeStatusMap)
-		for _, e := range updatedEdges {
-			props := e.Properties.(map[string]interface{})
-			assert.True(t, props["is_skipped"].(bool))
-		}
-	})
-
-	t.Run("PassCase", func(t *testing.T) {
-		nodeStatusMapPass := map[string]int{"node1": 1, "node2": 1}
-		edgesPass := []Edge{{SourceNodeId: "node1", TargetNodeId: "node2", Properties: map[string]interface{}{}}}
-		updated := UpdateEdgeProperties(edgesPass, edgeMap, nodeStatusMapPass)
-		props := updated[0].Properties.(map[string]interface{})
-		assert.True(t, props["is_pass"].(bool))
-	})
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			updated := UpdateEdgeProperties(tc.edges, tc.edgeMap, tc.nodeStatusMap)
+			tc.verify(t, updated)
+		})
+	}
 }
 
 func TestToNodePropertyParsesSchedule(t *testing.T) {
@@ -300,4 +384,52 @@ func TestToNodePropertyParsesSchedule(t *testing.T) {
 	assert.Equal(t, int64(12), property.Schedule.Source.TemplateID)
 	assert.Equal(t, "execute_date", property.Schedule.Source.Field)
 	assert.Equal(t, "execute_time", property.Schedule.Source.TimeField)
+}
+
+func TestDeduplicateEdges(t *testing.T) {
+	testCases := []struct {
+		name     string
+		edges    []Edge
+		expected []Edge
+	}{
+		{
+			name: "多条同源同目标连线去重保留一条",
+			edges: []Edge{
+				{ID: "e1", SourceNodeId: "nodeA", TargetNodeId: "nodeB"},
+				{ID: "e2", SourceNodeId: "nodeA", TargetNodeId: "nodeB"},
+			},
+			expected: []Edge{
+				{ID: "e1", SourceNodeId: "nodeA", TargetNodeId: "nodeB"},
+			},
+		},
+		{
+			name: "重复连线中优先保留包含有效表达式配置的连线",
+			edges: []Edge{
+				{ID: "e1", SourceNodeId: "cond", TargetNodeId: "user", Properties: map[string]interface{}{"expression": ""}},
+				{ID: "e2", SourceNodeId: "cond", TargetNodeId: "user", Properties: map[string]interface{}{"expression": "$amount > 100"}},
+			},
+			expected: []Edge{
+				{ID: "e2", SourceNodeId: "cond", TargetNodeId: "user", Properties: map[string]interface{}{"expression": "$amount > 100"}},
+			},
+		},
+		{
+			name: "多分支不同目标连线互不影响",
+			edges: []Edge{
+				{ID: "e1", SourceNodeId: "fork", TargetNodeId: "branch1"},
+				{ID: "e2", SourceNodeId: "fork", TargetNodeId: "branch2"},
+				{ID: "e3", SourceNodeId: "fork", TargetNodeId: "branch1"}, // 与 e1 重复
+			},
+			expected: []Edge{
+				{ID: "e1", SourceNodeId: "fork", TargetNodeId: "branch1"},
+				{ID: "e2", SourceNodeId: "fork", TargetNodeId: "branch2"},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deduplicateEdges(tc.edges)
+			assert.Equal(t, tc.expected, got)
+		})
+	}
 }

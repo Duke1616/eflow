@@ -339,16 +339,18 @@ func (e *ProcessEvent) EventSelectiveGatewaySplit(instID int, node *model.Node, 
 			continue
 		}
 
-		branchActive := false
 		for _, cond := range condNode.GWConfig.Conditions {
-			if passed, _ := e.evaluateExpression(instID, cond.Expression); passed {
-				branchActive = true
-				break
+			passed, err := e.evaluateExpression(instID, cond.Expression)
+			if err != nil {
+				e.logger.Error("【EventSelectiveGatewaySplit】计算条件表达式失败",
+					elog.FieldErr(err),
+					elog.Int("instID", instID),
+					elog.String("expression", cond.Expression),
+					elog.String("nodeID", cond.NodeID))
+				continue
 			}
-		}
 
-		if !branchActive {
-			for _, cond := range condNode.GWConfig.Conditions {
+			if !passed {
 				e.skipBranch(ctx, instID, cond.NodeID, prevNode.NodeID)
 			}
 		}

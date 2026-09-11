@@ -34,11 +34,17 @@ func UpdateEdgeProperties(edges []Edge, edgeMap map[string][]string, nodeStatusM
 			continue
 		}
 
-		// 检查节点状态 (Source 或 Target 为 status=5)
+		// 检查节点状态：
+		// 1. 常规节点：Source 或 Target 为 status=5 (跳过)
+		// 2. 网关直连场景：引擎在底层为网关之间的连线注入了虚拟系统代理节点 (proxy_{SourceNodeId}_{TargetNodeId})，
+		//    当该分支未满足条件被跳过时，对应的 proxy 节点状态会被置为 5 (跳过)。
+		//    因此需检查 proxy 节点状态，防止网关直连的跳过分支被误判为正常通过。
 		sourceStatus := nodeStatusMap[edge.SourceNodeId]
 		targetStatus := nodeStatusMap[edge.TargetNodeId]
+		proxyID := fmt.Sprintf("proxy_%s_%s", edge.SourceNodeId, edge.TargetNodeId)
+		proxyStatus := nodeStatusMap[proxyID]
 
-		if sourceStatus == 5 || targetStatus == 5 {
+		if sourceStatus == 5 || targetStatus == 5 || proxyStatus == 5 {
 			// 被跳过的分支，标记为 is_skipped=true
 			properties["is_skipped"] = true
 		} else {
