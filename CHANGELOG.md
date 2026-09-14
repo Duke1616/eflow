@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## Unreleased
 
+## [v0.0.2](https://github.com/Duke1616/eflow/releases/tag/v0.0.2) - 2026-09-14
+
+- [`7292e41`](https://github.com/Duke1616/eflow/commit/7292e4155a48437b78397336b9ad9fafa1a48c02) feat(workflow): 新增条件网关重复条件表达式防呆校验规则
+- [`ab1aa59`](https://github.com/Duke1616/eflow/commit/ab1aa5997b752d75c748662f7439b3fab789986e) fix(workflow): 优化流程图拓扑校验、连线去重与流转轨迹渲染
+- [`497832f`](https://github.com/Duke1616/eflow/commit/497832f97cc44d1993349abdb6acff40bc854a11) fix: 修复消息发送链路 ctx 消息丢失
+- [`d33b263`](https://github.com/Duke1616/eflow/commit/d33b26359c290b2f1b4f5344f9a063cf37cb877e) chore: 升级 eiam 依赖，支持操作审计能力
+- [`a92d6b8`](https://github.com/Duke1616/eflow/commit/a92d6b89cc60814929e63b34f048e95a8f288905) feat(tools): 升级 etask 依赖至 v1.14.1，添加 swagger 任务与跨服务权限契约强类型引用
+- [`98b66af`](https://github.com/Duke1616/eflow/commit/98b66af4dfdbebc78bae9b63017316282db43aa1) refactor(perm): 升级权限契约包名为 permission 并支持跨微服务强类型常量引用
+- [`0a0d928`](https://github.com/Duke1616/eflow/commit/0a0d928de2fa2c47954928aa691a39bfc3eac6ad) refactor(mq): normalize topic and consumer group naming conventions
+- [`4608668`](https://github.com/Duke1616/eflow/commit/4608668a50b9c6a622ec204311a184ea19946732) feat(mq): add declarative topic topology and idempotent startup self-healing
+- [`1dd782a`](https://github.com/Duke1616/eflow/commit/1dd782a00a2c7a994c41d5b89b542f3d1f3374a5) refactor: optimize assignee resolution with fallback, short timeout and samber/lo
+- [`d8dc013`](https://github.com/Duke1616/eflow/commit/d8dc013afcc028fea90638d82f825efd65b0345f) feat: upgrade easy-workflow to v1.0.6 and optimize multi-tenancy and logging
+- [`6e7c705`](https://github.com/Duke1616/eflow/commit/6e7c7059221596da390e5adc6e3a5c3cdce832ce) fix: 优化通知模板自愈任务，支持退避重试与定期巡检
+- [`7312673`](https://github.com/Duke1616/eflow/commit/7312673868af0150f5cb8a8af967eeeac7b05658) fix: 修复 Kafka 消费者断连后自动恢复
+- [`ac09451`](https://github.com/Duke1616/eflow/commit/ac0945140f8bfcb77a1886d253da981be1430dad) chore: 新增工单流程启动失败状态，重启流程能力
+- [`3a554dc`](https://github.com/Duke1616/eflow/commit/3a554dc745182cfd6943d7b1bcaf9f530f49badc) refactor: 优化通过 ealert 直接处理用户解析，消息通知
+- [`ef728a7`](https://github.com/Duke1616/eflow/commit/ef728a72875f3e637d9cc3d72115530d0bb06054) Revert "fix: migrate legacy dynamic routes to automation nodes"
+- [`7f204eb`](https://github.com/Duke1616/eflow/commit/7f204eb95b3b2862a5d7fd219685302302164c25) fix: migrate legacy dynamic routes to automation nodes
+- [`0815fb9`](https://github.com/Duke1616/eflow/commit/0815fb91864fb389736d20ffe8b0a4173dfe9176) refactor: 优化程序模式绑定关系
+- [`9a91dda`](https://github.com/Duke1616/eflow/commit/9a91dda34d2be5c49e6bdb086167012b66e834bb) feat: 支持自动化任务选择程序来源
+- [`1f3a132`](https://github.com/Duke1616/eflow/commit/1f3a1322a72b61dcecb2dba638ac472491816c26) chore: 支持强制停止能力
+- [`735150b`](https://github.com/Duke1616/eflow/commit/735150b7abb0adbca0739cd150909c064250244e) chore: 同步权限
+
 ## [v0.0.1](https://github.com/Duke1616/eflow/releases/tag/v0.0.1) - 2026-07-28
 
 - [`a49062e`](https://github.com/Duke1616/eflow/commit/a49062e9e340deaa29b2f6a3652a2560d9a51891) chore: 评价工单通过 needs 处理
