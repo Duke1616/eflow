@@ -62,6 +62,11 @@ func (fp *FieldProcessor) initialize() {
 
 func (fp *FieldProcessor) filterHiddenFields() {
 	for _, rule := range fp.rules {
+		if rule.NotifyHidden {
+			delete(fp.data, rule.Field)
+			continue
+		}
+
 		if _, ok := rule.Style["notify_display"]; ok {
 			delete(fp.data, rule.Field)
 		}
