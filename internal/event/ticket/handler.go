@@ -135,7 +135,7 @@ func (h *larkCallbackHandler) OnCardAction(ctx context.Context, cte *larkcallbac
 				h.logger.Error("本地异步驱动飞书卡片事件发生 panic", elog.Any("recover", r))
 			}
 		}()
-		localCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		localCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		h.logger.Info("已触发本地异步驱动工单实例流转流程", elog.Any("evt", evt))
 		if err := h.Handle(localCtx, evt); err != nil {
@@ -223,7 +223,7 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) erro
 		}
 		return h.withdraw(ctx, evt, remark)
 	case Progress:
-		err = h.progress(ticketId, evt.GetUserId())
+		err = h.progress(ctx, ticketId, evt.GetUserId())
 		if err != nil {
 			h.logger.Error("查看流程进度失败", elog.FieldErr(err))
 			return err
@@ -264,7 +264,7 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) erro
 	}
 }
 
-func (h *larkCallbackHandler) progress(ticketId int64, userId string) error {
+func (h *larkCallbackHandler) progress(ctx context.Context, ticketId int64, userId string) error {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
 		chromedp.NoFirstRun,
@@ -282,7 +282,7 @@ func (h *larkCallbackHandler) progress(ticketId int64, userId string) error {
 		opts = append(opts, chromedp.Flag("headless", false))
 	}
 
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
 	defer cancelAlloc()
 
 	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
