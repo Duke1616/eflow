@@ -1,8 +1,9 @@
 FROM golang:1.26.0-alpine as build
 MAINTAINER luankz
+RUN apk add --no-cache git ca-certificates
 WORKDIR /app
 COPY . .
-RUN go mod tidy
+RUN go mod download
 ARG VERSION=unknown
 RUN go build -ldflags="-X main.version=${VERSION} -w -s" -a -o dist/eflow main.go
 FROM chromedp/headless-shell:133.0.6905.0 as deploy

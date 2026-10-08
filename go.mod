@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/Bunny3th/easy-workflow v1.0.0
 	github.com/Duke1616/ecmdb v1.11.1
-	github.com/Duke1616/eiam v0.0.24
+	github.com/Duke1616/eiam v0.0.25
 	github.com/Duke1616/enotify v0.1.25-0.20260311115016-f762700e83e9
 	github.com/Duke1616/etask v1.14.1
 	github.com/chromedp/chromedp v0.15.1
