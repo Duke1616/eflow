@@ -95,7 +95,8 @@ func (g *gormTaskAttemptDAO) Begin(ctx context.Context, taskID int64,
 		}
 		var last TaskAttempt
 		attemptNo := 1
-		if err := tx.Where("task_id = ?", taskID).Order("attempt_no DESC").First(&last).Error; err == nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("task_id = ?", taskID).Order("attempt_no DESC").Take(&last).Error; err == nil {
 			attemptNo = last.AttemptNo + 1
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
