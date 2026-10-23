@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Duke1616/eflow/internal/service/event/easyflow"
+	grpcpkg "github.com/Duke1616/etask/pkg/grpc"
 	"github.com/gotomicro/ego/server"
 	"github.com/gotomicro/ego/server/egin"
 )
@@ -15,9 +16,12 @@ type Task interface {
 
 // App 模块化容器
 type App struct {
-	Web   *egin.Component
-	Event *easyflow.ProcessEvent
-	Tasks []Task
+	// Web 容器组件
+	Web *egin.Component
+	// GRPC 服务组件
+	Server *grpcpkg.Server
+	Event  *easyflow.ProcessEvent
+	Tasks  []Task
 }
 
 // GetServers 获取所有需要启动的服务列表
@@ -25,6 +29,9 @@ func (a *App) GetServers() []server.Server {
 	var res []server.Server
 	if a.Web != nil {
 		res = append(res, a.Web)
+	}
+	if a.Server != nil {
+		res = append(res, a.Server)
 	}
 	return res
 }

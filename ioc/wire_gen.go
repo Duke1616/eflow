@@ -11,6 +11,7 @@ import (
 	"github.com/Duke1616/eflow/internal/client/eiam"
 	"github.com/Duke1616/eflow/internal/client/etask"
 	ticket3 "github.com/Duke1616/eflow/internal/event/ticket"
+	"github.com/Duke1616/eflow/internal/grpc"
 	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
@@ -97,6 +98,8 @@ func InitApp() (*App, error) {
 	dispatchHandler := dispatch2.NewHandler(dispatchService)
 	listener := InitListener()
 	component := InitGinWebServer(v, sdk, syncer, v2, handler, workflowHandler, taskHandler, ticketHandler, dispatchHandler, listener)
+	ticketServiceServer := grpc.NewTicketServer(ticketService, service)
+	server := InitGrpcServer(registry, ticketServiceServer)
 	producer, err := InitTicketStatusModifyEventProducer(mq)
 	if err != nil {
 		return nil, err
@@ -145,9 +148,10 @@ func InitApp() (*App, error) {
 	}
 	v3 := InitTasks(taskService, withdrawalRepository, compensationPlanner, engineService, executeResultConsumer, processEventConsumer, wechatTicketConsumer, larkCallbackTicketServer, wechatApprovalCallbackConsumer, templateServiceClient)
 	app := &App{
-		Web:   component,
-		Event: processEvent,
-		Tasks: v3,
+		Web:    component,
+		Server: server,
+		Event:  processEvent,
+		Tasks:  v3,
 	}
 	return app, nil
 }

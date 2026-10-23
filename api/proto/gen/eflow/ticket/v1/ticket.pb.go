@@ -190,15 +190,16 @@ func (x *NotificationConf) GetChannel() Channel {
 }
 
 type CreateTicketRequest struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	BizId            int64                  `protobuf:"varint,1,opt,name=biz_id,json=bizId,proto3" json:"biz_id,omitempty"`                                 // 外部关联的业务实体 ID
-	Key              string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`                                                   // 工单的唯一业务 Key (用以幂等校验等)
-	TemplateId       int64                  `protobuf:"varint,3,opt,name=template_id,json=templateId,proto3" json:"template_id,omitempty"`                  // 所关联的页面渲染模板 ID
-	WorkflowId       int64                  `protobuf:"varint,4,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`                  // 所关联的工作流流程定义 ID
-	Provide          Provide                `protobuf:"varint,5,opt,name=provide,proto3,enum=eflow.ticket.v1.Provide" json:"provide,omitempty"`             // 工单来源渠道提供商
-	CreateBy         string                 `protobuf:"bytes,6,opt,name=create_by,json=createBy,proto3" json:"create_by,omitempty"`                         // 工单创建/发起人 ID 或是系统名
-	Data             *structpb.Struct       `protobuf:"bytes,7,opt,name=data,proto3" json:"data,omitempty"`                                                 // 用户在表单中填写的工单实时数据属性集合
-	NotificationConf *NotificationConf      `protobuf:"bytes,8,opt,name=notification_conf,json=notificationConf,proto3" json:"notification_conf,omitempty"` // 为支持告警自动转单等引入的外部通知媒介配置
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	BizId      int64                  `protobuf:"varint,1,opt,name=biz_id,json=bizId,proto3" json:"biz_id,omitempty"`                // 外部关联的业务实体 ID
+	Key        string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`                                  // 工单的唯一业务 Key (用以幂等校验等)
+	TemplateId int64                  `protobuf:"varint,3,opt,name=template_id,json=templateId,proto3" json:"template_id,omitempty"` // 所关联的页面渲染模板 ID (系统将自动解析绑定的流程引擎版本)
+	// Deprecated: Marked as deprecated in eflow/ticket/v1/ticket.proto.
+	WorkflowId       int64             `protobuf:"varint,4,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`                  // [已废弃] 调用方无需传递，由系统根据 template_id 自行解析工作流
+	Provide          Provide           `protobuf:"varint,5,opt,name=provide,proto3,enum=eflow.ticket.v1.Provide" json:"provide,omitempty"`             // 工单来源渠道提供商
+	CreateBy         string            `protobuf:"bytes,6,opt,name=create_by,json=createBy,proto3" json:"create_by,omitempty"`                         // 工单创建/发起人 ID 或是系统名
+	Data             *structpb.Struct  `protobuf:"bytes,7,opt,name=data,proto3" json:"data,omitempty"`                                                 // 用户在表单中填写的工单实时数据属性集合
+	NotificationConf *NotificationConf `protobuf:"bytes,8,opt,name=notification_conf,json=notificationConf,proto3" json:"notification_conf,omitempty"` // 为支持告警自动转单等引入的外部通知媒介配置
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -254,6 +255,7 @@ func (x *CreateTicketRequest) GetTemplateId() int64 {
 	return 0
 }
 
+// Deprecated: Marked as deprecated in eflow/ticket/v1/ticket.proto.
 func (x *CreateTicketRequest) GetWorkflowId() int64 {
 	if x != nil {
 		return x.WorkflowId
@@ -342,13 +344,13 @@ const file_eflow_ticket_v1_ticket_proto_rawDesc = "" +
 	"\vtemplate_id\x18\x01 \x01(\x03R\n" +
 	"templateId\x12@\n" +
 	"\x0ftemplate_params\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x0etemplateParams\x122\n" +
-	"\achannel\x18\x03 \x01(\x0e2\x18.eflow.ticket.v1.ChannelR\achannel\"\xce\x02\n" +
+	"\achannel\x18\x03 \x01(\x0e2\x18.eflow.ticket.v1.ChannelR\achannel\"\xd2\x02\n" +
 	"\x13CreateTicketRequest\x12\x15\n" +
 	"\x06biz_id\x18\x01 \x01(\x03R\x05bizId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1f\n" +
 	"\vtemplate_id\x18\x03 \x01(\x03R\n" +
-	"templateId\x12\x1f\n" +
-	"\vworkflow_id\x18\x04 \x01(\x03R\n" +
+	"templateId\x12#\n" +
+	"\vworkflow_id\x18\x04 \x01(\x03B\x02\x18\x01R\n" +
 	"workflowId\x122\n" +
 	"\aprovide\x18\x05 \x01(\x0e2\x18.eflow.ticket.v1.ProvideR\aprovide\x12\x1b\n" +
 	"\tcreate_by\x18\x06 \x01(\tR\bcreateBy\x12+\n" +

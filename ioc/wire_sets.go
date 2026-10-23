@@ -11,6 +11,7 @@ import (
 	"github.com/Duke1616/eflow/internal/event"
 	ticketEvent "github.com/Duke1616/eflow/internal/event/ticket"
 	eflowEasyflow "github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/grpc"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
@@ -158,6 +159,12 @@ var (
 		wire.FieldsOf(new(*eiam.EIAMClient), "UserClient", "DepartmentClient"),
 		wire.FieldsOf(new(*ealert.EALERTClient), "TeamClient", "NotificationClient", "TemplateClient", "OnCallClient"),
 	)
+	// GrpcSet gRPC 内部服务端点装配集合
+	GrpcSet = wire.NewSet(
+		grpc.NewTicketServer,
+		InitGrpcServer,
+	)
+
 	// WebSet Web 服务 Provider 集合
 	WebSet = wire.NewSet(
 		InitDB,
@@ -169,6 +176,7 @@ var (
 		InitGinMiddlewares,
 		InitGinWebServer,
 		InitTasks,
+		GrpcSet,
 		grpcSet,
 		BaseSet,
 		TemplateSet,

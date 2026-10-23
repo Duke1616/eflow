@@ -32,8 +32,8 @@ message NotificationConf {
 message CreateTicketRequest {
   int64 biz_id = 1;                       // 外部关联的业务实体 ID
   string key = 2;                         // 工单的唯一业务 Key (用以幂等校验等)
-  int64 template_id = 3;                  // 所关联的页面渲染模板 ID
-  int64 workflow_id = 4;                  // 所关联的工作流流程定义 ID
+  int64 template_id = 3;                  // 所关联的页面渲染模板 ID (系统将自动解析绑定的流程引擎版本)
+  int64 workflow_id = 4 [deprecated = true]; // [已废弃] 调用方无需传递，由系统根据 template_id 自行解析工作流
   Provide provide = 5;                    // 工单来源渠道提供商
   string create_by = 6;                   // 工单创建/发起人 ID 或是系统名
   google.protobuf.Struct data = 7;        // 用户在表单中填写的工单实时数据属性集合
