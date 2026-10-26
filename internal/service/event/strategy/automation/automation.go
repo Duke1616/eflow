@@ -77,21 +77,8 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 		return notification.NewErrorResponse(string(errs.ErrorCodeFetchDataFailed), err.Error()), fmt.Errorf("%w: %v", errs.ErrFetchData, err)
 	}
 
-	// 4. 发送消息
+	// 4. 发送消息（BuildAutomationOutputFields 内部已通过 AddRowSpacers 规范化双列换行排版）
 	fields := strategy.BuildAutomationOutputFields(data.AutomationOutput)
-
-	// 每两个字段插入一个空行（保持原有格式）
-	formattedFields := make([]notification.Field, 0, len(fields)*2)
-	for i, field := range fields {
-		formattedFields = append(formattedFields, field)
-		if (i+1)%2 == 0 && i < len(fields)-1 {
-			formattedFields = append(formattedFields, notification.Field{
-				IsShort: false,
-				Tag:     "lark_md",
-				Content: "",
-			})
-		}
-	}
 
 	return n.sender.Send(ctx, notification.Notification{
 		Channel:      notification.Channel(info.Channel),
@@ -101,7 +88,7 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 		Template: notification.Template{
 			Name:     domain.NotifyTypeApproval,
 			Title:    rule.GenerateAutoTitle("你提交", data.TName),
-			Fields:   formattedFields,
+			Fields:   fields,
 			HideForm: true,
 		},
 	})
