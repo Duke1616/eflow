@@ -179,7 +179,12 @@ func (fp *FieldProcessor) processSliceValue(field string, value interface{}) str
 	results := make([]string, 0, sli.Len())
 
 	for i := 0; i < sli.Len(); i++ {
-		results = append(results, fp.getOptionLabel(field, sli.Index(i).Interface()))
+		item := sli.Index(i).Interface()
+		if label := fp.getOptionLabel(field, item); label != "" {
+			results = append(results, label)
+		} else if item != nil {
+			results = append(results, fmt.Sprintf("%v", item))
+		}
 	}
 
 	return strings.Join(results, ", ")

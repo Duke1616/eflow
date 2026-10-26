@@ -3,6 +3,7 @@ package rule
 import (
 	"encoding/json"
 	"io/ioutil"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -46,7 +47,60 @@ func TestField(t *testing.T) {
 		"role":        1,
 	})
 
-	print(card)
+	assert.NotEmpty(t, card)
+	// 验证带 options 的切片正常解析为 Label (MongoDB, Redis)
+	var foundAssets bool
+	for _, f := range card {
+		if strings.Contains(f.Content, "资产选择") {
+			assert.Contains(t, f.Content, "MongoDB, Redis")
+			foundAssets = true
+		}
+	}
+	assert.True(t, foundAssets)
+}
+
+func TestProcessSliceValueWithoutOptions(t *testing.T) {
+	// 测试无 options 的切片（如文件上传 manifest_file 数组）
+	rules := []Rule{
+		{
+			Type:  "upload",
+			Field: "manifest_file",
+			Title: "提取清单文件",
+		},
+		{
+			Type:  "select",
+			Field: "tags",
+			Title: "标签",
+			Options: []Options{
+				{Label: "标签A", Value: "a"},
+			},
+		},
+	}
+
+	data := map[string]interface{}{
+		"manifest_file": []string{
+			"http://10.31.0.4:3003/api/download-sets/public/manifests/manifest_set_1.json",
+			"http://10.31.0.4:3003/api/download-sets/public/manifests/manifest_set_2.json",
+		},
+		"tags": []string{"a", "b"}, // a 匹配 label，b 回退原值
+	}
+
+	fields := GetFields(rules, SystemProvide, data)
+	assert.NotEmpty(t, fields)
+
+	var foundManifest, foundTags bool
+	for _, f := range fields {
+		if strings.Contains(f.Content, "提取清单文件") {
+			assert.Contains(t, f.Content, "http://10.31.0.4:3003/api/download-sets/public/manifests/manifest_set_1.json, http://10.31.0.4:3003/api/download-sets/public/manifests/manifest_set_2.json")
+			foundManifest = true
+		}
+		if strings.Contains(f.Content, "标签") {
+			assert.Contains(t, f.Content, "标签A, b")
+			foundTags = true
+		}
+	}
+	assert.True(t, foundManifest)
+	assert.True(t, foundTags)
 }
 
 func TestParseRulesPreservesProps(t *testing.T) {
