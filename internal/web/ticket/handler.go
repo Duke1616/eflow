@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
@@ -182,17 +183,32 @@ func (h *Handler) TodoAll(ctx *ginx.Context, req Todo) (ginx.Result, error) {
 	if err != nil {
 		return systemErrorResult, err
 	}
-	failedTickets, failedTotal, err := h.svc.ListProcessStartFailed(ctx.Context, "", req.Offset, req.Limit)
-	if err != nil {
-		return systemErrorResult, err
+
+	// 启动失败工单首屏置顶提示，并严格保护返回数量不超过 req.Limit 限制
+	if req.Offset == 0 {
+		failedTickets, failedTotal, failedErr := h.svc.ListProcessStartFailed(ctx.Context, "", 0, req.Limit)
+		if failedErr != nil {
+			return systemErrorResult, failedErr
+		}
+		failedVOs := lo.Map(failedTickets, func(t domain.Ticket, _ int) Ticket {
+			return h.toVoTicket(t)
+		})
+		tickets = append(failedVOs, tickets...)
+		total += failedTotal
+	} else {
+		_, failedTotal, countErr := h.svc.ListProcessStartFailed(ctx.Context, "", 0, 1)
+		if countErr == nil {
+			total += failedTotal
+		}
 	}
-	for _, failed := range failedTickets {
-		tickets = append([]Ticket{h.toVoTicket(failed)}, tickets...)
+
+	if req.Limit > 0 && int64(len(tickets)) > req.Limit {
+		tickets = tickets[:req.Limit]
 	}
 
 	return ginx.Result{
 		Data: RetrieveTickets{
-			Total: total + failedTotal,
+			Total: total,
 			Tasks: tickets,
 		},
 		Msg: "查看待办工单列表成功",
@@ -225,6 +241,18 @@ func (h *Handler) TodoByUser(ctx *ginx.Context, req Todo) (ginx.Result, error) {
 }
 
 func (h *Handler) Transfer(ctx *ginx.Context, req TransferReq) (ginx.Result, error) {
+	if req.TaskId <= 0 {
+		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
+	}
+	if len(req.Usernames) == 0 {
+		return ginx.Result{Code: 400, Msg: "转签目标用户不能为空"}, nil
+	}
+
+	// 权限判定：必须为该任务当前指派处理人或管理员，杜绝水平越权
+	if err := h.verifyUser(ctx, req.TaskId); err != nil {
+		return systemErrorResult, err
+	}
+
 	_, err := h.engineSvc.Transfer(ctx.Context, req.TaskId, req.Usernames)
 	if err != nil {
 		return systemErrorResult, err
@@ -236,12 +264,24 @@ func (h *Handler) Transfer(ctx *ginx.Context, req TransferReq) (ginx.Result, err
 }
 
 func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, error) {
-	username, err := h.getSessUsername(ctx)
+	user, err := h.getSessUser(ctx)
 	if err != nil {
 		return systemErrorResult, err
 	}
 
-	err = h.withdrawalSvc.Revoke(ctx.Context, req.InstanceId, req.Force, username, req.Reason)
+	// 权限判定：只有工单发起人或系统管理员允许撤回该工单
+	ticket, err := h.svc.GetByProcessInstanceID(ctx.Context, req.InstanceId)
+	if err != nil {
+		if errors.Is(err, domain.ErrTicketNotAccessible) {
+			return ticketNotAccessibleResult, nil
+		}
+		return systemErrorResult, fmt.Errorf("查询撤回工单信息失败: %w", err)
+	}
+	if !user.IsAdmin && ticket.CreateBy != user.Username {
+		return ginx.Result{Code: 403, Msg: "无权撤回他人发起的工单"}, nil
+	}
+
+	err = h.withdrawalSvc.Revoke(ctx.Context, req.InstanceId, req.Force, user.Username, req.Reason)
 	if err != nil {
 		if errors.Is(err, withdrawalSvc.ErrInvalidRevokeReason) {
 			return ginx.Result{Code: 400, Msg: err.Error()}, nil
@@ -321,6 +361,15 @@ func (h *Handler) StartUser(ctx *ginx.Context, req StartUserReq) (ginx.Result, e
 	if err != nil {
 		return systemErrorResult, err
 	}
+	if len(tickets) == 0 {
+		return ginx.Result{
+			Data: RetrieveTickets{
+				Total: total,
+				Tasks: []Ticket{},
+			},
+			Msg: "查看我的工单列表成功",
+		}, nil
+	}
 
 	procInstIds := lo.FilterMap(tickets, func(src domain.Ticket, _ int) (int, bool) {
 		return src.Process.InstanceId, src.Process.InstanceId > 0
@@ -331,15 +380,61 @@ func (h *Handler) StartUser(ctx *ginx.Context, req StartUserReq) (ginx.Result, e
 		return systemErrorResult, err
 	}
 
-	tasks, err := h.toVoEngineTicket(ctx.Context, processTasks)
+	// 建立待办步骤分组索引：ProcInstID -> []domain.Instance
+	tasksByProcInst := lo.GroupBy(processTasks, func(inst domain.Instance) int {
+		return inst.ProcInstID
+	})
+
+	// 批量解析待办处理人的真实展示姓名
+	us, err := h.getUsers(ctx.Context, processTasks)
 	if err != nil {
-		return systemErrorResult, err
+		us = make(map[string]string)
 	}
-	for _, failed := range tickets {
-		if failed.Status == domain.START_FAILED || failed.Status == domain.START {
-			tasks = append(tasks, h.toVoTicket(failed))
+
+	// 主干以 tickets 实体为基准 1:1 转换，保证分页严格对齐且不丢失无人工待办状态的工单
+	tasks := lo.Map(tickets, func(ticket domain.Ticket, _ int) Ticket {
+		vo := h.toVoTicket(ticket)
+
+		if steps, exists := tasksByProcInst[ticket.Process.InstanceId]; exists && len(steps) > 0 {
+			nodeNames := lo.Uniq(lo.FilterMap(steps, func(s domain.Instance, _ int) (string, bool) {
+				return s.CurrentNodeName, s.CurrentNodeName != ""
+			}))
+			if len(nodeNames) > 0 {
+				vo.CurrentStep = strings.Join(nodeNames, ", ")
+			}
+
+			approvers := lo.Uniq(lo.FilterMap(steps, func(s domain.Instance, _ int) (string, bool) {
+				if s.ApprovedBy == "" {
+					return "", false
+				}
+				if displayName, ok := us[s.ApprovedBy]; ok && displayName != "" {
+					return displayName, true
+				}
+				return s.ApprovedBy, true
+			}))
+			if len(approvers) > 0 {
+				vo.ApprovedBy = strings.Join(approvers, ", ")
+			}
+			vo.TaskId = steps[0].TaskID
+		} else {
+			// 当前工单没有挂起的人工待办任务，根据工单领域状态填充语义化步骤信息
+			switch ticket.Status {
+			case domain.WITHDRAWING:
+				vo.CurrentStep = "撤回处理中"
+			case domain.WITHDRAW:
+				vo.CurrentStep = "已撤回"
+			case domain.END:
+				vo.CurrentStep = "已结束"
+			case domain.START:
+				vo.CurrentStep = "待启动流程"
+			case domain.START_FAILED:
+				vo.CurrentStep = "流程启动失败"
+			default:
+				vo.CurrentStep = "处理中"
+			}
 		}
-	}
+		return vo
+	})
 
 	return ginx.Result{
 		Data: RetrieveTickets{
@@ -661,50 +756,52 @@ func (h *Handler) getUsers(ctx context.Context, instances []domain.Instance) (ma
 	return h.getUserMap(ctx, lo.Uniq(nonEmptyUsers))
 }
 
-func (h *Handler) getSessUsername(ctx *ginx.Context) (string, error) {
+func (h *Handler) getSessUser(ctx *ginx.Context) (*userv1.User, error) {
 	uid := ctxutil.GetUserID(ctx).Int64()
-	if uid == 0 {
-		return "", fmt.Errorf("获取 UserID 失败: %d", uid)
-	}
-	resp, err := h.userSvc.QueryByIds(ctx.Context, &userv1.QueryByIdsReq{
-		Ids: []int64{uid},
-	})
-	if err != nil || len(resp.Users) == 0 {
-		return "", fmt.Errorf("查询 gRPC 用户信息失败: %w", err)
+	if uid <= 0 {
+		return nil, fmt.Errorf("上下文缺少有效的用户身份 ID: %d", uid)
 	}
 
-	return resp.Users[0].Username, nil
+	resp, err := h.userSvc.QueryById(ctx.Context, &userv1.QueryByIdReq{Id: uid})
+	if err != nil {
+		return nil, fmt.Errorf("查询当前登录用户信息失败: %w", err)
+	}
+	if resp == nil || resp.User == nil {
+		return nil, fmt.Errorf("未检索到 ID 为 %d 的有效用户信息", uid)
+	}
+
+	return resp.User, nil
+}
+
+func (h *Handler) getSessUsername(ctx *ginx.Context) (string, error) {
+	user, err := h.getSessUser(ctx)
+	if err != nil {
+		return "", err
+	}
+	return user.Username, nil
 }
 
 func (h *Handler) verifyUser(ctx *ginx.Context, taskId int) error {
-	uid := ctxutil.GetUserID(ctx).Int64()
-	if uid == 0 {
-		return fmt.Errorf("获取 UserID 失败: %d", uid)
-	}
-
-	// 1. 获取操作用户信息
-	resp, err := h.userSvc.QueryById(ctx.Context, &userv1.QueryByIdReq{
-		Id: uid,
-	})
+	user, err := h.getSessUser(ctx)
 	if err != nil {
-		return fmt.Errorf("获取用户信息失败: %w", err)
+		return err
 	}
 
-	// 2. 检索流程任务详情
+	// 1. 检索流程任务详情
 	tInfo, err := h.engineSvc.TaskInfo(ctx.Context, taskId)
 	if err != nil {
 		return err
 	}
 
-	// 3. 权限判定：如果不是管理员用户，则必须校验当前任务指派处理人与当前操作用户一致
-	if !resp.User.IsAdmin && tInfo.UserID != resp.User.Username {
+	// 2. 权限判定：如果不是管理员用户，则必须校验当前任务指派处理人与当前操作用户一致
+	if !user.IsAdmin && tInfo.UserID != user.Username {
 		return fmt.Errorf("无法操作，当前审批任务指派处理人与您账号不一致")
 	}
 
 	// 记录 admin 操作别人任务的审计日志
-	if resp.User.IsAdmin && tInfo.UserID != resp.User.Username {
+	if user.IsAdmin && tInfo.UserID != user.Username && h.logger != nil {
 		h.logger.Info("管理员代办他人任务",
-			elog.String("admin", resp.User.Username),
+			elog.String("admin", user.Username),
 			elog.Int("taskId", taskId),
 			elog.String("originalAssignee", tInfo.UserID),
 		)
