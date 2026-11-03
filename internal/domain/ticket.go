@@ -338,4 +338,7 @@ func (v *TicketTaskView) ResolveStep(steps []Instance, displayNames map[string]s
 		v.ApprovedBy = strings.Join(approvers, ", ")
 	}
 	v.TaskID = steps[0].TaskID
+	if steps[0].CreateTime != nil {
+		v.ProcInstCreateTime = steps[0].CreateTime
+	}
 }

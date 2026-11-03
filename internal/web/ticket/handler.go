@@ -517,6 +517,14 @@ func (h *Handler) toDomain(req CreateTicketReq) domain.Ticket {
 }
 
 func (h *Handler) toVoTicket(req domain.Ticket) Ticket {
+	var ctime, wtime string
+	if req.Ctime > 0 {
+		ctime = time.Unix(req.Ctime/1000, 0).Format("2006-01-02 15:04:05")
+	}
+	if req.Wtime > 0 {
+		wtime = time.Unix(req.Wtime/1000, 0).Format("2006-01-02 15:04:05")
+	}
+
 	return Ticket{
 		Id:                   req.Id,
 		TemplateId:           req.TemplateId,
@@ -525,8 +533,8 @@ func (h *Handler) toVoTicket(req domain.Ticket) Ticket {
 		Provide:              req.Provide.ToUint8(),
 		Status:               req.Status.ToUint8(),
 		WorkflowId:           req.WorkflowId,
-		Ctime:                time.Unix(req.Ctime/1000, 0).Format("2006-01-02 15:04:05"),
-		Wtime:                time.Unix(req.Wtime/1000, 0).Format("2006-01-02 15:04:05"),
+		Ctime:                ctime,
+		Wtime:                wtime,
 		Data:                 req.Data,
 		RevokeReason:         req.RevokeReason,
 		ProcessStartError:    req.ProcessStartError,
@@ -577,6 +585,10 @@ func (h *Handler) toVoTicketView(view domain.TicketTaskView) Ticket {
 		} else {
 			vo.ProcInstCreateTime = view.ProcInstCreateTime
 		}
+	}
+	// 兜底保障：若底层引擎实例未返回创建时间（如流程启动中、启动失败），统一回退为工单提单创建时间，确保前端列绝不为空
+	if vo.ProcInstCreateTime == nil || vo.ProcInstCreateTime == "" {
+		vo.ProcInstCreateTime = vo.Ctime
 	}
 	vo.CanRate = view.CanRate
 	if view.Rating != nil {

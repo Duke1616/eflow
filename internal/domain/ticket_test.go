@@ -2,6 +2,7 @@ package domain
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -234,8 +235,9 @@ func TestTicketTaskView_ResolveStep(t *testing.T) {
 		view := TicketTaskView{
 			Ticket: Ticket{Status: PROCESS},
 		}
+		now := time.Now()
 		steps := []Instance{
-			{CurrentNodeName: "技术主管审批", ApprovedBy: "leader1", TaskID: 666},
+			{CurrentNodeName: "技术主管审批", ApprovedBy: "leader1", TaskID: 666, CreateTime: &now},
 		}
 		displayNames := map[string]string{
 			"leader1": "张主管",
@@ -244,6 +246,7 @@ func TestTicketTaskView_ResolveStep(t *testing.T) {
 		assert.Equal(t, "技术主管审批", view.CurrentStep)
 		assert.Equal(t, "张主管", view.ApprovedBy)
 		assert.Equal(t, 666, view.TaskID)
+		assert.Equal(t, &now, view.ProcInstCreateTime)
 	})
 }
 

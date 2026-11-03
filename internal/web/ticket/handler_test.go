@@ -225,17 +225,17 @@ func TestHandler_StartUser_CompleteData(t *testing.T) {
 
 	views := []domain.TicketTaskView{
 		{
-			Ticket:      domain.Ticket{Id: 1, CreateBy: "alice", Status: domain.PROCESS},
+			Ticket:      domain.Ticket{Id: 1, CreateBy: "alice", Status: domain.PROCESS, Ctime: 1716999999000},
 			CurrentStep: "领导审批",
 			ApprovedBy:  "李领导",
 			TaskID:      501,
 		},
 		{
-			Ticket:      domain.Ticket{Id: 2, CreateBy: "alice", Status: domain.WITHDRAWING},
+			Ticket:      domain.Ticket{Id: 2, CreateBy: "alice", Status: domain.WITHDRAWING, Ctime: 1716999999000},
 			CurrentStep: "撤回处理中",
 		},
 		{
-			Ticket:      domain.Ticket{Id: 3, CreateBy: "alice", Status: domain.END},
+			Ticket:      domain.Ticket{Id: 3, CreateBy: "alice", Status: domain.END, Ctime: 1716999999000},
 			CurrentStep: "已结束",
 		},
 	}
@@ -261,10 +261,12 @@ func TestHandler_StartUser_CompleteData(t *testing.T) {
 	require.Equal(t, int64(3), data.Total)
 	require.Len(t, data.Tasks, 3)
 
-	// 工单 1 正常映射节点名和处理人真实姓名
+	// 工单 1 正常映射节点名和处理人真实姓名，并正确填充流程提交时间
 	assert.Equal(t, "领导审批", data.Tasks[0].CurrentStep)
 	assert.Equal(t, "李领导", data.Tasks[0].ApprovedBy)
 	assert.Equal(t, 501, data.Tasks[0].TaskId)
+	assert.NotEmpty(t, data.Tasks[0].ProcInstCreateTime)
+	assert.Equal(t, data.Tasks[0].Ctime, data.Tasks[0].ProcInstCreateTime)
 
 	// 工单 2 撤回中，步骤展示为“撤回处理中”
 	assert.Equal(t, "撤回处理中", data.Tasks[1].CurrentStep)
