@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ecodeclub/ekit/slice"
+	"github.com/samber/lo"
 	"github.com/xen0n/go-workwx"
 )
 
@@ -101,7 +102,10 @@ func (fp *FieldProcessor) processWechatFields() []Field {
 	var fields []Field
 
 	for _, contents := range oaData.ApplyData.Contents {
-		key := contents.Title[0].Text
+		key := contents.ID
+		if len(contents.Title) > 0 {
+			key = contents.Title[0].Text
+		}
 		content := fp.processWechatContent(contents)
 
 		if content != "" {
@@ -132,10 +136,18 @@ func (fp *FieldProcessor) processWechatContent(contents workwx.OAContent) string
 	case "Selector":
 		switch contents.Value.Selector.Type {
 		case "single":
+			// 防御：单选未选择或选项切片为空时避免 Panic
+			if len(contents.Value.Selector.Options) == 0 || len(contents.Value.Selector.Options[0].Value) == 0 {
+				return ""
+			}
 			return contents.Value.Selector.Options[0].Value[0].Text
 		case "multi":
-			values := slice.Map(contents.Value.Selector.Options, func(_ int, opt workwx.OAContentSelectorOption) string {
-				return opt.Value[0].Text
+			// 防御：多选过滤空值选项
+			values := lo.FilterMap(contents.Value.Selector.Options, func(opt workwx.OAContentSelectorOption, _ int) (string, bool) {
+				if len(opt.Value) == 0 {
+					return "", false
+				}
+				return opt.Value[0].Text, true
 			})
 			return strings.Join(values, ", ")
 		}

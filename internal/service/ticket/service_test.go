@@ -2,6 +2,7 @@ package ticket
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	workflowmocks "github.com/Duke1616/eflow/internal/service/workflow/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/xen0n/go-workwx"
 	"go.uber.org/mock/gomock"
 )
 
@@ -409,4 +411,56 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConvert_Safe(t *testing.T) {
+	// 验证企微审批数据转换：空选项、ID 无连字符等边界条件不触发 Panic
+	jsonStr := `{
+		"apply_data": {
+			"contents": [
+				{
+					"id": "Selector-12345",
+					"control": "Selector",
+					"value": {
+						"selector": {
+							"type": "single",
+							"options": []
+						}
+					}
+				},
+				{
+					"id": "reason_no_hyphen",
+					"control": "Textarea",
+					"value": {
+						"text": "审批原因"
+					}
+				},
+				{
+					"id": "Selector-multi",
+					"control": "Selector",
+					"value": {
+						"selector": {
+							"type": "multi",
+							"options": [
+								{
+									"value": [{"text": "选项A"}]
+								}
+							]
+						}
+					}
+				}
+			]
+		}
+	}`
+
+	var oaData workwx.OAApprovalDetail
+	err := json.Unmarshal([]byte(jsonStr), &oaData)
+	require.NoError(t, err)
+
+	result := convert(nil, oaData)
+	require.Len(t, result, 2)
+	assert.Equal(t, "reason_no_hyphen", result[0].Key)
+	assert.Equal(t, "审批原因", result[0].Value)
+	assert.Equal(t, "multi", result[1].Key)
+	assert.Equal(t, []string{"选项A"}, result[1].Value)
 }

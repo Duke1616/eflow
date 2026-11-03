@@ -59,6 +59,18 @@ func (c *ProcessEventConsumer) Consume(ctx context.Context) error {
 }
 
 func (c *ProcessEventConsumer) handleTask(ctx context.Context, evt event.TicketEvent) error {
+	// 1. 幂等校验：若工单已绑定流程实例，无需重复启动流程引擎，防止 MQ 重试产生多套孤儿流程
+	ticket, err := c.ticketSvc.GetByID(ctx, evt.Id)
+	if err != nil {
+		return fmt.Errorf("查询待启动工单详情失败: %w", err)
+	}
+	if ticket.Process.InstanceId > 0 {
+		c.logger.Info("工单已绑定流程实例，跳过重复启动",
+			elog.Int64("ticketId", evt.Id),
+			elog.Int("instanceId", ticket.Process.InstanceId))
+		return nil
+	}
+
 	flow, err := c.workFlowSvc.Find(ctx, evt.WorkflowId)
 	if err != nil {
 		return fmt.Errorf("查询流程信息失败: %w", err)

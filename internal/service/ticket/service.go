@@ -140,7 +140,18 @@ func (s *ticketService) CreateBizTicket(ctx context.Context, ticket domain.Ticke
 		return domain.Ticket{}, err
 	}
 
-	err = s.sendGenerateFlowEvent(ctx, ticket, bizTicket.Id, "TODO")
+	templateName := "默认工单"
+	if ticket.TemplateId > 0 {
+		if tmpl, tmplErr := s.templateSvc.DetailTemplate(ctx, ticket.TemplateId); tmplErr == nil && tmpl.Name != "" {
+			templateName = tmpl.Name
+		} else if tmplErr != nil {
+			s.l.Warn("查询工单模板名称失败，使用默认模版名兜底",
+				elog.Int64("templateId", ticket.TemplateId),
+				elog.FieldErr(tmplErr))
+		}
+	}
+
+	err = s.sendGenerateFlowEvent(ctx, ticket, bizTicket.Id, templateName)
 	if err != nil {
 		_ = s.MarkProcessStartFailed(ctx, bizTicket.Id, err.Error())
 		return bizTicket, nil
@@ -613,26 +624,36 @@ func wechatOaData(data map[string]interface{}) (workwx.OAApprovalDetail, error) 
 
 func convert(data []event.Variables, oaData workwx.OAApprovalDetail) []event.Variables {
 	for _, contents := range oaData.ApplyData.Contents {
-		id := strings.Split(contents.ID, "-")
-		key := id[1]
+		// 防御：控件 ID 可能不包含 "-" 或者是单个字符串
+		key := contents.ID
+		if idx := strings.Index(contents.ID, "-"); idx >= 0 && idx < len(contents.ID)-1 {
+			key = contents.ID[idx+1:]
+		}
 
 		switch contents.Control {
 		case "Selector":
 			switch contents.Value.Selector.Type {
 			case "single":
+				if len(contents.Value.Selector.Options) == 0 || len(contents.Value.Selector.Options[0].Value) == 0 {
+					continue
+				}
 				data = append(data, event.Variables{
 					Key:   key,
 					Value: contents.Value.Selector.Options[0].Value[0].Text,
 				})
 			case "multi":
-				value := lo.Map(contents.Value.Selector.Options, func(src workwx.OAContentSelectorOption, _ int) string {
-					return src.Value[0].Text
+				value := lo.FilterMap(contents.Value.Selector.Options, func(src workwx.OAContentSelectorOption, _ int) (string, bool) {
+					if len(src.Value) == 0 {
+						return "", false
+					}
+					return src.Value[0].Text, true
 				})
-
-				data = append(data, event.Variables{
-					Key:   key,
-					Value: value,
-				})
+				if len(value) > 0 {
+					data = append(data, event.Variables{
+						Key:   key,
+						Value: value,
+					})
+				}
 			}
 		case "Textarea":
 			data = append(data, event.Variables{

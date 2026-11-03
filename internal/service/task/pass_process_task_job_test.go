@@ -11,6 +11,7 @@ import (
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestPassProcessTaskJobDoesNotSkipShrinkingPages(t *testing.T) {
@@ -75,6 +76,20 @@ func TestPassProcessTaskJobDefersWithdrawingProcess(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, tasks.marked)
 	require.Empty(t, engineSvc.tenantIDs)
+}
+
+func TestPassProcessTaskJobMarksAutoPassedWhenEngineTaskNotFound(t *testing.T) {
+	// 流程引擎中节点任务不存在（已被跳过或完结），应自动标记已推进，避免死循环报错
+	tasks := &passTaskServiceStub{remaining: []domain.Task{
+		{ID: 1, TenantID: 11, NodeID: "node-1", ProcessInstanceID: 101},
+	}}
+	engineSvc := &passEngineStub{errors: map[int]error{101: gorm.ErrRecordNotFound}}
+	job := NewPassProcessTaskJob(tasks, engineSvc, 10, time.Minute)
+
+	err := job.run(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, tasks.marked)
 }
 
 type passTaskServiceStub struct {

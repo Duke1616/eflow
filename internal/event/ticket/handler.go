@@ -213,7 +213,7 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) erro
 		if err != nil {
 			if errors.Is(err, ticketSvc.ErrTaskAlreadyFinished) {
 				remark = "你的节点任务已经结束，无法进行审批，详情登录 ECMDB 平台查看"
-				h.logger.Error("飞书回调消息，同意工单失败", elog.FieldErr(err))
+				h.logger.Error("飞书回调消息，驳回工单失败", elog.FieldErr(err))
 			}
 
 			h.logger.Error("飞书回调消息，驳回工单失败", elog.FieldErr(err),

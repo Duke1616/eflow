@@ -199,3 +199,49 @@ func TestFlattenRules(t *testing.T) {
 	assert.True(t, flattened[1].NotifyHidden)
 	assert.Equal(t, "role", flattened[2].Field)
 }
+
+func TestProcessWechatFieldsSafe(t *testing.T) {
+	// 验证在企微表单的单选未勾选（Options 为空）、Title 为空、控件 ID 无连字符等边界场景下不会发生 Panic
+	testData := map[string]interface{}{
+		"apply_data": map[string]interface{}{
+			"contents": []map[string]interface{}{
+				{
+					"id":      "Selector-1",
+					"title":   []map[string]interface{}{{"text": "单选留空"}},
+					"control": "Selector",
+					"value": map[string]interface{}{
+						"selector": map[string]interface{}{
+							"type":    "single",
+							"options": []map[string]interface{}{},
+						},
+					},
+				},
+				{
+					"id":      "no_hyphen_id",
+					"title":   []map[string]interface{}{},
+					"control": "Textarea",
+					"value": map[string]interface{}{
+						"text": "文本备注",
+					},
+				},
+				{
+					"id":      "Selector-2",
+					"title":   []map[string]interface{}{{"text": "多选空值"}},
+					"control": "Selector",
+					"value": map[string]interface{}{
+						"selector": map[string]interface{}{
+							"type": "multi",
+							"options": []map[string]interface{}{
+								{"value": []map[string]interface{}{}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	fields := GetFields(nil, WechatProvide, testData)
+	assert.Len(t, fields, 1)
+	assert.Equal(t, "no_hyphen_id", fields[0].Content[2:14])
+}
