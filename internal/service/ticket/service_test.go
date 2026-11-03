@@ -21,6 +21,8 @@ func TestTicketService_Pass(t *testing.T) {
 	testCases := []struct {
 		name      string
 		taskId    int
+		operator  string
+		isAdmin   bool
 		comment   string
 		extraData map[string]interface{}
 		mock      func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockService, *workflowmocks.MockService)
@@ -29,6 +31,8 @@ func TestTicketService_Pass(t *testing.T) {
 		{
 			name:      "任务已被处理防御性拦截",
 			taskId:    101,
+			operator:  "auditor1",
+			isAdmin:   false,
 			comment:   "同意",
 			extraData: nil,
 			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockService, *workflowmocks.MockService) {
@@ -39,6 +43,7 @@ func TestTicketService_Pass(t *testing.T) {
 				engineSvc.EXPECT().TaskInfo(gomock.Any(), 101).Return(model.Task{
 					TaskID:     101,
 					ProcInstID: 1,
+					UserID:     "auditor1",
 					IsFinished: 1,
 				}, nil)
 
@@ -47,8 +52,33 @@ func TestTicketService_Pass(t *testing.T) {
 			wantErr: ErrTaskAlreadyFinished,
 		},
 		{
+			name:      "非指派人且非管理员拦截越权操作",
+			taskId:    101,
+			operator:  "attacker",
+			isAdmin:   false,
+			comment:   "同意",
+			extraData: nil,
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockService, *workflowmocks.MockService) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				engineSvc := enginemocks.NewMockService(ctrl)
+				wfSvc := workflowmocks.NewMockService(ctrl)
+
+				engineSvc.EXPECT().TaskInfo(gomock.Any(), 101).Return(model.Task{
+					TaskID:     101,
+					ProcInstID: 1,
+					UserID:     "auditor1",
+					IsFinished: 0,
+				}, nil)
+
+				return repo, engineSvc, wfSvc
+			},
+			wantErr: domain.ErrTaskUnauthorized,
+		},
+		{
 			name:      "无表单字段时直接触发引擎通过",
 			taskId:    102,
+			operator:  "auditor1",
+			isAdmin:   false,
 			comment:   "同意通过",
 			extraData: nil,
 			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockService, *workflowmocks.MockService) {
@@ -61,6 +91,7 @@ func TestTicketService_Pass(t *testing.T) {
 					ProcInstID: 1,
 					ProcID:     10,
 					NodeID:     "node-audit",
+					UserID:     "auditor1",
 					IsFinished: 0,
 				}, nil)
 
@@ -90,9 +121,11 @@ func TestTicketService_Pass(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			name:    "表单必填字段校验失败",
-			taskId:  103,
-			comment: "同意",
+			name:      "表单必填字段校验失败",
+			taskId:    103,
+			operator:  "auditor1",
+			isAdmin:   false,
+			comment:   "同意",
 			extraData: map[string]interface{}{
 				"reason": "",
 			},
@@ -106,6 +139,7 @@ func TestTicketService_Pass(t *testing.T) {
 					ProcInstID: 1,
 					ProcID:     10,
 					NodeID:     "node-audit",
+					UserID:     "auditor1",
 					IsFinished: 0,
 				}, nil)
 
@@ -140,9 +174,11 @@ func TestTicketService_Pass(t *testing.T) {
 			wantErr: ValidationError,
 		},
 		{
-			name:    "包含表单字段时成功合并数据、归档快照并推进流程",
-			taskId:  104,
-			comment: "通过",
+			name:      "包含表单字段时成功合并数据、归档快照并推进流程",
+			taskId:    104,
+			operator:  "admin_user",
+			isAdmin:   true,
+			comment:   "通过",
 			extraData: map[string]interface{}{
 				"opinion": "审批通过，准予发布",
 			},
@@ -156,6 +192,7 @@ func TestTicketService_Pass(t *testing.T) {
 					ProcInstID: 2,
 					ProcID:     10,
 					NodeID:     "node-audit",
+					UserID:     "auditor1",
 					IsFinished: 0,
 				}, nil)
 
@@ -219,7 +256,7 @@ func TestTicketService_Pass(t *testing.T) {
 			repo, engineStub, wfStub := tc.mock(ctrl)
 			svc := NewService(repo, nil, engineStub, wfStub, nil)
 
-			err := svc.Pass(context.Background(), tc.taskId, tc.comment, tc.extraData)
+			err := svc.Pass(context.Background(), tc.taskId, tc.operator, tc.isAdmin, tc.comment, tc.extraData)
 			if tc.wantErr != nil {
 				require.Error(t, err)
 				assert.True(t, errors.Is(err, tc.wantErr))
@@ -232,21 +269,26 @@ func TestTicketService_Pass(t *testing.T) {
 
 func TestTicketService_Reject(t *testing.T) {
 	testCases := []struct {
-		name    string
-		taskId  int
-		comment string
-		mock    func(ctrl *gomock.Controller) *enginemocks.MockService
-		wantErr error
+		name     string
+		taskId   int
+		operator string
+		isAdmin  bool
+		comment  string
+		mock     func(ctrl *gomock.Controller) *enginemocks.MockService
+		wantErr  error
 	}{
 		{
-			name:    "任务已提前处理拦截驳回",
-			taskId:  201,
-			comment: "驳回",
+			name:     "任务已提前处理拦截驳回",
+			taskId:   201,
+			operator: "auditor1",
+			isAdmin:  false,
+			comment:  "驳回",
 			mock: func(ctrl *gomock.Controller) *enginemocks.MockService {
 				engineSvc := enginemocks.NewMockService(ctrl)
 				engineSvc.EXPECT().TaskInfo(gomock.Any(), 201).Return(model.Task{
 					TaskID:     201,
 					ProcInstID: 1,
+					UserID:     "auditor1",
 					IsFinished: 1,
 				}, nil)
 				return engineSvc
@@ -254,17 +296,117 @@ func TestTicketService_Reject(t *testing.T) {
 			wantErr: ErrTaskAlreadyFinished,
 		},
 		{
-			name:    "未处理任务成功委托引擎执行驳回",
-			taskId:  202,
-			comment: "材料不齐，驳回修改",
+			name:     "未处理任务成功委托引擎执行驳回",
+			taskId:   202,
+			operator: "auditor1",
+			isAdmin:  false,
+			comment:  "材料不齐，驳回修改",
 			mock: func(ctrl *gomock.Controller) *enginemocks.MockService {
 				engineSvc := enginemocks.NewMockService(ctrl)
 				engineSvc.EXPECT().TaskInfo(gomock.Any(), 202).Return(model.Task{
 					TaskID:     202,
 					ProcInstID: 1,
+					UserID:     "auditor1",
 					IsFinished: 0,
 				}, nil)
 				engineSvc.EXPECT().Reject(gomock.Any(), 202, "材料不齐，驳回修改").Return(nil)
+				return engineSvc
+			},
+			wantErr: nil,
+		},
+		{
+			name:     "越权拦截非指派人驳回",
+			taskId:   203,
+			operator: "someone_else",
+			isAdmin:  false,
+			comment:  "恶意驳回",
+			mock: func(ctrl *gomock.Controller) *enginemocks.MockService {
+				engineSvc := enginemocks.NewMockService(ctrl)
+				engineSvc.EXPECT().TaskInfo(gomock.Any(), 203).Return(model.Task{
+					TaskID:     203,
+					ProcInstID: 1,
+					UserID:     "auditor1",
+					IsFinished: 0,
+				}, nil)
+				return engineSvc
+			},
+			wantErr: domain.ErrTaskUnauthorized,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			engineStub := tc.mock(ctrl)
+			svc := NewService(nil, nil, engineStub, nil, nil)
+
+			err := svc.Reject(context.Background(), tc.taskId, tc.operator, tc.isAdmin, tc.comment)
+			if tc.wantErr != nil {
+				require.Error(t, err)
+				assert.True(t, errors.Is(err, tc.wantErr))
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestTicketService_Transfer(t *testing.T) {
+	testCases := []struct {
+		name        string
+		taskId      int
+		operator    string
+		isAdmin     bool
+		targetUsers []string
+		mock        func(ctrl *gomock.Controller) *enginemocks.MockService
+		wantErr     error
+	}{
+		{
+			name:        "转签目标人为空时拦截",
+			taskId:      301,
+			operator:    "auditor1",
+			isAdmin:     false,
+			targetUsers: nil,
+			mock: func(ctrl *gomock.Controller) *enginemocks.MockService {
+				return enginemocks.NewMockService(ctrl)
+			},
+			wantErr: domain.ErrInvalidParameter,
+		},
+		{
+			name:        "非指派人转签被越权拦截",
+			taskId:      302,
+			operator:    "intruder",
+			isAdmin:     false,
+			targetUsers: []string{"bob"},
+			mock: func(ctrl *gomock.Controller) *enginemocks.MockService {
+				engineSvc := enginemocks.NewMockService(ctrl)
+				engineSvc.EXPECT().TaskInfo(gomock.Any(), 302).Return(model.Task{
+					TaskID:     302,
+					ProcInstID: 1,
+					UserID:     "auditor1",
+					IsFinished: 0,
+				}, nil)
+				return engineSvc
+			},
+			wantErr: domain.ErrTaskUnauthorized,
+		},
+		{
+			name:        "合法指派人成功转签",
+			taskId:      303,
+			operator:    "auditor1",
+			isAdmin:     false,
+			targetUsers: []string{"bob"},
+			mock: func(ctrl *gomock.Controller) *enginemocks.MockService {
+				engineSvc := enginemocks.NewMockService(ctrl)
+				engineSvc.EXPECT().TaskInfo(gomock.Any(), 303).Return(model.Task{
+					TaskID:     303,
+					ProcInstID: 1,
+					UserID:     "auditor1",
+					IsFinished: 0,
+				}, nil)
+				engineSvc.EXPECT().Transfer(gomock.Any(), 303, []string{"bob"}).Return([]model.Task{}, nil)
 				return engineSvc
 			},
 			wantErr: nil,
@@ -279,7 +421,7 @@ func TestTicketService_Reject(t *testing.T) {
 			engineStub := tc.mock(ctrl)
 			svc := NewService(nil, nil, engineStub, nil, nil)
 
-			err := svc.Reject(context.Background(), tc.taskId, tc.comment)
+			err := svc.Transfer(context.Background(), tc.taskId, tc.operator, tc.isAdmin, tc.targetUsers)
 			if tc.wantErr != nil {
 				require.Error(t, err)
 				assert.True(t, errors.Is(err, tc.wantErr))
@@ -463,4 +605,25 @@ func TestConvert_Safe(t *testing.T) {
 	assert.Equal(t, "审批原因", result[0].Value)
 	assert.Equal(t, "multi", result[1].Key)
 	assert.Equal(t, []string{"选项A"}, result[1].Value)
+}
+
+func TestFormatVariableValue(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    any
+		expected any
+	}{
+		{name: "nil 防 panic 返回空字符串", input: nil, expected: ""},
+		{name: "float64 格式化为浮点文本", input: float64(123.45), expected: "123.450000"},
+		{name: "字符串保持原样", input: "hello", expected: "hello"},
+		{name: "整型保持原样", input: 42, expected: 42},
+		{name: "切片转为 JSON 字符串", input: []any{"a", "b"}, expected: `["a","b"]`},
+		{name: "字典转为 JSON 字符串", input: map[string]any{"k": "v"}, expected: `{"k":"v"}`},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, formatVariableValue(tc.input))
+		})
+	}
 }

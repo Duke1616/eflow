@@ -3,8 +3,10 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
+	"github.com/samber/lo"
 )
 
 // Channel 消息通知媒介/渠道定义
@@ -22,6 +24,22 @@ const (
 	ChannelEmail Channel = "EMAIL"
 	// ChannelInApp 系统站内信通知渠道
 	ChannelInApp Channel = "IN_APP"
+)
+
+// 领域错误定义
+var (
+	// ErrTicketTerminal 工单已处于终结状态
+	ErrTicketTerminal = errors.New("工单已处于终结状态")
+	// ErrTicketUnauthorized 操作用户无权操作该工单
+	ErrTicketUnauthorized = errors.New("无权操作该工单")
+	// ErrTicketWithdrawing 工单正在撤回中
+	ErrTicketWithdrawing = errors.New("工单撤回处理中，不可重复发起撤回")
+	// ErrTicketCannotRevoke 当前工单状态不支持撤回
+	ErrTicketCannotRevoke = errors.New("当前工单状态不支持撤回")
+	// ErrTaskUnauthorized 审批任务处理人与操作人不一致
+	ErrTaskUnauthorized = errors.New("无法操作，当前审批任务指派处理人与您账号不一致")
+	// ErrTaskAlreadyFinished 任务已被处理，不可重复审批或驳回
+	ErrTaskAlreadyFinished = errors.New("任务已被处理")
 )
 
 // Status 工单流转实例的状态
@@ -55,6 +73,34 @@ const (
 // AllowsProcessRestart 判断工单状态是否处于允许重新启动底层流程引擎的阶段（未终态启动或启动失败）
 func (s Status) AllowsProcessRestart() bool {
 	return s == START || s == START_FAILED
+}
+
+// IsTerminal 判断工单是否处于不可逆的终结状态（已正常结束或已成功撤回）
+func (s Status) IsTerminal() bool {
+	return s == END || s == WITHDRAW
+}
+
+// CanRevoke 判断当前工单状态是否支持申请撤回（仅运行中或启动中允许撤回）
+func (s Status) CanRevoke() bool {
+	return s == START || s == PROCESS
+}
+
+// DefaultStepName 返回工单在没有挂起人工待办步骤时的语义化展示文本
+func (s Status) DefaultStepName() string {
+	switch s {
+	case WITHDRAWING:
+		return "撤回处理中"
+	case WITHDRAW:
+		return "已撤回"
+	case END:
+		return "已结束"
+	case START:
+		return "待启动流程"
+	case START_FAILED:
+		return "流程启动失败"
+	default:
+		return "处理中"
+	}
 }
 
 // Provide 工单的发起/同步来源提供者
@@ -124,20 +170,20 @@ var ErrInvalidParameter = errors.New("参数校验错误")
 var ErrTicketNotAccessible = errors.New("工单不存在或无权访问")
 
 // Validate 校验工单创建/更新请求的合法性，防止脏数据入库
-func (o *Ticket) Validate() error {
-	if o.TemplateId <= 0 {
-		return fmt.Errorf("%w: Template.ID = %d", ErrInvalidParameter, o.TemplateId)
+func (t *Ticket) Validate() error {
+	if t.TemplateId <= 0 {
+		return fmt.Errorf("%w: Template.ID = %d", ErrInvalidParameter, t.TemplateId)
 	}
 
-	if o.WorkflowId <= 0 {
-		return fmt.Errorf("%w: WorkFlow.ID = %d", ErrInvalidParameter, o.WorkflowId)
+	if t.WorkflowId <= 0 {
+		return fmt.Errorf("%w: WorkFlow.ID = %d", ErrInvalidParameter, t.WorkflowId)
 	}
 
-	if !o.Provide.IsValid() {
+	if !t.Provide.IsValid() {
 		return fmt.Errorf("%w: 不支持的来源提供商", ErrInvalidParameter)
 	}
 
-	if o.CreateBy == "" {
+	if t.CreateBy == "" {
 		return fmt.Errorf("%w: 工单创建人不能为空", ErrInvalidParameter)
 	}
 
@@ -146,7 +192,7 @@ func (o *Ticket) Validate() error {
 
 // CanRestartProcess 判断工单是否具备重新启动底层流程引擎的资格。
 // 仅允许未绑定流程实例且状态处于允许重启集（START / START_FAILED）的工单重新触发流程启动。
-func (t Ticket) CanRestartProcess() bool {
+func (t *Ticket) CanRestartProcess() bool {
 	return !t.Process.IsBound() && t.Status.AllowsProcessRestart()
 }
 
@@ -214,4 +260,82 @@ func ChannelToProtoDomain(ch notificationv1.Channel) Channel {
 		return v
 	}
 	return ""
+}
+
+// TicketTaskView 聚合了工单业务主实体与其在底层流程引擎中的流转步骤、审批人展示信息
+type TicketTaskView struct {
+	Ticket             Ticket
+	TaskID             int
+	CurrentStep        string
+	ApprovedBy         string
+	ProcInstCreateTime any
+	CanRate            bool
+	Rating             *TicketRating
+}
+
+// CanRevokeBy 断言操作人是否有权撤回当前工单（必须是发起人本人或管理员，且工单处于可撤回状态）
+func (t *Ticket) CanRevokeBy(operator string, isAdmin bool) error {
+	if !isAdmin && t.CreateBy != operator {
+		return fmt.Errorf("%w: 仅允许工单发起人或管理员撤回", ErrTicketUnauthorized)
+	}
+	if t.Status == WITHDRAWING {
+		return ErrTicketWithdrawing
+	}
+	if !t.Status.CanRevoke() {
+		return fmt.Errorf("%w: 当前状态为 %s", ErrTicketCannotRevoke, t.Status.DefaultStepName())
+	}
+	return nil
+}
+
+// CanBeRatedBy 断言指定用户是否拥有对该工单的评价资格
+func (t *Ticket) CanBeRatedBy(rater string, alreadyRated bool) bool {
+	return t.Status == END && t.CreateBy == rater && !alreadyRated
+}
+
+// ValidateTaskOperable 断言审批任务是否允许被指定操作人执行流转动作（同意、驳回、转办等）。
+// 业务自卫逻辑：
+// 1. 若底层任务节点已标记为完成（isFinished），立即拦截，防止网络重试或并发请求造成的重复审批；
+// 2. 权限隔离：若操作人既不是当前任务指派的处理人，也不是系统超级管理员（isAdmin），则直接拦截越权操作。
+func ValidateTaskOperable(assignee string, isFinished bool, operator string, isAdmin bool) error {
+	if isFinished {
+		return ErrTaskAlreadyFinished
+	}
+	if !isAdmin && assignee != operator {
+		return fmt.Errorf("%w: 任务指派人 [%s]，当前操作人 [%s]", ErrTaskUnauthorized, assignee, operator)
+	}
+	return nil
+}
+
+// IsTerminal 判断工单是否已终结
+func (t *Ticket) IsTerminal() bool {
+	return t.Status.IsTerminal()
+}
+
+// ResolveStep 根据流程待办步骤和用户真实姓名字典，自适应组装聚合视图的当前步骤与处理人
+func (v *TicketTaskView) ResolveStep(steps []Instance, displayNames map[string]string) {
+	if len(steps) == 0 {
+		v.CurrentStep = v.Ticket.Status.DefaultStepName()
+		return
+	}
+
+	nodeNames := lo.Uniq(lo.FilterMap(steps, func(s Instance, _ int) (string, bool) {
+		return s.CurrentNodeName, s.CurrentNodeName != ""
+	}))
+	if len(nodeNames) > 0 {
+		v.CurrentStep = strings.Join(nodeNames, ", ")
+	}
+
+	approvers := lo.Uniq(lo.FilterMap(steps, func(s Instance, _ int) (string, bool) {
+		if s.ApprovedBy == "" {
+			return "", false
+		}
+		if name, ok := displayNames[s.ApprovedBy]; ok && name != "" {
+			return name, true
+		}
+		return s.ApprovedBy, true
+	}))
+	if len(approvers) > 0 {
+		v.ApprovedBy = strings.Join(approvers, ", ")
+	}
+	v.TaskID = steps[0].TaskID
 }

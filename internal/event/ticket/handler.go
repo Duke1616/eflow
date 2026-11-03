@@ -176,11 +176,20 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) erro
 		elog.Any("task_id", taskId),
 	)
 
+	var operator string
+	var isAdmin bool
+	if userResp, uErr := h.userSvc.FindByFeishuUserId(ctx, evt.GetUserId()); uErr == nil && userResp != nil {
+		operator = userResp.Username
+		isAdmin = userResp.IsAdmin
+	} else {
+		operator = evt.GetUserId()
+	}
+
 	var remark string
 	switch evt.GetAction() {
 	case Pass:
 		remark = fmt.Sprintf("你已同意该申请, 批注：%s", comment)
-		if err = h.svc.Pass(ctx, taskId, comment, evt.GetFormValue()); err != nil {
+		if err = h.svc.Pass(ctx, taskId, operator, isAdmin, comment, evt.GetFormValue()); err != nil {
 			if errors.Is(err, ticketSvc.ErrTaskAlreadyFinished) {
 				remark = "你的节点任务已经结束，无法进行审批，详情登录 ECMDB 平台查看"
 				h.logger.Error("飞书回调消息，同意工单失败", elog.FieldErr(err))
@@ -209,7 +218,7 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt LarkCallback) erro
 		return h.withdraw(ctx, evt, remark)
 	case Reject:
 		remark = fmt.Sprintf("你已驳回该申请, 批注：%s", comment)
-		err = h.svc.Reject(ctx, taskId, comment)
+		err = h.svc.Reject(ctx, taskId, operator, isAdmin, comment)
 		if err != nil {
 			if errors.Is(err, ticketSvc.ErrTaskAlreadyFinished) {
 				remark = "你的节点任务已经结束，无法进行审批，详情登录 ECMDB 平台查看"

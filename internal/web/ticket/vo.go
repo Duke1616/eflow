@@ -168,18 +168,3 @@ type FormValue struct {
 	Type  string      `json:"type"`
 	Value interface{} `json:"value"`
 }
-
-type Steps struct {
-	CurrentStep string   `json:"current_step"`
-	ApprovedBy  []string `json:"approved_by"`
-}
-
-type ProgressReq struct {
-	TargetUrl string `json:"target_url"`
-}
-
-type Rule struct {
-	Type  string `json:"type"`
-	Field string `json:"field"`
-	Title string `json:"title"`
-}

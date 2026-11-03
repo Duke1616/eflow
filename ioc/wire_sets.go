@@ -98,6 +98,7 @@ var (
 		repository.NewTicketRepository,
 		repository.NewTicketRatingRepository,
 		ticketSvc.NewService,
+		ticketSvc.NewQueryService,
 		ratingSvc.NewService,
 		ticket.NewHandler,
 	)

@@ -14,6 +14,8 @@ import (
 var ErrAutomationRunning = errors.New("自动化任务正在执行，暂时无法撤回")
 var ErrInvalidRevokeReason = errors.New("撤单原因不能为空且不能超过 500 个字符")
 
+//go:generate mockgen -source=./service.go -package=withdrawalmocks -destination=./mocks/withdrawal_svc.mock.go Service
+
 // Service 统一编排流程实例撤回及其自动化任务状态迁移。
 type Service interface {
 	// Revoke 校验撤单原因，撤回流程实例，并启动已成功动作对应的撤回补偿。

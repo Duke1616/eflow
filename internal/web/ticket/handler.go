@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
@@ -31,6 +30,7 @@ var ticketNotAccessibleResult = ginx.Result{Code: 403, Msg: "工单不存在或�
 type Handler struct {
 	capability.IRegistry
 	svc           ticketSvc.Service
+	querySvc      ticketSvc.QueryService
 	userSvc       userv1.UserServiceClient
 	engineSvc     engineSvc.Service
 	workflowSvc   workflowSvc.Service
@@ -39,10 +39,11 @@ type Handler struct {
 	logger        *elog.Component
 }
 
-func NewHandler(svc ticketSvc.Service, engineSvc engineSvc.Service, userSvc userv1.UserServiceClient,
+func NewHandler(svc ticketSvc.Service, querySvc ticketSvc.QueryService, engineSvc engineSvc.Service, userSvc userv1.UserServiceClient,
 	workflowSvc workflowSvc.Service, withdrawalSvc withdrawalSvc.Service, ratingSvc ratingSvc.Service) *Handler {
 	return &Handler{
 		svc:           svc,
+		querySvc:      querySvc,
 		userSvc:       userSvc,
 		engineSvc:     engineSvc,
 		workflowSvc:   workflowSvc,
@@ -174,42 +175,14 @@ func (h *Handler) RestartProcess(ctx *ginx.Context, req RestartProcessReq) (ginx
 }
 
 func (h *Handler) TodoAll(ctx *ginx.Context, req Todo) (ginx.Result, error) {
-	instances, total, err := h.engineSvc.ListAllTodoTasks(ctx.Context, req.UserId, req.ProcessName, req.SortByAsc, int(req.Offset), int(req.Limit))
+	views, total, err := h.querySvc.ListAllTodo(ctx.Context, req.UserId, req.ProcessName, req.SortByAsc, req.Offset, req.Limit)
 	if err != nil {
 		return systemErrorResult, err
 	}
-
-	tickets, err := h.toVoEngineTicket(ctx.Context, instances)
-	if err != nil {
-		return systemErrorResult, err
-	}
-
-	// 启动失败工单首屏置顶提示，并严格保护返回数量不超过 req.Limit 限制
-	if req.Offset == 0 {
-		failedTickets, failedTotal, failedErr := h.svc.ListProcessStartFailed(ctx.Context, "", 0, req.Limit)
-		if failedErr != nil {
-			return systemErrorResult, failedErr
-		}
-		failedVOs := lo.Map(failedTickets, func(t domain.Ticket, _ int) Ticket {
-			return h.toVoTicket(t)
-		})
-		tickets = append(failedVOs, tickets...)
-		total += failedTotal
-	} else {
-		_, failedTotal, countErr := h.svc.ListProcessStartFailed(ctx.Context, "", 0, 1)
-		if countErr == nil {
-			total += failedTotal
-		}
-	}
-
-	if req.Limit > 0 && int64(len(tickets)) > req.Limit {
-		tickets = tickets[:req.Limit]
-	}
-
 	return ginx.Result{
 		Data: RetrieveTickets{
 			Total: total,
-			Tasks: tickets,
+			Tasks: h.toVoTicketViews(views),
 		},
 		Msg: "查看待办工单列表成功",
 	}, nil
@@ -221,12 +194,7 @@ func (h *Handler) TodoByUser(ctx *ginx.Context, req Todo) (ginx.Result, error) {
 		return systemErrorResult, err
 	}
 
-	instances, total, err := h.engineSvc.ListTodoTasks(ctx.Context, username, req.ProcessName, req.SortByAsc, int(req.Offset), int(req.Limit))
-	if err != nil {
-		return systemErrorResult, err
-	}
-
-	tickets, err := h.toVoEngineTicket(ctx.Context, instances)
+	views, total, err := h.querySvc.ListUserTodo(ctx.Context, username, req.ProcessName, req.SortByAsc, req.Offset, req.Limit)
 	if err != nil {
 		return systemErrorResult, err
 	}
@@ -234,7 +202,7 @@ func (h *Handler) TodoByUser(ctx *ginx.Context, req Todo) (ginx.Result, error) {
 	return ginx.Result{
 		Data: RetrieveTickets{
 			Total: total,
-			Tasks: tickets,
+			Tasks: h.toVoTicketViews(views),
 		},
 		Msg: "查看待办工单列表成功",
 	}, nil
@@ -248,13 +216,22 @@ func (h *Handler) Transfer(ctx *ginx.Context, req TransferReq) (ginx.Result, err
 		return ginx.Result{Code: 400, Msg: "转签目标用户不能为空"}, nil
 	}
 
-	// 权限判定：必须为该任务当前指派处理人或管理员，杜绝水平越权
-	if err := h.verifyUser(ctx, req.TaskId); err != nil {
+	user, err := h.getSessUser(ctx)
+	if err != nil {
 		return systemErrorResult, err
 	}
 
-	_, err := h.engineSvc.Transfer(ctx.Context, req.TaskId, req.Usernames)
+	err = h.svc.Transfer(ctx.Context, req.TaskId, user.Username, user.IsAdmin, req.Usernames)
 	if err != nil {
+		if errors.Is(err, domain.ErrTaskUnauthorized) {
+			return ginx.Result{Code: 403, Msg: err.Error()}, nil
+		}
+		if errors.Is(err, domain.ErrTaskAlreadyFinished) {
+			return ginx.Result{Code: 400, Msg: err.Error()}, nil
+		}
+		if errors.Is(err, domain.ErrInvalidParameter) {
+			return ginx.Result{Code: 400, Msg: err.Error()}, nil
+		}
 		return systemErrorResult, err
 	}
 
@@ -277,8 +254,12 @@ func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, er
 		}
 		return systemErrorResult, fmt.Errorf("查询撤回工单信息失败: %w", err)
 	}
-	if !user.IsAdmin && ticket.CreateBy != user.Username {
-		return ginx.Result{Code: 403, Msg: "无权撤回他人发起的工单"}, nil
+	// 由工单领域模型统一防卫：仅允许发起人本人或管理员撤回，并断言当前处于可撤回状态
+	if err = ticket.CanRevokeBy(user.Username, user.IsAdmin); err != nil {
+		if errors.Is(err, domain.ErrTicketUnauthorized) {
+			return ginx.Result{Code: 403, Msg: "无权撤回他人发起的工单"}, nil
+		}
+		return ginx.Result{Code: 400, Msg: err.Error()}, nil
 	}
 
 	err = h.withdrawalSvc.Revoke(ctx.Context, req.InstanceId, req.Force, user.Username, req.Reason)
@@ -320,11 +301,17 @@ func (h *Handler) SubmitRating(ctx *ginx.Context, req SubmitRatingReq) (ginx.Res
 }
 
 func (h *Handler) Pass(ctx *ginx.Context, req PassOrderReq) (ginx.Result, error) {
-	err := h.verifyUser(ctx, req.TaskId)
+	user, err := h.getSessUser(ctx)
 	if err != nil {
 		return systemErrorResult, err
 	}
-	if err = h.svc.Pass(ctx.Context, req.TaskId, req.Comment, req.ExtraData); err != nil {
+	if err = h.svc.Pass(ctx.Context, req.TaskId, user.Username, user.IsAdmin, req.Comment, req.ExtraData); err != nil {
+		if errors.Is(err, domain.ErrTaskUnauthorized) {
+			return ginx.Result{Code: 403, Msg: err.Error()}, nil
+		}
+		if errors.Is(err, domain.ErrTaskAlreadyFinished) {
+			return ginx.Result{Code: 400, Msg: err.Error()}, nil
+		}
 		return systemErrorResult, err
 	}
 
@@ -335,13 +322,19 @@ func (h *Handler) Pass(ctx *ginx.Context, req PassOrderReq) (ginx.Result, error)
 }
 
 func (h *Handler) Reject(ctx *ginx.Context, req RejectOrderReq) (ginx.Result, error) {
-	err := h.verifyUser(ctx, req.TaskId)
+	user, err := h.getSessUser(ctx)
 	if err != nil {
 		return systemErrorResult, err
 	}
 
-	err = h.svc.Reject(ctx.Context, req.TaskId, req.Comment)
+	err = h.svc.Reject(ctx.Context, req.TaskId, user.Username, user.IsAdmin, req.Comment)
 	if err != nil {
+		if errors.Is(err, domain.ErrTaskUnauthorized) {
+			return ginx.Result{Code: 403, Msg: err.Error()}, nil
+		}
+		if errors.Is(err, domain.ErrTaskAlreadyFinished) {
+			return ginx.Result{Code: 400, Msg: err.Error()}, nil
+		}
 		return systemErrorResult, err
 	}
 
@@ -357,89 +350,15 @@ func (h *Handler) StartUser(ctx *ginx.Context, req StartUserReq) (ginx.Result, e
 		return systemErrorResult, err
 	}
 
-	tickets, total, err := h.svc.ListByUser(ctx.Context, username, req.Offset, req.Limit)
+	views, total, err := h.querySvc.ListUserInitiated(ctx.Context, username, req.Offset, req.Limit)
 	if err != nil {
 		return systemErrorResult, err
 	}
-	if len(tickets) == 0 {
-		return ginx.Result{
-			Data: RetrieveTickets{
-				Total: total,
-				Tasks: []Ticket{},
-			},
-			Msg: "查看我的工单列表成功",
-		}, nil
-	}
-
-	procInstIds := lo.FilterMap(tickets, func(src domain.Ticket, _ int) (int, bool) {
-		return src.Process.InstanceId, src.Process.InstanceId > 0
-	})
-
-	processTasks, err := h.engineSvc.ListPendingStepsOfMyTask(ctx.Context, procInstIds, username)
-	if err != nil {
-		return systemErrorResult, err
-	}
-
-	// 建立待办步骤分组索引：ProcInstID -> []domain.Instance
-	tasksByProcInst := lo.GroupBy(processTasks, func(inst domain.Instance) int {
-		return inst.ProcInstID
-	})
-
-	// 批量解析待办处理人的真实展示姓名
-	us, err := h.getUsers(ctx.Context, processTasks)
-	if err != nil {
-		us = make(map[string]string)
-	}
-
-	// 主干以 tickets 实体为基准 1:1 转换，保证分页严格对齐且不丢失无人工待办状态的工单
-	tasks := lo.Map(tickets, func(ticket domain.Ticket, _ int) Ticket {
-		vo := h.toVoTicket(ticket)
-
-		if steps, exists := tasksByProcInst[ticket.Process.InstanceId]; exists && len(steps) > 0 {
-			nodeNames := lo.Uniq(lo.FilterMap(steps, func(s domain.Instance, _ int) (string, bool) {
-				return s.CurrentNodeName, s.CurrentNodeName != ""
-			}))
-			if len(nodeNames) > 0 {
-				vo.CurrentStep = strings.Join(nodeNames, ", ")
-			}
-
-			approvers := lo.Uniq(lo.FilterMap(steps, func(s domain.Instance, _ int) (string, bool) {
-				if s.ApprovedBy == "" {
-					return "", false
-				}
-				if displayName, ok := us[s.ApprovedBy]; ok && displayName != "" {
-					return displayName, true
-				}
-				return s.ApprovedBy, true
-			}))
-			if len(approvers) > 0 {
-				vo.ApprovedBy = strings.Join(approvers, ", ")
-			}
-			vo.TaskId = steps[0].TaskID
-		} else {
-			// 当前工单没有挂起的人工待办任务，根据工单领域状态填充语义化步骤信息
-			switch ticket.Status {
-			case domain.WITHDRAWING:
-				vo.CurrentStep = "撤回处理中"
-			case domain.WITHDRAW:
-				vo.CurrentStep = "已撤回"
-			case domain.END:
-				vo.CurrentStep = "已结束"
-			case domain.START:
-				vo.CurrentStep = "待启动流程"
-			case domain.START_FAILED:
-				vo.CurrentStep = "流程启动失败"
-			default:
-				vo.CurrentStep = "处理中"
-			}
-		}
-		return vo
-	})
 
 	return ginx.Result{
 		Data: RetrieveTickets{
 			Total: total,
-			Tasks: tasks,
+			Tasks: h.toVoTicketViews(views),
 		},
 		Msg: "查看我的工单列表成功",
 	}, nil
@@ -485,32 +404,33 @@ func (h *Handler) TaskRecord(ctx *ginx.Context, req RecordTaskReq) (ginx.Result,
 	}, nil
 }
 
-// TaskTimeline 以节点执行批次为单位返回流转历史；成员明细仅作为事件的展开内容。
+// TaskTimeline 以节点执行批次为单位返回流转历史；成员明细仅作为事件的展开内容
 func (h *Handler) TaskTimeline(ctx *ginx.Context, req TaskTimelineReq) (ginx.Result, error) {
 	groups, total, err := h.engineSvc.AccessibleTaskTimeline(ctx.Context, req.ProcessInstId, int(req.Offset), int(req.Limit))
 	if err != nil {
 		return systemErrorResult, err
 	}
 
-	allMembers := make([]model.Task, 0)
-	for _, group := range groups {
-		allMembers = append(allMembers, group.Members...)
-	}
-	recordsByTaskID := make(map[int]TaskRecord, len(allMembers))
-	allRecords := h.toTaskRecords(ctx.Context, allMembers)
+	events := h.assembleTimelineEvents(ctx.Context, groups)
+	return ginx.Result{Data: RetrieveTaskTimeline{Events: events, Total: total}}, nil
+}
+
+func (h *Handler) assembleTimelineEvents(ctx context.Context, groups []engineSvc.TaskTimelineGroup) []TaskTimelineEvent {
+	allMembers := lo.FlatMap(groups, func(g engineSvc.TaskTimelineGroup, _ int) []model.Task {
+		return g.Members
+	})
+	allRecords := h.toTaskRecords(ctx, allMembers)
+	recordsMap := make(map[int]TaskRecord, len(allMembers))
 	for idx, record := range allRecords {
-		recordsByTaskID[allMembers[idx].TaskID] = record
+		recordsMap[allMembers[idx].TaskID] = record
 	}
 
-	events := make([]TaskTimelineEvent, 0, len(groups))
-	for _, group := range groups {
-		members := make([]TaskRecord, 0, len(group.Members))
-		for _, member := range group.Members {
-			members = append(members, recordsByTaskID[member.TaskID])
-		}
-		id := group.NodeID + ":" + group.BatchCode
-		events = append(events, TaskTimelineEvent{
-			ID:         id,
+	return lo.Map(groups, func(group engineSvc.TaskTimelineGroup, _ int) TaskTimelineEvent {
+		members := lo.Map(group.Members, func(m model.Task, _ int) TaskRecord {
+			return recordsMap[m.TaskID]
+		})
+		return TaskTimelineEvent{
+			ID:         group.NodeID + ":" + group.BatchCode,
 			NodeID:     group.NodeID,
 			NodeName:   group.NodeName,
 			BatchCode:  group.BatchCode,
@@ -528,10 +448,8 @@ func (h *Handler) TaskTimeline(ctx *ginx.Context, req TaskTimelineReq) (ginx.Res
 				Pending:        group.PendingCount,
 			},
 			Members: members,
-		})
-	}
-
-	return ginx.Result{Data: RetrieveTaskTimeline{Events: events, Total: total}}, nil
+		}
+	})
 }
 
 func (h *Handler) toTaskRecords(ctx context.Context, ts []model.Task) []TaskRecord {
@@ -617,64 +535,54 @@ func (h *Handler) toVoTicket(req domain.Ticket) Ticket {
 }
 
 func (h *Handler) History(ctx *ginx.Context, req HistoryReq) (ginx.Result, error) {
-	os, total, err := h.svc.ListHistory(ctx.Context, req.UserId, req.Offset, req.Limit)
-	if err != nil {
-		return systemErrorResult, err
-	}
 	username, err := h.getSessUsername(ctx)
 	if err != nil {
 		return systemErrorResult, err
 	}
-	ticketIDs := lo.Map(os, func(ticket domain.Ticket, _ int) int64 { return ticket.Id })
-	ratings, err := h.ratingSvc.ListByTicketIDs(ctx.Context, ticketIDs)
+
+	views, total, err := h.querySvc.ListHistory(ctx.Context, username, req.UserId, req.Offset, req.Limit)
 	if err != nil {
 		return systemErrorResult, err
-	}
-
-	uns := lo.Uniq(lo.Map(os, func(ticket domain.Ticket, _ int) string {
-		return ticket.CreateBy
-	}))
-
-	uMap, err := h.getUserMap(ctx.Context, uns)
-	if err != nil {
-		uMap = make(map[string]string)
 	}
 
 	return ginx.Result{
 		Data: RetrieveTickets{
 			Total: total,
-			Tasks: lo.Map(os, func(src domain.Ticket, _ int) Ticket {
-				starter, ok := uMap[src.CreateBy]
-				if !ok {
-					starter = src.CreateBy
-				}
-
-				result := Ticket{
-					Id:                src.Id,
-					TemplateId:        src.TemplateId,
-					Starter:           starter,
-					Status:            src.Status.ToUint8(),
-					Provide:           src.Provide.ToUint8(),
-					ProcessInstanceId: src.Process.InstanceId,
-					WorkflowId:        src.WorkflowId,
-					Ctime:             time.Unix(src.Ctime/1000, 0).Format("2006-01-02 15:04:05"),
-					Wtime:             time.Unix(src.Wtime/1000, 0).Format("2006-01-02 15:04:05"),
-					Data:              src.Data,
-					RevokeReason:      src.RevokeReason,
-				}
-				rating, rated := ratings[src.Id]
-				result.CanRate = canRateTicket(src, username, rated)
-				if rated {
-					result.Rating = toRatingVO(rating)
-				}
-				return result
-			}),
+			Tasks: h.toVoTicketViews(views),
 		},
+		Msg: "查看历史工单列表成功",
 	}, nil
 }
 
-func canRateTicket(ticket domain.Ticket, actor string, alreadyRated bool) bool {
-	return ticket.Status == domain.END && ticket.CreateBy == actor && !alreadyRated
+func (h *Handler) toVoTicketViews(views []domain.TicketTaskView) []Ticket {
+	return lo.Map(views, func(v domain.TicketTaskView, _ int) Ticket {
+		return h.toVoTicketView(v)
+	})
+}
+
+func (h *Handler) toVoTicketView(view domain.TicketTaskView) Ticket {
+	vo := h.toVoTicket(view.Ticket)
+	if view.TaskID > 0 {
+		vo.TaskId = view.TaskID
+	}
+	if view.CurrentStep != "" {
+		vo.CurrentStep = view.CurrentStep
+	}
+	if view.ApprovedBy != "" {
+		vo.ApprovedBy = view.ApprovedBy
+	}
+	if view.ProcInstCreateTime != nil {
+		if t, ok := view.ProcInstCreateTime.(*time.Time); ok && t != nil {
+			vo.ProcInstCreateTime = t.Format("2006-01-02 15:04:05")
+		} else {
+			vo.ProcInstCreateTime = view.ProcInstCreateTime
+		}
+	}
+	vo.CanRate = view.CanRate
+	if view.Rating != nil {
+		vo.Rating = toRatingVO(*view.Rating)
+	}
+	return vo
 }
 
 func toRatingVO(rating domain.TicketRating) *Rating {
@@ -684,76 +592,8 @@ func toRatingVO(rating domain.TicketRating) *Rating {
 	}
 }
 
-func (h *Handler) toVoEngineTicket(ctx context.Context, instances []domain.Instance) ([]Ticket, error) {
-	if len(instances) == 0 {
-		return nil, nil
-	}
-
-	procInstIds := lo.Uniq(lo.Map(instances, func(inst domain.Instance, _ int) int {
-		return inst.ProcInstID
-	}))
-
-	us, err := h.getUsers(ctx, instances)
-	if err != nil {
-		us = make(map[string]string)
-	}
-
-	os, err := h.svc.ListByProcessInstanceIDs(ctx, procInstIds)
-	if err != nil {
-		return nil, err
-	}
-	m := lo.KeyBy(os, func(element domain.Ticket) int {
-		return element.Process.InstanceId
-	})
-
-	return lo.Map(instances, func(src domain.Instance, _ int) Ticket {
-		val := m[src.ProcInstID]
-		starter, ok := us[src.Starter]
-		if !ok {
-			starter = src.Starter
-		}
-		approved, ok := us[src.ApprovedBy]
-		if !ok {
-			approved = src.ApprovedBy
-		}
-
-		ctime := ""
-		if val.Ctime > 0 {
-			ctime = time.Unix(val.Ctime/1000, 0).Format("2006-01-02 15:04:05")
-		}
-
-		var createTimeStr string
-		if src.CreateTime != nil {
-			createTimeStr = src.CreateTime.Format("2006-01-02 15:04:05")
-		}
-
-		return Ticket{
-			Id:                   val.Id,
-			TaskId:               src.TaskID,
-			ProcessInstanceId:    src.ProcInstID,
-			Starter:              starter,
-			CurrentStep:          src.CurrentNodeName,
-			ApprovedBy:           approved,
-			ProcInstCreateTime:   createTimeStr,
-			Provide:              val.Provide.ToUint8(),
-			Status:               val.Status.ToUint8(),
-			TemplateId:           val.TemplateId,
-			WorkflowId:           val.WorkflowId,
-			Ctime:                ctime,
-			ProcessStartError:    val.ProcessStartError,
-			ProcessStartAttempts: val.ProcessStartAttempts,
-		}
-	}), nil
-}
-
-func (h *Handler) getUsers(ctx context.Context, instances []domain.Instance) (map[string]string, error) {
-	users := lo.FlatMap(instances, func(inst domain.Instance, _ int) []string {
-		return []string{inst.ApprovedBy, inst.Starter}
-	})
-	nonEmptyUsers := lo.Filter(users, func(u string, _ int) bool {
-		return u != ""
-	})
-	return h.getUserMap(ctx, lo.Uniq(nonEmptyUsers))
+func canRateTicket(ticket domain.Ticket, actor string, alreadyRated bool) bool {
+	return ticket.CanBeRatedBy(actor, alreadyRated)
 }
 
 func (h *Handler) getSessUser(ctx *ginx.Context) (*userv1.User, error) {
@@ -779,35 +619,6 @@ func (h *Handler) getSessUsername(ctx *ginx.Context) (string, error) {
 		return "", err
 	}
 	return user.Username, nil
-}
-
-func (h *Handler) verifyUser(ctx *ginx.Context, taskId int) error {
-	user, err := h.getSessUser(ctx)
-	if err != nil {
-		return err
-	}
-
-	// 1. 检索流程任务详情
-	tInfo, err := h.engineSvc.TaskInfo(ctx.Context, taskId)
-	if err != nil {
-		return err
-	}
-
-	// 2. 权限判定：如果不是管理员用户，则必须校验当前任务指派处理人与当前操作用户一致
-	if !user.IsAdmin && tInfo.UserID != user.Username {
-		return fmt.Errorf("无法操作，当前审批任务指派处理人与您账号不一致")
-	}
-
-	// 记录 admin 操作别人任务的审计日志
-	if user.IsAdmin && tInfo.UserID != user.Username && h.logger != nil {
-		h.logger.Info("管理员代办他人任务",
-			elog.String("admin", user.Username),
-			elog.Int("taskId", taskId),
-			elog.String("originalAssignee", tInfo.UserID),
-		)
-	}
-
-	return nil
 }
 
 func (h *Handler) getUserMap(ctx context.Context, uns []string) (map[string]string, error) {
