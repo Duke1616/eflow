@@ -21,8 +21,7 @@ type Service interface {
 	ListTodoTasks(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, int64, error)
 	// ListAllTodoTasks 分页查询经过 PBAC AccessScope 约束的待办任务，并返回使用相同条件计算的总数。
 	ListAllTodoTasks(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, int64, error)
-	// ListByStartUser 获取我发起的流程实例历史列表，支持分页
-	ListByStartUser(ctx context.Context, userId, processName string, offset, limit int) ([]domain.Instance, int64, error)
+
 	// TaskRecord 获取工单流转的任务节点变更和审批历史全量记录
 	TaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, int64, error)
 	// AccessibleTaskRecord 获取经过工单 AccessScope 约束的流转记录。
@@ -377,30 +376,6 @@ func (s *engineService) listTodoTasks(
 	return ts, total, nil
 }
 
-func (s *engineService) ListByStartUser(ctx context.Context, userId, processName string, offset,
-	limit int) ([]domain.Instance, int64, error) {
-
-	var (
-		eg    errgroup.Group
-		ts    []domain.Instance
-		total int64
-	)
-	eg.Go(func() error {
-		var err error
-		ts, err = s.repo.ListStartUser(ctx, userId, processName, offset, limit)
-		return err
-	})
-
-	eg.Go(func() error {
-		var err error
-		total, err = s.repo.CountStartUser(ctx, userId, processName)
-		return err
-	})
-	if err := eg.Wait(); err != nil {
-		return ts, total, err
-	}
-	return ts, total, nil
-}
 
 func (s *engineService) GetTraversedEdges(ctx context.Context, record []model.Task, processInstId, processId int, status uint8) (map[string][]string, error) {
 	if len(record) == 0 {

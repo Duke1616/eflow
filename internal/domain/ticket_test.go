@@ -304,3 +304,67 @@ func TestValidateTaskOperable(t *testing.T) {
 		})
 	}
 }
+
+func TestTicket_MergeData(t *testing.T) {
+	ticket := Ticket{
+		Id:   1,
+		Data: TicketData{"existing": "value1"},
+	}
+
+	ticket.MergeData(map[string]any{
+		"new_key":  "value2",
+		"existing": "updated_value",
+	})
+
+	assert.Equal(t, "updated_value", ticket.Data["existing"])
+	assert.Equal(t, "value2", ticket.Data["new_key"])
+}
+
+func TestTaskTimelineEvent_RichDomain(t *testing.T) {
+	members := []TaskRecord{
+		{
+			ApprovedBy: "alice",
+			Status:     1, // 通过
+			IsFinished: 1,
+		},
+		{
+			ApprovedBy: "bob",
+			Status:     2, // 驳回
+			IsFinished: 1,
+		},
+		{
+			ApprovedBy: "charlie",
+			Status:     0, // 待审批
+			IsFinished: 0,
+		},
+	}
+
+	event := NewTaskTimelineEvent(
+		"node_approval",
+		"主管审批",
+		"batch_001",
+		1,
+		"2026-05-01 10:00:00",
+		TaskTimelineSummary{Total: 3, Passed: 1, Rejected: 1, Pending: 1},
+		members,
+	)
+
+	// 断言内聚计算的 ID
+	assert.Equal(t, "node_approval:batch_001", event.ID)
+
+	// 断言内聚计算的审批参与人（charlie 还在待处理，不属于参与过裁决的 Actors）
+	assert.ElementsMatch(t, []string{"alice", "bob"}, event.Actors)
+
+	// 断言 TaskRecord 的充血方法
+	assert.True(t, members[0].IsAudited())
+	assert.True(t, members[0].IsApproved())
+	assert.False(t, members[0].IsRejected())
+	assert.True(t, members[0].IsFinishedTask())
+
+	assert.True(t, members[1].IsAudited())
+	assert.False(t, members[1].IsApproved())
+	assert.True(t, members[1].IsRejected())
+
+	assert.False(t, members[2].IsAudited())
+	assert.False(t, members[2].IsFinishedTask())
+}

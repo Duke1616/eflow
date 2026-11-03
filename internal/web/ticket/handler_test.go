@@ -274,3 +274,86 @@ func TestHandler_StartUser_CompleteData(t *testing.T) {
 	// 工单 3 已完结，步骤展示为“已结束”
 	assert.Equal(t, "已结束", data.Tasks[2].CurrentStep)
 }
+
+func TestHandler_TaskRecord(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockQuery := ticketmocks.NewMockQueryService(ctrl)
+	mockQuery.EXPECT().TaskRecord(gomock.Any(), 100, 0, 10).
+		Return([]domain.TaskRecord{
+			{
+				Nodename:   "直接主管审批",
+				ApprovedBy: "张主管",
+				Status:     1,
+				Comment:    "同意",
+				IsFinished: 1,
+				FormValues: []domain.FormValue{
+					{Name: "请假天数", Key: "days", Type: "number", Value: 3},
+				},
+			},
+		}, int64(1), nil)
+
+	h := &Handler{
+		logger:   elog.DefaultLogger,
+		querySvc: mockQuery,
+	}
+
+	ctx := newTestContext(1)
+	res, err := h.TaskRecord(ctx, RecordTaskReq{ProcessInstId: 100, Offset: 0, Limit: 10})
+	require.NoError(t, err)
+
+	data, ok := res.Data.(RetrieveTaskRecords)
+	require.True(t, ok)
+	require.Equal(t, int64(1), data.Total)
+	require.Len(t, data.TaskRecords, 1)
+	assert.Equal(t, "直接主管审批", data.TaskRecords[0].Nodename)
+	assert.Equal(t, "张主管", data.TaskRecords[0].ApprovedBy)
+	assert.Equal(t, "请假天数", data.TaskRecords[0].FormValues[0].Name)
+}
+
+func TestHandler_TaskTimeline(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockQuery := ticketmocks.NewMockQueryService(ctrl)
+	mockQuery.EXPECT().TaskTimeline(gomock.Any(), 200, 0, 10).
+		Return([]domain.TaskTimelineEvent{
+			{
+				ID:         "node_1:batch_1",
+				NodeID:     "node_1",
+				NodeName:   "HR审批",
+				OccurredAt: "2026-05-01 10:00:00",
+				Actors:     []string{"王HR"},
+				Summary: domain.TaskTimelineSummary{
+					Total:  1,
+					Passed: 1,
+				},
+				Members: []domain.TaskRecord{
+					{
+						Nodename:   "HR审批",
+						ApprovedBy: "王HR",
+						Status:     1,
+						Comment:    "审核通过",
+					},
+				},
+			},
+		}, int64(1), nil)
+
+	h := &Handler{
+		logger:   elog.DefaultLogger,
+		querySvc: mockQuery,
+	}
+
+	ctx := newTestContext(1)
+	res, err := h.TaskTimeline(ctx, TaskTimelineReq{ProcessInstId: 200, Offset: 0, Limit: 10})
+	require.NoError(t, err)
+
+	data, ok := res.Data.(RetrieveTaskTimeline)
+	require.True(t, ok)
+	require.Equal(t, int64(1), data.Total)
+	require.Len(t, data.Events, 1)
+	assert.Equal(t, "node_1", data.Events[0].NodeID)
+	assert.Equal(t, 1, data.Events[0].Summary.Passed)
+	assert.Equal(t, "王HR", data.Events[0].Members[0].ApprovedBy)
+}

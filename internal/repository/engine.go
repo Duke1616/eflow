@@ -20,12 +20,9 @@ type IEngineRepository interface {
 	TodoAllList(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, error)
 	// CountAllTodo 使用与 TodoAllList 相同的 PBAC 和查询条件统计待办任务总数。
 	CountAllTodo(ctx context.Context, userId, processName string) (int64, error)
-	// CountStartUser 统计用户发起的流程实例总数
-	CountStartUser(ctx context.Context, userId, processName string) (int64, error)
 	// GetTasksByCurrentNodeId 根据当前进行节点获取其对应未完成的任务
 	GetTasksByCurrentNodeId(ctx context.Context, processInstId int, currentNodeId string) ([]model.Task, error)
-	// ListStartUser 获取由指定用户发起的流程实例列表
-	ListStartUser(ctx context.Context, userId, processName string, offset, limit int) ([]domain.Instance, error)
+
 	// ListTaskRecord 获取指定实例的全局审批变更流转任务链
 	ListTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, error)
 	// CountTaskRecord 统计指定流程实例的流转任务总条数
@@ -180,16 +177,6 @@ func (repo *engineRepository) TodoList(ctx context.Context, userId, processName 
 	}), nil
 }
 
-func (repo *engineRepository) ListStartUser(ctx context.Context, userId, processName string, offset,
-	limit int) ([]domain.Instance, error) {
-	ts, err := repo.engineDao.ListStartUser(ctx, userId, processName, offset, limit)
-	if err != nil {
-		return nil, err
-	}
-	return lo.Map(ts, func(src dao.Instance, _ int) domain.Instance {
-		return repo.toDomainByInstance(src)
-	}), nil
-}
 
 func (repo *engineRepository) CountTodo(ctx context.Context, userId, processName string) (int64, error) {
 	return repo.engineDao.CountTodo(ctx, userId, processName)
@@ -209,9 +196,6 @@ func (repo *engineRepository) CountAllTodo(ctx context.Context, userId, processN
 	return repo.engineDao.CountAllTodo(ctx, userId, processName)
 }
 
-func (repo *engineRepository) CountStartUser(ctx context.Context, userId, processName string) (int64, error) {
-	return repo.engineDao.CountStartUser(ctx, userId, processName)
-}
 
 func (repo *engineRepository) ListTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, error) {
 	return repo.engineDao.ListTaskRecord(ctx, processInstId, offset, limit)

@@ -3,6 +3,7 @@ package ticket
 import (
 	"context"
 
+	easyModel "github.com/Bunny3th/easy-workflow/workflow/model"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
@@ -25,6 +26,12 @@ type QueryService interface {
 	ListAllTodo(ctx context.Context, userID, processName string, sortByAsc bool, offset, limit int64) ([]domain.TicketTaskView, int64, error)
 	// ListHistory 分页查询历史已办结/已撤销工单（聚合评价与提单人信息）
 	ListHistory(ctx context.Context, currentUsername, targetUserID string, offset, limit int64) ([]domain.TicketTaskView, int64, error)
+	// TaskRecord 分页查询经过工单权限约束的任务流转执行记录，并聚合处理人真名与步骤表单
+	TaskRecord(ctx context.Context, processInstID, offset, limit int) ([]domain.TaskRecord, int64, error)
+	// TaskTimeline 以节点执行批次为单位聚合可见任务时间线事件，聚合审批汇总与参与人真名
+	TaskTimeline(ctx context.Context, processInstID, offset, limit int) ([]domain.TaskTimelineEvent, int64, error)
+	// Upstream 查询指定任务节点的上游处理节点集合
+	Upstream(ctx context.Context, taskID int) ([]easyModel.Node, error)
 }
 
 type queryService struct {
@@ -265,6 +272,100 @@ func (q *queryService) getUserMap(ctx context.Context, usernames []string) map[s
 	}
 	return lo.Associate(resp.Users, func(u *userv1.User) (string, string) {
 		return u.Username, u.DisplayName
+	})
+}
+
+// TaskRecord 查询指定流程实例的流转执行记录，并聚合处理人真名与步骤表单
+func (q *queryService) TaskRecord(ctx context.Context, processInstID, offset, limit int) ([]domain.TaskRecord, int64, error) {
+	ts, total, err := q.engineSvc.AccessibleTaskRecord(ctx, processInstID, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	records := q.toTaskRecords(ctx, ts)
+	return records, total, nil
+}
+
+// TaskTimeline 以节点执行批次为单位返回流转历史时间线，聚合审批汇总与参与人真名
+func (q *queryService) TaskTimeline(ctx context.Context, processInstID, offset, limit int) ([]domain.TaskTimelineEvent, int64, error) {
+	groups, total, err := q.engineSvc.AccessibleTaskTimeline(ctx, processInstID, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	events := q.assembleTimelineEvents(ctx, groups)
+	return events, total, nil
+}
+
+// Upstream 查询指定任务节点的上游处理节点集合
+func (q *queryService) Upstream(ctx context.Context, taskID int) ([]easyModel.Node, error) {
+	return q.engineSvc.Upstream(ctx, taskID)
+}
+
+func (q *queryService) assembleTimelineEvents(ctx context.Context, groups []engineSvc.TaskTimelineGroup) []domain.TaskTimelineEvent {
+	allMembers := lo.FlatMap(groups, func(g engineSvc.TaskTimelineGroup, _ int) []easyModel.Task {
+		return g.Members
+	})
+	allRecords := q.toTaskRecords(ctx, allMembers)
+	recordsMap := make(map[int]domain.TaskRecord, len(allMembers))
+	for idx, record := range allRecords {
+		recordsMap[allMembers[idx].TaskID] = record
+	}
+
+	return lo.Map(groups, func(group engineSvc.TaskTimelineGroup, _ int) domain.TaskTimelineEvent {
+		members := lo.Map(group.Members, func(m easyModel.Task, _ int) domain.TaskRecord {
+			return recordsMap[m.TaskID]
+		})
+		return domain.NewTaskTimelineEvent(
+			group.NodeID,
+			group.NodeName,
+			group.BatchCode,
+			group.IsCosigned,
+			group.OccurredAt.String(),
+			domain.TaskTimelineSummary{
+				Total:          group.TaskCount,
+				Passed:         group.PassedCount,
+				Rejected:       group.RejectedCount,
+				SystemPassed:   group.SystemPassedCount,
+				SystemRejected: group.SystemRejectedCount,
+				Skipped:        group.SkippedCount,
+				Linked:         group.LinkedCount,
+				Pending:        group.PendingCount,
+			},
+			members,
+		)
+	})
+}
+
+func (q *queryService) toTaskRecords(ctx context.Context, ts []easyModel.Task) []domain.TaskRecord {
+	uniqueUserIDs := lo.Uniq(lo.Map(ts, func(src easyModel.Task, _ int) string {
+		return src.UserID
+	}))
+
+	uMap := q.getUserMap(ctx, uniqueUserIDs)
+
+	taskIDs := lo.Map(ts, func(src easyModel.Task, _ int) int {
+		return src.TaskID
+	})
+	taskDataMap, err := q.repo.FindTaskFormsBatch(ctx, taskIDs)
+	if err != nil {
+		taskDataMap = make(map[int][]domain.FormValue)
+	}
+
+	return lo.Map(ts, func(src easyModel.Task, _ int) domain.TaskRecord {
+		userName := uMap[src.UserID]
+		if userName == "" {
+			userName = src.UserID
+		}
+
+		return domain.TaskRecord{
+			Nodename:     src.NodeName,
+			ApprovedBy:   userName,
+			IsCosigned:   src.IsCosigned,
+			Status:       src.Status,
+			Comment:      src.Comment,
+			IsFinished:   src.IsFinished,
+			FinishedTime: src.FinishedTime,
+			FormValues:   taskDataMap[src.TaskID],
+		}
 	})
 }
 

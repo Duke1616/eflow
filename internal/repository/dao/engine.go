@@ -28,12 +28,7 @@ type IEngineDAO interface {
 	ListAllTodo(ctx context.Context, userId, processName string, sortByAsc bool, offset, limit int) ([]Instance, error)
 	// CountAllTodo 使用与 ListAllTodo 相同的 PBAC 和查询条件统计待办任务总数。
 	CountAllTodo(ctx context.Context, userId, processName string) (int64, error)
-	// CountStartUser 统计用户发起的流程实例总数
-	CountStartUser(ctx context.Context, userId, processName string) (int64, error)
-	// ListHistory 获取审批历史记录列表
-	ListHistory(ctx context.Context, userId, processName string, offset, limit int)
-	// ListStartUser 获取用户发起的流程实例列表
-	ListStartUser(ctx context.Context, userId, processName string, offset, limit int) ([]Instance, error)
+
 	// GetTasksByCurrentNodeId 根据当前节点 ID 获取未完成的审批任务
 	GetTasksByCurrentNodeId(ctx context.Context, processInstId int, currentNodeId string) ([]model.Task, error)
 	// ListTaskRecord 获取指定流程实例的全部流转任务记录（联合查询 proc_task 与 hist_proc_task）
@@ -50,8 +45,7 @@ type IEngineDAO interface {
 	CountAccessibleTaskTimelineGroups(ctx context.Context, processInstId int) (int64, error)
 	// ListAccessibleTaskTimelineMembers 查询指定时间线分组下的原始任务明细。
 	ListAccessibleTaskTimelineMembers(ctx context.Context, processInstId int, groups []domain.TaskTimelineGroup) ([]model.Task, error)
-	// SearchStartByProcessInstIds 批量检索指定的流程实例列表
-	SearchStartByProcessInstIds(ctx context.Context, processInstIds []int) ([]Instance, error)
+
 	// UpdateIsFinishedByPreNodeId 自动更新当前节点的前置代理流转任务为完成状态
 	UpdateIsFinishedByPreNodeId(ctx context.Context, processInstId int, nodeId string, status int, comment string) error
 	// ForceUpdateIsFinishedByPreNodeId 强制清理指定前置节点下的所有任务（包含已完成的任务）
@@ -555,57 +549,6 @@ func listTodo(db *gorm.DB, sortByAsc bool, offset, limit int) ([]Instance, error
 	return result, err
 }
 
-func (g *gormEngineDAO) SearchStartByProcessInstIds(ctx context.Context, processInstIds []int) ([]Instance, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (g *gormEngineDAO) ListHistory(ctx context.Context, userId, processName string, offset, limit int) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (g *gormEngineDAO) ListStartUser(ctx context.Context, userId, processName string, offset, limit int) ([]Instance, error) {
-	var res []Instance
-	db := g.db.WithContext(ctx).Table("proc_inst as a").Select("a.id, a.proc_id, a.proc_version, " +
-		"a.business_id, a.starter, a.current_node_id, a.create_time, " +
-		"a.status, b.name, c.id as task_id, c.user_id, c.node_name as current_node_name").
-		Joins("JOIN proc_def b ON a.proc_id = b.id").
-		Joins("JOIN proc_task c ON a.id = c.proc_inst_id AND a.current_node_id = c.node_id").
-		Order("a.id").
-		Limit(limit).
-		Offset(offset)
-
-	if userId != "" {
-		db = db.Where("c.starter = ?", userId)
-	}
-	if processName != "" {
-		db = db.Where("name = ?", processName)
-	}
-
-	err := db.Scan(&res).Error
-
-	return res, err
-}
-
-func (g *gormEngineDAO) CountStartUser(ctx context.Context, userId, processName string) (int64, error) {
-	var res int64
-	db := g.db.WithContext(ctx).Model(&model.Instance{}).Table("proc_inst as a").
-		Joins("JOIN proc_def b ON a.proc_id = b.id").
-		Joins("JOIN proc_task c ON a.id = c.proc_inst_id AND a.current_node_id = c.node_id " +
-			"AND a.starter = c.starter").
-		Order("a.id")
-
-	if userId != "" {
-		db = db.Where("c.starter = ?", userId)
-	}
-	if processName != "" {
-		db = db.Where("name = ?", processName)
-	}
-
-	err := db.Count(&res).Error
-	return res, err
-}
 
 func (g *gormEngineDAO) GetInstanceByID(ctx context.Context, processInstId int) (Instance, error) {
 	var res Instance

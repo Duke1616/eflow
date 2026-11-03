@@ -190,6 +190,19 @@ func (t *Ticket) Validate() error {
 	return nil
 }
 
+// MergeData 将审批节点提交的增量数据合并至工单实体动态数据集中，保证表单状态更新的高内聚
+func (t *Ticket) MergeData(patch map[string]any) {
+	if len(patch) == 0 {
+		return
+	}
+	if t.Data == nil {
+		t.Data = make(TicketData)
+	}
+	for k, v := range patch {
+		t.Data[k] = v
+	}
+}
+
 // CanRestartProcess 判断工单是否具备重新启动底层流程引擎的资格。
 // 仅允许未绑定流程实例且状态处于允许重启集（START / START_FAILED）的工单重新触发流程启动。
 func (t *Ticket) CanRestartProcess() bool {

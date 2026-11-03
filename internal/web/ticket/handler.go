@@ -1,20 +1,16 @@
 package ticket
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/Bunny3th/easy-workflow/workflow/model"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/ticketpbac"
-	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	ratingSvc "github.com/Duke1616/eflow/internal/service/rating"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	withdrawalSvc "github.com/Duke1616/eflow/internal/service/withdrawal"
-	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eflow/pkg/contract/permission"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/Duke1616/eiam/pkg/web/capability"
@@ -32,21 +28,17 @@ type Handler struct {
 	svc           ticketSvc.Service
 	querySvc      ticketSvc.QueryService
 	userSvc       userv1.UserServiceClient
-	engineSvc     engineSvc.Service
-	workflowSvc   workflowSvc.Service
 	withdrawalSvc withdrawalSvc.Service
 	ratingSvc     ratingSvc.Service
 	logger        *elog.Component
 }
 
-func NewHandler(svc ticketSvc.Service, querySvc ticketSvc.QueryService, engineSvc engineSvc.Service, userSvc userv1.UserServiceClient,
-	workflowSvc workflowSvc.Service, withdrawalSvc withdrawalSvc.Service, ratingSvc ratingSvc.Service) *Handler {
+func NewHandler(svc ticketSvc.Service, querySvc ticketSvc.QueryService, userSvc userv1.UserServiceClient,
+	withdrawalSvc withdrawalSvc.Service, ratingSvc ratingSvc.Service) *Handler {
 	return &Handler{
 		svc:           svc,
 		querySvc:      querySvc,
 		userSvc:       userSvc,
-		engineSvc:     engineSvc,
-		workflowSvc:   workflowSvc,
 		withdrawalSvc: withdrawalSvc,
 		ratingSvc:     ratingSvc,
 		logger:        elog.DefaultLogger,
@@ -390,15 +382,14 @@ func (h *Handler) Detail(ctx *ginx.Context, req DetailProcessInstIdReq) (ginx.Re
 }
 
 func (h *Handler) TaskRecord(ctx *ginx.Context, req RecordTaskReq) (ginx.Result, error) {
-	ts, total, err := h.engineSvc.AccessibleTaskRecord(ctx.Context, req.ProcessInstId, int(req.Offset), int(req.Limit))
+	ts, total, err := h.querySvc.TaskRecord(ctx.Context, req.ProcessInstId, int(req.Offset), int(req.Limit))
 	if err != nil {
 		return systemErrorResult, err
 	}
-	records := h.toTaskRecords(ctx.Context, ts)
 
 	return ginx.Result{
 		Data: RetrieveTaskRecords{
-			TaskRecords: records,
+			TaskRecords: toVoTaskRecords(ts),
 			Total:       total,
 		},
 	}, nil
@@ -406,85 +397,25 @@ func (h *Handler) TaskRecord(ctx *ginx.Context, req RecordTaskReq) (ginx.Result,
 
 // TaskTimeline 以节点执行批次为单位返回流转历史；成员明细仅作为事件的展开内容
 func (h *Handler) TaskTimeline(ctx *ginx.Context, req TaskTimelineReq) (ginx.Result, error) {
-	groups, total, err := h.engineSvc.AccessibleTaskTimeline(ctx.Context, req.ProcessInstId, int(req.Offset), int(req.Limit))
+	events, total, err := h.querySvc.TaskTimeline(ctx.Context, req.ProcessInstId, int(req.Offset), int(req.Limit))
 	if err != nil {
 		return systemErrorResult, err
 	}
 
-	events := h.assembleTimelineEvents(ctx.Context, groups)
-	return ginx.Result{Data: RetrieveTaskTimeline{Events: events, Total: total}}, nil
+	return ginx.Result{Data: RetrieveTaskTimeline{Events: toVoTimelineEvents(events), Total: total}}, nil
 }
 
-func (h *Handler) assembleTimelineEvents(ctx context.Context, groups []engineSvc.TaskTimelineGroup) []TaskTimelineEvent {
-	allMembers := lo.FlatMap(groups, func(g engineSvc.TaskTimelineGroup, _ int) []model.Task {
-		return g.Members
-	})
-	allRecords := h.toTaskRecords(ctx, allMembers)
-	recordsMap := make(map[int]TaskRecord, len(allMembers))
-	for idx, record := range allRecords {
-		recordsMap[allMembers[idx].TaskID] = record
-	}
-
-	return lo.Map(groups, func(group engineSvc.TaskTimelineGroup, _ int) TaskTimelineEvent {
-		members := lo.Map(group.Members, func(m model.Task, _ int) TaskRecord {
-			return recordsMap[m.TaskID]
-		})
-		return TaskTimelineEvent{
-			ID:         group.NodeID + ":" + group.BatchCode,
-			NodeID:     group.NodeID,
-			NodeName:   group.NodeName,
-			BatchCode:  group.BatchCode,
-			IsCosigned: group.IsCosigned,
-			OccurredAt: group.OccurredAt.String(),
-			Actors:     timelineActors(members),
-			Summary: TaskTimelineSummary{
-				Total:          group.TaskCount,
-				Passed:         group.PassedCount,
-				Rejected:       group.RejectedCount,
-				SystemPassed:   group.SystemPassedCount,
-				SystemRejected: group.SystemRejectedCount,
-				Skipped:        group.SkippedCount,
-				Linked:         group.LinkedCount,
-				Pending:        group.PendingCount,
-			},
-			Members: members,
-		}
-	})
-}
-
-func (h *Handler) toTaskRecords(ctx context.Context, ts []model.Task) []TaskRecord {
-	uniqueUserIDs := lo.Uniq(lo.Map(ts, func(src model.Task, _ int) string {
-		return src.UserID
-	}))
-
-	uMap, err := h.getUserMap(ctx, uniqueUserIDs)
-	if err != nil {
-		uMap = make(map[string]string)
-	}
-
-	taskIds := lo.Map(ts, func(src model.Task, _ int) int {
-		return src.TaskID
-	})
-	taskDataMap, err := h.svc.ListTaskFormsByTaskIDs(ctx, taskIds)
-	if err != nil {
-		taskDataMap = make(map[int][]domain.FormValue)
-	}
-
-	return lo.Map(ts, func(src model.Task, _ int) TaskRecord {
-		userName := uMap[src.UserID]
-		if userName == "" {
-			userName = src.UserID
-		}
-
+func toVoTaskRecords(records []domain.TaskRecord) []TaskRecord {
+	return lo.Map(records, func(src domain.TaskRecord, _ int) TaskRecord {
 		return TaskRecord{
-			Nodename:     src.NodeName,
-			ApprovedBy:   userName,
+			Nodename:     src.Nodename,
+			ApprovedBy:   src.ApprovedBy,
 			IsCosigned:   src.IsCosigned,
 			Status:       src.Status,
 			Comment:      src.Comment,
 			IsFinished:   src.IsFinished,
 			FinishedTime: src.FinishedTime,
-			FormValues: lo.Map(taskDataMap[src.TaskID], func(val domain.FormValue, _ int) FormValue {
+			FormValues: lo.Map(src.FormValues, func(val domain.FormValue, _ int) FormValue {
 				return FormValue{
 					Name:  val.Name,
 					Key:   val.Key,
@@ -496,13 +427,29 @@ func (h *Handler) toTaskRecords(ctx context.Context, ts []model.Task) []TaskReco
 	})
 }
 
-func timelineActors(records []TaskRecord) []string {
-	filtered := lo.Filter(records, func(r TaskRecord, _ int) bool {
-		return r.Status == 1 || r.Status == 2
+func toVoTimelineEvents(events []domain.TaskTimelineEvent) []TaskTimelineEvent {
+	return lo.Map(events, func(group domain.TaskTimelineEvent, _ int) TaskTimelineEvent {
+		return TaskTimelineEvent{
+			ID:         group.ID,
+			NodeID:     group.NodeID,
+			NodeName:   group.NodeName,
+			BatchCode:  group.BatchCode,
+			IsCosigned: group.IsCosigned,
+			OccurredAt: group.OccurredAt,
+			Actors:     group.Actors,
+			Summary: TaskTimelineSummary{
+				Total:          group.Summary.Total,
+				Passed:         group.Summary.Passed,
+				Rejected:       group.Summary.Rejected,
+				SystemPassed:   group.Summary.SystemPassed,
+				SystemRejected: group.Summary.SystemRejected,
+				Skipped:        group.Summary.Skipped,
+				Linked:         group.Summary.Linked,
+				Pending:        group.Summary.Pending,
+			},
+			Members: toVoTaskRecords(group.Members),
+		}
 	})
-	return lo.Uniq(lo.Map(filtered, func(r TaskRecord, _ int) string {
-		return r.ApprovedBy
-	}))
 }
 
 func (h *Handler) toDomain(req CreateTicketReq) domain.Ticket {
@@ -633,22 +580,6 @@ func (h *Handler) getSessUsername(ctx *ginx.Context) (string, error) {
 	return user.Username, nil
 }
 
-func (h *Handler) getUserMap(ctx context.Context, uns []string) (map[string]string, error) {
-	if len(uns) == 0 {
-		return make(map[string]string), nil
-	}
-	resp, err := h.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
-		Usernames: uns,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return lo.Associate(resp.Users, func(element *userv1.User) (string, string) {
-		return element.Username, element.DisplayName
-	}), nil
-}
-
 // Upstream 查询指定任务节点的上游处理节点及历史流转进度
 func (h *Handler) Upstream(ctx *ginx.Context) (ginx.Result, error) {
 	taskID, err := ctx.Param("task_id").AsInt()
@@ -656,7 +587,7 @@ func (h *Handler) Upstream(ctx *ginx.Context) (ginx.Result, error) {
 		return systemErrorResult, err
 	}
 
-	upstream, err := h.engineSvc.Upstream(ctx.Context, taskID)
+	upstream, err := h.querySvc.Upstream(ctx.Context, taskID)
 	if err != nil {
 		return ginx.Result{}, err
 	}

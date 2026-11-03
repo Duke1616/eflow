@@ -327,22 +327,6 @@ func (mr *MockServiceMockRecorder) ListAllTodoTasks(ctx, userId, processName, so
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAllTodoTasks", reflect.TypeOf((*MockService)(nil).ListAllTodoTasks), ctx, userId, processName, sortByAse, offset, limit)
 }
 
-// ListByStartUser mocks base method.
-func (m *MockService) ListByStartUser(ctx context.Context, userId, processName string, offset, limit int) ([]domain.Instance, int64, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListByStartUser", ctx, userId, processName, offset, limit)
-	ret0, _ := ret[0].([]domain.Instance)
-	ret1, _ := ret[1].(int64)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// ListByStartUser indicates an expected call of ListByStartUser.
-func (mr *MockServiceMockRecorder) ListByStartUser(ctx, userId, processName, offset, limit any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListByStartUser", reflect.TypeOf((*MockService)(nil).ListByStartUser), ctx, userId, processName, offset, limit)
-}
-
 // ListPendingStepsOfMyTask mocks base method.
 func (m *MockService) ListPendingStepsOfMyTask(ctx context.Context, processInstIds []int, starter string) ([]domain.Instance, error) {
 	m.ctrl.T.Helper()
