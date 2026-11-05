@@ -181,7 +181,7 @@ func (s *ticketService) CreateTicket(ctx context.Context, req domain.Ticket) err
 }
 
 func (s *ticketService) GetByProcessInstanceID(ctx context.Context, instanceId int) (domain.Ticket, error) {
-	return s.repo.AccessibleDetailByProcessInstId(ctx, instanceId)
+	return s.repo.DetailByProcessInstId(ctx, instanceId)
 }
 
 func (s *ticketService) GetByID(ctx context.Context, id int64) (domain.Ticket, error) {
@@ -598,47 +598,53 @@ func wechatOaData(data map[string]interface{}) (workwx.OAApprovalDetail, error) 
 }
 
 func convert(data []event.Variables, oaData workwx.OAApprovalDetail) []event.Variables {
-	for _, contents := range oaData.ApplyData.Contents {
-		// 防御：控件 ID 可能不包含 "-" 或者是单个字符串
-		key := contents.ID
-		if idx := strings.Index(contents.ID, "-"); idx >= 0 && idx < len(contents.ID)-1 {
-			key = contents.ID[idx+1:]
-		}
-
-		switch contents.Control {
-		case "Selector":
-			switch contents.Value.Selector.Type {
-			case "single":
-				if len(contents.Value.Selector.Options) == 0 || len(contents.Value.Selector.Options[0].Value) == 0 {
-					continue
-				}
-				data = append(data, event.Variables{
-					Key:   key,
-					Value: contents.Value.Selector.Options[0].Value[0].Text,
-				})
-			case "multi":
-				value := lo.FilterMap(contents.Value.Selector.Options, func(src workwx.OAContentSelectorOption, _ int) (string, bool) {
-					if len(src.Value) == 0 {
-						return "", false
-					}
-					return src.Value[0].Text, true
-				})
-				if len(value) > 0 {
-					data = append(data, event.Variables{
-						Key:   key,
-						Value: value,
-					})
-				}
-			}
-		case "Textarea":
-			data = append(data, event.Variables{
-				Key:   key,
-				Value: contents.Value.Text,
-			})
-		default:
+	for _, c := range oaData.ApplyData.Contents {
+		val, ok := extractOAContentValue(c)
+		if !ok {
 			continue
 		}
+		data = append(data, event.Variables{
+			Key:   cleanControlID(c.ID),
+			Value: val,
+		})
 	}
-
 	return data
+}
+
+func cleanControlID(rawID string) string {
+	if idx := strings.Index(rawID, "-"); idx >= 0 && idx < len(rawID)-1 {
+		return rawID[idx+1:]
+	}
+	return rawID
+}
+
+func extractOAContentValue(c workwx.OAContent) (any, bool) {
+	switch c.Control {
+	case "Textarea":
+		return c.Value.Text, c.Value.Text != ""
+	case "Selector":
+		return extractSelectorValue(c.Value.Selector)
+	default:
+		return nil, false
+	}
+}
+
+func extractSelectorValue(s workwx.OAContentSelector) (any, bool) {
+	switch s.Type {
+	case "single":
+		if len(s.Options) > 0 && len(s.Options[0].Value) > 0 {
+			return s.Options[0].Value[0].Text, true
+		}
+	case "multi":
+		vals := lo.FilterMap(s.Options, func(opt workwx.OAContentSelectorOption, _ int) (string, bool) {
+			if len(opt.Value) == 0 {
+				return "", false
+			}
+			return opt.Value[0].Text, true
+		})
+		if len(vals) > 0 {
+			return vals, true
+		}
+	}
+	return nil, false
 }

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 
+	"github.com/Bunny3th/easy-workflow/workflow/database"
 	easyEngine "github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
@@ -63,17 +65,7 @@ func (a *adapter) Start(ctx context.Context, req engine.ProcessLaunchReq) (engin
 		return engine.ProcessLaunchResult{}, errors.New("easyflow 流程定义 ProcessId 不能为空")
 	}
 
-	var rawVars string
-	if len(req.Variables) > 0 {
-		bs, err := json.Marshal(req.Variables)
-		if err == nil {
-			rawVars = string(bs)
-		}
-	}
-	if rawVars == "" {
-		rawVars = "{}"
-	}
-
+	rawVars := toEasyVariables(ensureEssentialVariables(req.Variables, req.Starter, req.TicketId))
 	instID, err := easyEngine.InstanceStart(req.ProcessId, "业务申请", req.WorkflowName, rawVars)
 	if err != nil {
 		return engine.ProcessLaunchResult{}, fmt.Errorf("easyflow 启动流程实例失败: %w", err)
@@ -91,7 +83,7 @@ func (a *adapter) Pass(ctx context.Context, req engine.TaskPassReq) error {
 		return fmt.Errorf("easyflow 任务 ID 无效: %s", req.TaskId)
 	}
 
-	return easyEngine.TaskPass(taskID, req.Comment, "", false)
+	return easyEngine.TaskPass(taskID, req.Comment, toEasyVariables(req.Variables), false)
 }
 
 func (a *adapter) Reject(ctx context.Context, req engine.TaskRejectReq) error {
@@ -100,7 +92,40 @@ func (a *adapter) Reject(ctx context.Context, req engine.TaskRejectReq) error {
 		return fmt.Errorf("easyflow 任务 ID 无效: %s", req.TaskId)
 	}
 
+	if req.TargetNodeId != "" {
+		return easyEngine.TaskFreeRejectToUpstreamNode(taskID, req.TargetNodeId, req.Comment, "")
+	}
 	return easyEngine.TaskReject(taskID, req.Comment, "")
+}
+
+// toEasyVariables 纯函数：将变量字典单向序列化为 easy-workflow 所需的 []model.Variable 格式
+func toEasyVariables(variables map[string]any) string {
+	if len(variables) == 0 {
+		return "[]"
+	}
+	vars := lo.MapToSlice(variables, func(k string, v any) model.Variable {
+		return model.Variable{Key: k, Value: fmt.Sprint(v)}
+	})
+	bs, err := json.Marshal(vars)
+	if err != nil {
+		return "[]"
+	}
+	return string(bs)
+}
+
+// ensureEssentialVariables 保证 easyflow 所需的核心元变量（$starter 与 ticket_id）始终注入
+func ensureEssentialVariables(vars map[string]any, starter string, ticketID int64) map[string]any {
+	result := maps.Clone(vars)
+	if result == nil {
+		result = make(map[string]any, 2)
+	}
+	if starter != "" && result["starter"] == nil {
+		result["starter"] = starter
+	}
+	if ticketID > 0 && result["ticket_id"] == nil {
+		result["ticket_id"] = strconv.FormatInt(ticketID, 10)
+	}
+	return result
 }
 
 func (a *adapter) GetTaskContext(ctx context.Context, taskID engine.ID) (engine.TaskContext, error) {
@@ -173,23 +198,26 @@ func (a *adapter) GetTimeline(ctx context.Context, instanceID engine.ID) ([]engi
 		}
 
 		for _, m := range taskMembers {
-			endTimeStr := ""
-			if m.FinishedTime != nil {
-				endTimeStr = m.FinishedTime.String()
-			}
 			nodes = append(nodes, engine.TimelineNode{
 				NodeID:    m.NodeID,
 				NodeName:  m.NodeName,
 				Operator:  m.UserID,
 				Status:    strconv.Itoa(int(m.Status)),
 				Comment:   m.Comment,
-				EndTime:   endTimeStr,
+				EndTime:   formatTimeString(m.FinishedTime),
 				StartTime: group.OccurredAt.String(),
 			})
 		}
 	}
 
 	return nodes, nil
+}
+
+func formatTimeString(t *database.LocalTime) string {
+	if t == nil {
+		return ""
+	}
+	return t.String()
 }
 
 func (a *adapter) GetInstanceExecutionView(ctx context.Context, instanceID engine.ID, status uint8) (engine.InstanceExecutionView, error) {

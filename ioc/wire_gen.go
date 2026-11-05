@@ -15,6 +15,7 @@ import (
 	"github.com/Duke1616/eflow/internal/pkg/compiler"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
+	"github.com/Duke1616/eflow/internal/service/channel"
 	"github.com/Duke1616/eflow/internal/service/dispatch"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
@@ -138,7 +139,9 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	iLarkCallbackHandler := ticket3.NewLarkCallbackHandler(engineService, ticketService, service, userService, workflowService, withdrawalService, notificationSender, larkClient)
+	iChannelIdentityResolver := channel.NewChannelIdentityResolver(userServiceClient, iEngineDispatcher)
+	iChannelActionService := channel.NewChannelActionService(iChannelIdentityResolver, ticketService, withdrawalService)
+	iLarkCallbackHandler := ticket3.NewLarkCallbackHandler(iChannelActionService, engineService, ticketService, service, userService, workflowService, withdrawalService, notificationSender, larkClient)
 	eventDispatcher := InitLarkDispatcher(iLarkCallbackHandler)
 	larkCallbackTicketServer := InitLarkServer(eventDispatcher)
 	wechatTicketEventProducer, err := InitWechatTicketEventProducer(mq)

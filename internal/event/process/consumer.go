@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/Duke1616/eflow/internal/event"
 	"github.com/Duke1616/eflow/internal/service/engine"
@@ -83,7 +84,16 @@ func (c *ProcessEventConsumer) handleTask(ctx context.Context, evt event.TicketE
 		return fmt.Errorf("查询流程信息失败: %w", err)
 	}
 
-	// 2. 调用流程启动角色契约（多态调度，隔离底层引擎差异）
+	// 2. 解码事件变量并显式装配关键工单上下文
+	variables := evt.DecodeVariables()
+	if ticket.CreateBy != "" {
+		variables["starter"] = ticket.CreateBy
+	}
+	if evt.Id > 0 {
+		variables["ticket_id"] = strconv.FormatInt(evt.Id, 10)
+	}
+
+	// 3. 调用流程启动角色契约（多态调度，隔离底层引擎差异）
 	launchRes, err := c.launcher.Launch(ctx, engine.ProcessLaunchReq{
 		EngineType:   flow.ResolveEngineType(),
 		TicketId:     evt.Id,
@@ -91,7 +101,8 @@ func (c *ProcessEventConsumer) handleTask(ctx context.Context, evt event.TicketE
 		ProcessId:    flow.ProcessId,
 		WorkflowName: flow.Name,
 		Starter:      ticket.CreateBy,
-	}.WithRawVariables(evt.Variables))
+		Variables:    variables,
+	})
 	if err != nil {
 		if markErr := c.ticketSvc.MarkProcessStartFailed(ctx, evt.Id, err.Error()); markErr != nil {
 			return fmt.Errorf("启动流程引擎失败: %w; 记录启动失败状态失败: %v", err, markErr)

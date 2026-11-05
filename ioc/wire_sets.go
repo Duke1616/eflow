@@ -15,6 +15,7 @@ import (
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
+	channelSvc "github.com/Duke1616/eflow/internal/service/channel"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eflow/internal/service/event/easyflow"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
@@ -130,6 +131,8 @@ var (
 		// 流程状态与核心反射事件处理器/Kafka 消费者/三方回调/审批模板自愈
 		InitLarkClient,
 		ticketEvent.NewUserServiceAdapter,
+		channelSvc.NewChannelIdentityResolver,
+		channelSvc.NewChannelActionService,
 		InitWechatTicketConsumer,
 		ticketEvent.NewLarkCallbackHandler,
 		InitLarkDispatcher,

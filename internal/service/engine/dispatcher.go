@@ -1,6 +1,6 @@
 package engine
 
-//go:generate /Users/luankz/go/bin/mockgen -source=./dispatcher.go -package=enginemocks -destination=./mocks/dispatcher.mock.go IEngineDispatcher
+//go:generate mockgen -source=./dispatcher.go -package=enginemocks -destination=./mocks/dispatcher.mock.go IEngineDispatcher
 
 import (
 	"context"

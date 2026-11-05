@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -55,17 +54,6 @@ type ProcessLaunchReq struct {
 	WorkflowName string            // 流程名称
 	Starter      string            // 流程发起人用户名/工号
 	Variables    map[string]any    // 表单初始变量快照字典（权威唯一结构）
-}
-
-// WithRawVariables 从原始 JSON 字符串链式解析并注入业务变量（优雅的 Fluent 语法糖）
-func (r ProcessLaunchReq) WithRawVariables(rawJSON string) ProcessLaunchReq {
-	if rawJSON != "" && rawJSON != "{}" {
-		var m map[string]any
-		if err := json.Unmarshal([]byte(rawJSON), &m); err == nil {
-			r.Variables = m
-		}
-	}
-	return r
 }
 
 // Validate 编译期与运行时防呆自卫校验（Fail-Fast）

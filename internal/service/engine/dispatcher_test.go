@@ -133,7 +133,8 @@ func TestEngineDispatcher_Launch(t *testing.T) {
 				ProcessId:    777,
 				WorkflowName: "采购申请",
 				Starter:      "jack",
-			}.WithRawVariables(`{"amount":100}`),
+				Variables:    map[string]any{"amount": 100},
+			},
 			mockSetup: func(easyMock *enginemocks.MockIEngineAdapter) {
 				easyMock.EXPECT().Start(gomock.Any(), gomock.Any()).
 					Return(engine.ProcessLaunchResult{InstanceId: 654, InstanceKey: "654"}, nil)

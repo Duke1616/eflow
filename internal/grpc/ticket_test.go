@@ -76,7 +76,7 @@ func TestTicketServer_CreateTicket(t *testing.T) {
 			name: "通过 template_id 成功创建工单",
 			req: &ticketv1.CreateTicketRequest{
 				TemplateId: 10,
-				CreateBy:   "luankz",
+				CreateBy:   "ZhangSan",
 				BizId:      100,
 				Key:        "fetcher:batch:100",
 				Data: func() *structpb.Struct {
@@ -89,7 +89,7 @@ func TestTicketServer_CreateTicket(t *testing.T) {
 					createBizTicketFn: func(ctx context.Context, ticket domain.Ticket) (domain.Ticket, error) {
 						assert.Equal(t, int64(10), ticket.TemplateId)
 						assert.Equal(t, int64(30), ticket.WorkflowId)
-						assert.Equal(t, "luankz", ticket.CreateBy)
+						assert.Equal(t, "ZhangSan", ticket.CreateBy)
 						assert.Equal(t, int64(100), ticket.BizID)
 						assert.Equal(t, "fetcher:batch:100", ticket.Key)
 						assert.Equal(t, "拉取测试", ticket.Data["task_name"])
@@ -111,7 +111,7 @@ func TestTicketServer_CreateTicket(t *testing.T) {
 			name: "模板未绑定工作流流程",
 			req: &ticketv1.CreateTicketRequest{
 				TemplateId: 10,
-				CreateBy:   "luankz",
+				CreateBy:   "ZhangSan",
 			},
 			mockTicket: func() *mockTicketService {
 				return &mockTicketService{}
@@ -129,7 +129,7 @@ func TestTicketServer_CreateTicket(t *testing.T) {
 			name: "模板不存在",
 			req: &ticketv1.CreateTicketRequest{
 				TemplateId: 10,
-				CreateBy:   "luankz",
+				CreateBy:   "ZhangSan",
 			},
 			mockTicket: func() *mockTicketService {
 				return &mockTicketService{}

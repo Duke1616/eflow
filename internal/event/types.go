@@ -1,5 +1,12 @@
 package event
 
+import (
+	"encoding/json"
+	"strings"
+
+	"github.com/samber/lo"
+)
+
 const (
 	ExecuteResultEventName      = "task_execution_complete_events"
 	CreateProcessEventName      = "ticket_process_start_events"
@@ -47,6 +54,31 @@ type TicketEvent struct {
 	WorkflowId int64                  `json:"workflow_id"`
 	Data       map[string]interface{} `json:"data"`
 	Variables  string                 `json:"variables"`
+}
+
+// DecodeVariables 解码工单事件中的业务变量字符串为通用键值字典
+// 兼容切片格式 []Variables 与标准字典格式 map[string]any
+func (e TicketEvent) DecodeVariables() map[string]any {
+	raw := strings.TrimSpace(e.Variables)
+	if raw == "" || raw == "{}" || raw == "[]" {
+		return make(map[string]any)
+	}
+
+	if strings.HasPrefix(raw, "[") {
+		var list []Variables
+		if err := json.Unmarshal([]byte(raw), &list); err == nil {
+			return lo.Associate(list, func(item Variables) (string, any) {
+				return item.Key, item.Value
+			})
+		}
+	}
+
+	var dict map[string]any
+	if err := json.Unmarshal([]byte(raw), &dict); err == nil && dict != nil {
+		return dict
+	}
+
+	return make(map[string]any)
 }
 
 const (

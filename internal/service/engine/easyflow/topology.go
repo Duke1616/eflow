@@ -57,18 +57,9 @@ func calculateTraversedEdges(
 			}
 		}
 
-		if analyzer.isBatchEffectivelyPassed(task) {
-			if analyzer.hasNewerBatchPending(task.NodeID, task.BatchCode) {
-				continue
-			}
-
-			nextNodes := topology.resolveNextNodes(task.NodeID)
-			for _, nextID := range nextNodes {
-				lightUpForward(task.NodeID, nextID, litEdges, nodesMap, topology.effectiveGraph)
-			}
-		} else if task.Status == 5 {
-			nextNodes := topology.resolveNextNodes(task.NodeID)
-			for _, nextID := range nextNodes {
+		shouldLightUp := task.Status == 5 || (analyzer.isBatchEffectivelyPassed(task) && !analyzer.hasNewerBatchPending(task.NodeID, task.BatchCode))
+		if shouldLightUp {
+			for _, nextID := range topology.resolveNextNodes(task.NodeID) {
 				lightUpForward(task.NodeID, nextID, litEdges, nodesMap, topology.effectiveGraph)
 			}
 		}
@@ -189,10 +180,8 @@ func newNodeStatusAnalyzer(record []model.Task, nodesMap map[string]model.Node) 
 }
 
 func (a *nodeStatusAnalyzer) isBatchTainted(nodeID, batchCode string) bool {
-	if batches, ok := a.stats[nodeID]; ok {
-		if stats := batches[batchCode]; stats != nil {
-			return stats.SystemPass > 0
-		}
+	if stats := a.stats[nodeID][batchCode]; stats != nil {
+		return stats.SystemPass > 0
 	}
 	return false
 }
@@ -202,19 +191,10 @@ func (a *nodeStatusAnalyzer) isBatchEffectivelyPassed(task model.Task) bool {
 		return false
 	}
 
-	isCosigned := false
-	if nodeDef, exists := a.nodesMap[task.NodeID]; exists && nodeDef.IsCosigned == 1 {
-		isCosigned = true
-	} else if task.IsCosigned == 1 {
-		isCosigned = true
-	}
-
+	isCosigned := task.IsCosigned == 1 || (a.nodesMap[task.NodeID].IsCosigned == 1)
 	if isCosigned {
-		if batches, ok := a.stats[task.NodeID]; ok {
-			stats := batches[task.BatchCode]
-			if stats != nil && stats.Passed < stats.Total {
-				return false
-			}
+		if stats := a.stats[task.NodeID][task.BatchCode]; stats != nil && stats.Passed < stats.Total {
+			return false
 		}
 	}
 
