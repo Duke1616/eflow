@@ -7,7 +7,8 @@ import (
 	processConsumer "github.com/Duke1616/eflow/internal/event/process"
 	taskConsumer "github.com/Duke1616/eflow/internal/event/task"
 	templateConsumer "github.com/Duke1616/eflow/internal/event/template"
-	ticketConsumer "github.com/Duke1616/eflow/internal/event/ticket"
+	feishuCallback "github.com/Duke1616/eflow/internal/callback/feishu"
+	wechatConsumerPkg "github.com/Duke1616/eflow/internal/event/wechat"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	serviceTask "github.com/Duke1616/eflow/internal/service/task"
@@ -24,8 +25,8 @@ func InitTasks(
 	engineSvc engine.Service,
 	executeResultConsumer *taskConsumer.ExecuteResultConsumer,
 	processConsumer *processConsumer.ProcessEventConsumer,
-	wechatConsumer *ticketConsumer.WechatTicketConsumer,
-	larkWsServer *ticketConsumer.LarkCallbackTicketServer,
+	wechatConsumer *wechatConsumerPkg.WechatTicketConsumer,
+	larkWsServer *feishuCallback.LarkCallbackServer,
 	wechatCallbackConsumer *templateConsumer.WechatApprovalCallbackConsumer,
 	templateClient templatev1.TemplateServiceClient,
 ) []Task {

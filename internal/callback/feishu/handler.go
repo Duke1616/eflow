@@ -1,4 +1,4 @@
-package ticket
+package feishu
 
 import (
 	"bytes"
@@ -11,6 +11,8 @@ import (
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
+	"github.com/Duke1616/eflow/internal/callback"
+	"github.com/Duke1616/eflow/internal/client/eiam"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
@@ -23,7 +25,7 @@ import (
 	withdrawalSvc "github.com/Duke1616/eflow/internal/service/withdrawal"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
-	"github.com/Duke1616/enotify/notify/feishu"
+	enotifyfeishu "github.com/Duke1616/enotify/notify/feishu"
 	"github.com/chromedp/chromedp"
 	"github.com/gotomicro/ego/core/elog"
 	lark "github.com/larksuite/oapi-sdk-go/v3"
@@ -31,25 +33,11 @@ import (
 	larkcallback "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	"github.com/samber/lo"
-	"github.com/spf13/viper"
 )
-
-type callback struct {
-	Debug       bool   `mapstructure:"debug"`
-	FrontendUrl string `mapstructure:"frontend_url"`
-}
-
-func getLarkCallbackConfig() callback {
-	var cfg callback
-	if err := viper.UnmarshalKey("lark.callback", &cfg); err != nil {
-		panic(err)
-	}
-	return cfg
-}
 
 // IFeishuCardCallbackHandler 飞书卡片专属回调处理器契约（特化自跨渠道泛型接口 IChannelCallbackHandler）
 type IFeishuCardCallbackHandler interface {
-	domain.IChannelCallbackHandler[*larkcallback.CardActionTriggerEvent, *larkcallback.CardActionTriggerResponse]
+	callback.IChannelCallbackHandler[*larkcallback.CardActionTriggerEvent, *larkcallback.CardActionTriggerResponse]
 	// Handle 本地驱动并处理跨渠道标准审批交互动作
 	Handle(ctx context.Context, evt domain.ChannelActionEvent) error
 	// OnCardAction 兼容飞书原生 SDK 长连接/Webhook 事件分发签名
@@ -61,12 +49,12 @@ type ILarkCallbackHandler = IFeishuCardCallbackHandler
 
 type larkCallbackHandler struct {
 	logger           *elog.Component
-	cfg              callback
+	cfg              callbackConfig
 	channelActionSvc channelSvc.IChannelActionService
 	engineSvc        engineSvc.Service
 	svc              ticketSvc.Service
 	templateSvc      templateSvc.Service
-	userSvc          UserService
+	userSvc          eiam.IUserClient
 	workflowSvc      workflowSvc.Service
 	withdrawalSvc    withdrawalSvc.Service
 	sender           sender.NotificationSender
@@ -79,7 +67,7 @@ func NewLarkCallbackHandler(
 	engineSvc engineSvc.Service,
 	svc ticketSvc.Service,
 	templateSvc templateSvc.Service,
-	userSvc UserService,
+	userSvc eiam.IUserClient,
 	workflowSvc workflowSvc.Service,
 	withdrawalSvc withdrawalSvc.Service,
 	sender sender.NotificationSender,
@@ -172,7 +160,7 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt domain.ChannelActi
 		// 向操作人推送私信错误提示，告知真实拦截原因，同时保留卡片可再次操作
 		_, _ = h.sender.Send(ctx, notification.Notification{
 			Receiver:     evt.ChannelUserID,
-			ReceiverType: feishu.ReceiveIDTypeUserID,
+			ReceiverType: enotifyfeishu.ReceiveIDTypeUserID,
 			Channel:      notification.ChannelLarkText,
 			Template: notification.Template{
 				Text: fmt.Sprintf("【工单操作提醒】您的操作未生效: %s", result.Remark),
@@ -356,7 +344,7 @@ func (h *larkCallbackHandler) sendImage(ctx context.Context, imageKey *string, a
 
 	if _, err = h.sender.Send(ctx, notification.Notification{
 		Receiver:     userId,
-		ReceiverType: feishu.ReceiveIDTypeUserID,
+		ReceiverType: enotifyfeishu.ReceiveIDTypeUserID,
 		Channel:      notification.ChannelLarkCard,
 		Template: notification.Template{
 			Name:     domain.NotifyTypeProgressImageResult,
@@ -432,7 +420,7 @@ func (h *larkCallbackHandler) withdraw(ctx context.Context, evt domain.ChannelAc
 	// 发送消息通知
 	if _, err = h.sender.Send(ctx, notification.Notification{
 		Receiver:     evt.ChannelUserID,
-		ReceiverType: feishu.ReceiveIDTypeUserID,
+		ReceiverType: enotifyfeishu.ReceiveIDTypeUserID,
 		MessageID:    evt.MessageID,
 		Channel:      notification.ChannelLarkCard,
 		Template: notification.Template{

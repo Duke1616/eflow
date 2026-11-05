@@ -12,6 +12,7 @@ const (
 	CreateProcessEventName      = "ticket_process_start_events"
 	TicketStatusModifyEventName = "ticket_status_changed_events"
 	OrderStatusModifyEventName  = TicketStatusModifyEventName // 保持向后兼容别名
+	WechatTicketEventName       = "wechat_ticket_create_events"
 )
 
 type Status uint8

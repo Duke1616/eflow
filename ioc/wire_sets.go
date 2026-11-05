@@ -5,11 +5,11 @@ import (
 	"sync"
 
 	easyEngine "github.com/Bunny3th/easy-workflow/workflow/engine"
+	feishuCallback "github.com/Duke1616/eflow/internal/callback/feishu"
 	"github.com/Duke1616/eflow/internal/client/ealert"
 	"github.com/Duke1616/eflow/internal/client/eiam"
 	"github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/event"
-	ticketEvent "github.com/Duke1616/eflow/internal/event/ticket"
 	"github.com/Duke1616/eflow/internal/pkg/compiler"
 	"github.com/Duke1616/eflow/internal/grpc"
 	"github.com/Duke1616/eflow/internal/repository"
@@ -130,11 +130,11 @@ var (
 
 		// 流程状态与核心反射事件处理器/Kafka 消费者/三方回调/审批模板自愈
 		InitLarkClient,
-		ticketEvent.NewUserServiceAdapter,
+		eiam.NewUserClient,
 		channelSvc.NewChannelIdentityResolver,
 		channelSvc.NewChannelActionService,
 		InitWechatTicketConsumer,
-		ticketEvent.NewLarkCallbackHandler,
+		feishuCallback.NewLarkCallbackHandler,
 		InitLarkDispatcher,
 		InitLarkServer,
 		InitWechatTicketEventProducer,

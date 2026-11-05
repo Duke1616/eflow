@@ -1,7 +1,5 @@
 package domain
 
-import "context"
-
 // ChannelType 标识工单外部通知与交互渠道来源类型
 type ChannelType string
 
@@ -68,13 +66,3 @@ type ChannelActionResult struct {
 	Error error `json:"-"`
 }
 
-// IChannelCallbackHandler 跨渠道通用的第三方交互事件回调处理器泛型接口
-// 抹平不同平台专有 Payload 差异，任意渠道通过特化 Req 与 Resp 即可接入系统
-// Req: 第三方平台专有的原始请求载荷（如飞书 *CardActionTriggerEvent，企微 *ApprovalEvent 等）
-// Resp: 第三方平台期望同步返回的响应结果（如飞书 *CardActionTriggerResponse）
-type IChannelCallbackHandler[Req any, Resp any] interface {
-	// Channel 获取当前处理器所属的渠道类型 (feishu / wechat / dingtalk 等)
-	Channel() ChannelType
-	// OnAction 响应第三方交互回调，完成协议解包、领域转换并驱动核心审批业务
-	OnAction(ctx context.Context, req Req) (Resp, error)
-}

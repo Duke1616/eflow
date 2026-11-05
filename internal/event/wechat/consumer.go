@@ -1,4 +1,4 @@
-package ticket
+package wechat
 
 import (
 	"context"
@@ -15,6 +15,11 @@ import (
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/xen0n/go-workwx"
 )
+
+// UserService 用户查询依赖最小接口
+type UserService interface {
+	FindByWechatUser(ctx context.Context, wechatUserId string) (*userv1.User, error)
+}
 
 // WechatTicketConsumer 企业微信 OA 审批流回调事件消费者
 type WechatTicketConsumer struct {

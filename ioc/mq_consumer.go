@@ -5,7 +5,8 @@ import (
 	"github.com/Duke1616/eflow/internal/event/process"
 	taskEvent "github.com/Duke1616/eflow/internal/event/task"
 	templateEvent "github.com/Duke1616/eflow/internal/event/template"
-	ticketEvent "github.com/Duke1616/eflow/internal/event/ticket"
+	wechatEvent "github.com/Duke1616/eflow/internal/event/wechat"
+	"github.com/Duke1616/eflow/internal/client/eiam"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
@@ -34,11 +35,11 @@ func InitExecuteResultConsumer(q mq.MQ, svc taskSvc.Service) (*taskEvent.Execute
 func InitWechatTicketConsumer(
 	svc ticketSvc.Service,
 	templateSvc templateSvc.Service,
-	userSvc ticketEvent.UserService,
+	userSvc eiam.IUserClient,
 	q mq.MQ,
-) (*ticketEvent.WechatTicketConsumer, error) {
-	consumer := mqx.NewResilientConsumer(q, ticketEvent.WechatTicketEventName, "wechat_ticket_creator")
-	return ticketEvent.NewWechatTicketConsumer(svc, templateSvc, userSvc, consumer), nil
+) (*wechatEvent.WechatTicketConsumer, error) {
+	consumer := mqx.NewResilientConsumer(q, event.WechatTicketEventName, "wechat_ticket_creator")
+	return wechatEvent.NewWechatTicketConsumer(svc, templateSvc, userSvc, consumer), nil
 }
 
 func InitWechatApprovalCallbackConsumer(
