@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Duke1616/eflow/internal/event"
+	"github.com/Duke1616/eflow/internal/service/engine"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eflow/pkg/mqx"
@@ -15,17 +15,24 @@ import (
 	"github.com/gotomicro/ego/core/elog"
 )
 
-// ProcessEventConsumer 流程引擎反射事件消费者
+// ProcessEventConsumer 流程引擎启动消息消费者（Consumer-Driven：只依赖 IProcessLauncher 角色契约）
 type ProcessEventConsumer struct {
+	launcher    engine.IProcessLauncher
 	workFlowSvc workflowSvc.Service
 	ticketSvc   ticketSvc.Service
 	consumer    mq.Consumer
 	logger      *elog.Component
 }
 
-// NewProcessEventConsumer 实例化反射事件消费者
-func NewProcessEventConsumer(workFlowSvc workflowSvc.Service, ticketSvc ticketSvc.Service, consumer mq.Consumer) *ProcessEventConsumer {
+// NewProcessEventConsumer 实例化流程启动事件消费者
+func NewProcessEventConsumer(
+	launcher engine.IProcessLauncher,
+	workFlowSvc workflowSvc.Service,
+	ticketSvc ticketSvc.Service,
+	consumer mq.Consumer,
+) *ProcessEventConsumer {
 	return &ProcessEventConsumer{
+		launcher:    launcher,
 		workFlowSvc: workFlowSvc,
 		ticketSvc:   ticketSvc,
 		consumer:    consumer,
@@ -76,7 +83,15 @@ func (c *ProcessEventConsumer) handleTask(ctx context.Context, evt event.TicketE
 		return fmt.Errorf("查询流程信息失败: %w", err)
 	}
 
-	instanceId, err := engine.InstanceStart(flow.ProcessId, "业务申请", flow.Name, evt.Variables)
+	// 2. 调用流程启动角色契约（多态调度，隔离底层引擎差异）
+	launchRes, err := c.launcher.Launch(ctx, engine.ProcessLaunchReq{
+		EngineType:   flow.ResolveEngineType(),
+		TicketId:     evt.Id,
+		WorkflowId:   flow.Id,
+		ProcessId:    flow.ProcessId,
+		WorkflowName: flow.Name,
+		Starter:      ticket.CreateBy,
+	}.WithRawVariables(evt.Variables))
 	if err != nil {
 		if markErr := c.ticketSvc.MarkProcessStartFailed(ctx, evt.Id, err.Error()); markErr != nil {
 			return fmt.Errorf("启动流程引擎失败: %w; 记录启动失败状态失败: %v", err, markErr)
@@ -87,7 +102,7 @@ func (c *ProcessEventConsumer) handleTask(ctx context.Context, evt event.TicketE
 	}
 
 	// 将生成的流程引擎实例 ID 回写反登记到对应工单上，激活流程实例绑定关系
-	if err = c.ticketSvc.BindProcessInstanceID(ctx, evt.Id, instanceId); err != nil {
+	if err = c.ticketSvc.BindProcessInstanceID(ctx, evt.Id, launchRes.InstanceId); err != nil {
 		return fmt.Errorf("绑定工单流程引擎实例ID失败: %w", err)
 	}
 	return nil

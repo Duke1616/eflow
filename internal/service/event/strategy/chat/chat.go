@@ -10,7 +10,7 @@ import (
 	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
 	teamv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/team"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	"github.com/Duke1616/eflow/internal/pkg/notification/sender"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
@@ -43,7 +43,7 @@ func NewNotification(base strategy.Service, sender sender.NotificationSender,
 // chatContext 封装发送所需的所有元数据
 type chatContext struct {
 	*strategy.NotificationData                            // 基础元数据和自动化输出
-	property                   easyflow.ChatGroupProperty // 节点配置属性
+	property                   flowdsl.ChatGroupConfig // 节点配置属性
 	members                    []domain.User              // 运行解析出的成员
 	userInputs                 []domain.FormValue         // 动态加载的用户输入
 }
@@ -144,9 +144,9 @@ func (n *Notification) sendNotifications(ctx context.Context, info strategy.Info
 // resolveRecipients 根据模式分发解析接收者逻辑
 func (n *Notification) resolveRecipients(ctx context.Context, info strategy.Info, data *chatContext) ([]recipient, error) {
 	switch data.property.Mode {
-	case easyflow.ChatGroupUseExisting:
+	case flowdsl.ChatGroupUseExisting:
 		return n.handleExistingGroups(ctx, info, data)
-	case easyflow.ChatGroupCreate:
+	case flowdsl.ChatGroupCreate:
 		return n.handleCreateGroup(ctx, info, data)
 	default:
 		n.Logger().Warn("未知的群组通知模式", elog.Any("mode", data.property.Mode))
@@ -315,14 +315,14 @@ func (n *Notification) createChatGroup(ctx context.Context, chatName string, dat
 // fetchChatData 获取发送消息所需的全量元数据
 func (n *Notification) fetchChatData(ctx context.Context, info strategy.Info) (*chatContext, error) {
 	// 1. 获取节点属性与基础数据
-	nodes, rawProps, err := n.GetNodeProperty(info, info.CurrentNode.NodeID)
+	nodes, node, err := n.GetNode(info, info.CurrentNode.NodeID)
 	if err != nil {
 		return nil, err
 	}
 
-	property, err := easyflow.ToNodeProperty[easyflow.ChatGroupProperty](easyflow.Node{Properties: rawProps})
-	if err != nil {
-		return nil, err
+	var property flowdsl.ChatGroupConfig
+	if chatCfg, ok := node.AsChatGroup(); ok {
+		property = *chatCfg
 	}
 
 	base, err := n.FetchRequiredData(ctx, info, nodes)
@@ -332,7 +332,7 @@ func (n *Notification) fetchChatData(ctx context.Context, info strategy.Info) (*
 
 	// 2. 依据配置拉取扩展信息
 	var inputs []domain.FormValue
-	if slice.Contains(property.OutputMode, easyflow.OutputUserInput) {
+	if slice.Contains(property.OutputMode, flowdsl.OutputUserInput) {
 		inputs, _ = n.FindTaskForms(ctx, info.Ticket.Id)
 	}
 
@@ -425,7 +425,7 @@ func (n *Notification) addMembersToChat(ctx context.Context, chatID string, memb
 }
 
 // resolveMembers 解析规则获取最终用户列表
-func (n *Notification) resolveMembers(ctx context.Context, info strategy.Info, property easyflow.ChatGroupProperty) []domain.User {
+func (n *Notification) resolveMembers(ctx context.Context, info strategy.Info, property flowdsl.ChatGroupConfig) []domain.User {
 	// 1. 如果未配置分配规则，则不解析成员
 	if len(property.Assignees) == 0 {
 		return nil
@@ -443,7 +443,7 @@ func (n *Notification) resolveFields(info strategy.Info, data *chatContext) []no
 	var fields []notification.Field
 
 	// 为了快速检查是否存在，将前端传来的选项列表转化为 map
-	modeSet := make(map[easyflow.OutputMode]bool, len(data.property.OutputMode))
+	modeSet := make(map[flowdsl.OutputMode]bool, len(data.property.OutputMode))
 	for _, mode := range data.property.OutputMode {
 		modeSet[mode] = true
 	}
@@ -451,7 +451,7 @@ func (n *Notification) resolveFields(info strategy.Info, data *chatContext) []no
 	// 强制按固定顺序渲染卡片区块：1. 工单信息 -> 2. 用户提交 -> 3. 执行结果
 
 	// 1. 工单信息（对应 OutputTicketData）
-	if modeSet[easyflow.OutputTicketData] {
+	if modeSet[flowdsl.OutputTicketData] {
 		ruleFields := rule.GetFields(data.Rules, info.Ticket.Provide.ToUint8(), info.Ticket.Data)
 		modeFields := strategy.ConvertRuleFields(ruleFields)
 		if len(modeFields) > 0 {
@@ -461,7 +461,7 @@ func (n *Notification) resolveFields(info strategy.Info, data *chatContext) []no
 	}
 
 	// 2. 用户提交（对应 OutputUserInput）
-	if modeSet[easyflow.OutputUserInput] {
+	if modeSet[flowdsl.OutputUserInput] {
 		if len(data.userInputs) > 0 {
 			fields = append(fields, sectionHeader("✍️ 用户提交"))
 			var inputFields []notification.Field
@@ -477,7 +477,7 @@ func (n *Notification) resolveFields(info strategy.Info, data *chatContext) []no
 	}
 
 	// 3. 执行结果（对应 OutputAutoTask）
-	if modeSet[easyflow.OutputAutoTask] {
+	if modeSet[flowdsl.OutputAutoTask] {
 		modeFields := strategy.BuildAutomationOutputFields(data.AutomationOutput)
 		if len(modeFields) > 0 {
 			fields = append(fields, sectionHeader("⚙️ 执行结果"))

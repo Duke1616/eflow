@@ -5,15 +5,13 @@ import (
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	"github.com/Duke1616/eflow/internal/pkg/notification/sender"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
 	"github.com/Duke1616/eflow/internal/service/event/errs"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
-	"github.com/Duke1616/enotify/notify/feishu"
-	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
+	"github.com/samber/lo"
 )
 
 const (
@@ -37,14 +35,14 @@ func NewNotification(base strategy.Service, sender sender.NotificationSender) *N
 
 func (n *Notification) Send(ctx context.Context, info strategy.Info) (notification.Response, error) {
 	// 1. 获取当前节点信息
-	_, rawProps, err := n.GetNodeProperty(info, info.CurrentNode.NodeID)
+	nodes, node, err := n.GetNode(info, info.CurrentNode.NodeID)
 	if err != nil {
 		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), err.Error()), fmt.Errorf("%w: %v", errs.ErrNodeNotConfigured, err)
 	}
 
-	property, err := easyflow.ToNodeProperty[easyflow.AutomationProperty](easyflow.Node{Properties: rawProps})
-	if err != nil {
-		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), err.Error()), err
+	autoCfg, ok := node.AsAutoTask()
+	if !ok {
+		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), "自动化节点未配置"), errs.ErrNodeNotConfigured
 	}
 
 	// 2. 权限与触发校验
@@ -52,7 +50,7 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 		return notification.NewSuccessResponse(0, "全局通知已关闭"), nil
 	}
 
-	if !property.IsNotify {
+	if !autoCfg.IsNotify {
 		n.Logger().Debug("【自动化节点】未开启消息通知，正常跳过",
 			elog.Int("instID", info.InstID),
 			elog.Int64("ticketID", info.Ticket.Id),
@@ -61,7 +59,7 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 		return notification.NewSuccessResponse(0, "【自动化节点】未开启消息通知，跳过发送"), nil
 	}
 
-	if !containsAutoNotifyMethod(property.NotifyMethod, ProcessNowSend) {
+	if !lo.Contains(autoCfg.NotifyMethod, ProcessNowSend) {
 		n.Logger().Debug("【自动化节点】未开启即时发送通知模式，正常跳过",
 			elog.Int("instID", info.InstID),
 			elog.Int64("ticketID", info.Ticket.Id),
@@ -71,7 +69,6 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 	}
 
 	// 3. 获取元数据与自动化任务结果
-	nodes, _, _ := n.GetNodeProperty(info, info.CurrentNode.NodeID)
 	data, err := n.FetchRequiredData(ctx, info, nodes)
 	if err != nil {
 		return notification.NewErrorResponse(string(errs.ErrorCodeFetchDataFailed), err.Error()), fmt.Errorf("%w: %v", errs.ErrFetchData, err)
@@ -81,10 +78,9 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 	fields := strategy.BuildAutomationOutputFields(data.AutomationOutput)
 
 	return n.sender.Send(ctx, notification.Notification{
-		Channel:      notification.Channel(info.Channel),
-		ReceiverType: feishu.ReceiveIDTypeUserID,
-		WorkFlowID:   info.Workflow.Id,
-		Receiver:     data.StartUser.LarkUserId,
+		Channel:    notification.Channel(info.Channel),
+		Receiver:   data.StartUser.LarkUserId,
+		WorkFlowID: info.Workflow.Id,
 		Template: notification.Template{
 			Name:     domain.NotifyTypeApproval,
 			Title:    rule.GenerateAutoTitle("你提交", data.TName),
@@ -92,8 +88,4 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 			HideForm: true,
 		},
 	})
-}
-
-func containsAutoNotifyMethod(methods []int64, target int64) bool {
-	return slice.Contains(methods, target)
 }

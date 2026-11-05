@@ -80,11 +80,18 @@ func (s *FlowxTestSuite) reject(engine Engine, store *memory.Storage, instID, op
 	}))
 }
 
+// deploy 辅助函数：部署流程定义并断言成功
+func (s *FlowxTestSuite) deploy(engine Engine, def model.ProcessDefinition) model.ProcessDefinition {
+	d, err := engine.Deploy(s.ctx, def)
+	s.Require().NoError(err)
+	return d
+}
+
 // TestApprovalAndBranch 测试或签与条件分流
 func (s *FlowxTestSuite) TestApprovalAndBranch() {
 	s.Run("请假2天_主管或签通过后直达END办结", func() {
 		engine, store := s.newEngine()
-		require.NoError(s.T(), engine.Deploy(s.ctx, buildStandardLeaveProcess()))
+		s.deploy(engine, buildStandardLeaveProcess())
 
 		instID, err := engine.Start(s.ctx, StartReq{
 			Key:       "leave_process",
@@ -109,7 +116,7 @@ func (s *FlowxTestSuite) TestApprovalAndBranch() {
 
 	s.Run("请假5天_主管或签通过后流向总监会签", func() {
 		engine, store := s.newEngine()
-		require.NoError(s.T(), engine.Deploy(s.ctx, buildStandardLeaveProcess()))
+		s.deploy(engine, buildStandardLeaveProcess())
 
 		instID, err := engine.Start(s.ctx, StartReq{
 			Key:       "leave_process",
@@ -137,7 +144,7 @@ func (s *FlowxTestSuite) TestApprovalAndBranch() {
 func (s *FlowxTestSuite) TestCosignAndReject() {
 	s.Run("会签全员通过_流程正常办结", func() {
 		engine, store := s.newEngine()
-		require.NoError(s.T(), engine.Deploy(s.ctx, buildStandardLeaveProcess()))
+		s.deploy(engine, buildStandardLeaveProcess())
 
 		instID, err := engine.Start(s.ctx, StartReq{
 			Key:       "leave_process",
@@ -158,7 +165,7 @@ func (s *FlowxTestSuite) TestCosignAndReject() {
 
 	s.Run("会签一人驳回_原子取消兄弟待办并回退上游主管_批次号自增", func() {
 		engine, store := s.newEngine()
-		require.NoError(s.T(), engine.Deploy(s.ctx, buildStandardLeaveProcess()))
+		s.deploy(engine, buildStandardLeaveProcess())
 
 		instID, err := engine.Start(s.ctx, StartReq{
 			Key:       "leave_process",
@@ -190,7 +197,7 @@ func (s *FlowxTestSuite) TestCosignAndReject() {
 
 	s.Run("会签驳回后第二轮审批重新提单并全员通过办结闭环", func() {
 		engine, store := s.newEngine()
-		require.NoError(s.T(), engine.Deploy(s.ctx, buildStandardLeaveProcess()))
+		s.deploy(engine, buildStandardLeaveProcess())
 
 		instID, err := engine.Start(s.ctx, StartReq{
 			Key:       "leave_process",
@@ -268,7 +275,7 @@ func (s *FlowxTestSuite) TestRuleEngine() {
 	for _, tc := range testCases {
 		s.Run(tc.name, func() {
 			engine, store := s.newEngine()
-			require.NoError(s.T(), engine.Deploy(s.ctx, proc))
+			s.deploy(engine, proc)
 
 			instID, err := engine.Start(s.ctx, StartReq{
 				Key:       "purchase_proc",
@@ -311,7 +318,7 @@ func (s *FlowxTestSuite) TestRuleEngine_EdgeOperators() {
 
 	s.Run("满足Contains_NotEmpty_Empty_NotIn所有高级条件_流向特批", func() {
 		engine, store := s.newEngine()
-		require.NoError(s.T(), engine.Deploy(s.ctx, proc))
+		s.deploy(engine, proc)
 
 		instID, err := engine.Start(s.ctx, StartReq{
 			Key:     "rule_edge_proc",
@@ -332,7 +339,7 @@ func (s *FlowxTestSuite) TestRuleEngine_EdgeOperators() {
 
 	s.Run("不满足ChannelNotIn条件_默认兜底流向结束", func() {
 		engine, store := s.newEngine()
-		require.NoError(s.T(), engine.Deploy(s.ctx, proc))
+		s.deploy(engine, proc)
 
 		instID, err := engine.Start(s.ctx, StartReq{
 			Key:     "rule_edge_proc",
@@ -385,7 +392,7 @@ func (s *FlowxTestSuite) TestEventsAndHooks() {
 			return nil
 		})
 
-		require.NoError(s.T(), engine.Deploy(s.ctx, def))
+		s.deploy(engine, def)
 		instID, err := engine.Start(s.ctx, StartReq{
 			Key:       "event_flow",
 			Starter:   "tom",
@@ -412,7 +419,7 @@ func (s *FlowxTestSuite) TestEventsAndHooks() {
 			return nil
 		})
 
-		require.NoError(s.T(), engine.Deploy(s.ctx, def))
+		s.deploy(engine, def)
 		_, err := engine.Start(s.ctx, StartReq{
 			Key:       "event_flow",
 			Starter:   "tom",
@@ -432,7 +439,8 @@ func (s *FlowxTestSuite) TestDefinitionValidation() {
 			End("end", "结束").
 			Edge("n1", "end")
 		require.Error(s.T(), b.Validate())
-		require.ErrorIs(s.T(), engine.Deploy(s.ctx, b.Build()), ErrInvalidDefinition)
+		_, err := engine.Deploy(s.ctx, b.Build())
+		require.ErrorIs(s.T(), err, ErrInvalidDefinition)
 	})
 
 	s.Run("缺少结束节点", func() {
@@ -485,6 +493,57 @@ func (s *FlowxTestSuite) TestDefinitionValidation() {
 		err := b.Validate()
 		require.Error(s.T(), err)
 		assert.Contains(s.T(), err.Error(), "开始节点 [start] 不能拥有入边")
+	})
+}
+
+// TestVersionAutoIncrement 测试流程定义多次发布时的原子版本递增机制
+func (s *FlowxTestSuite) TestVersionAutoIncrement() {
+	s.Run("未指定版本发布自动从1自增递增", func() {
+		engine, store := s.newEngine()
+
+		baseDef := func() model.ProcessDefinition {
+			return NewProcess("auto_incr_proc", "自增版本流程").
+				Version(0).
+				Start("start", "开始").
+				End("end", "结束").
+				Edge("start", "end").
+				Build()
+		}
+
+		// 首次发布：应自增为版本 1
+		defV1, err := engine.Deploy(s.ctx, baseDef())
+		s.Require().NoError(err)
+		s.Assert().Equal(1, defV1.Version)
+
+		storedV1, err := store.GetDefinition(s.ctx, "auto_incr_proc", 1)
+		s.Require().NoError(err)
+		s.Assert().Equal(1, storedV1.Version)
+
+		// 二次发布：应自增为版本 2
+		defV2, err := engine.Deploy(s.ctx, baseDef())
+		s.Require().NoError(err)
+		s.Assert().Equal(2, defV2.Version)
+
+		storedV2, err := store.GetDefinition(s.ctx, "auto_incr_proc", 2)
+		s.Require().NoError(err)
+		s.Assert().Equal(2, storedV2.Version)
+
+		// 三次发布：应自增为版本 3
+		defV3, err := engine.Deploy(s.ctx, baseDef())
+		s.Require().NoError(err)
+		s.Assert().Equal(3, defV3.Version)
+
+		// 显式指定版本覆盖发布（例如修复已有版本 2）
+		fixDef := baseDef()
+		fixDef.Version = 2
+		fixDef.Name = "修复后的版本2"
+		defFixed, err := engine.Deploy(s.ctx, fixDef)
+		s.Require().NoError(err)
+		s.Assert().Equal(2, defFixed.Version)
+
+		storedFixed, err := store.GetDefinition(s.ctx, "auto_incr_proc", 2)
+		s.Require().NoError(err)
+		s.Assert().Equal("修复后的版本2", storedFixed.Name)
 	})
 }
 

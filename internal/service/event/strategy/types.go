@@ -5,7 +5,7 @@ import (
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 )
 
@@ -34,7 +34,7 @@ type FlowContext struct {
 	Workflow    domain.Workflow // 流程定义快照
 	Instance    domain.Instance // 引擎实例状态
 	CurrentNode *model.Node     // 当前触发事件的节点
-	Nodes       []easyflow.Node // 解析后的流程节点
+	Nodes       []*flowdsl.Node // 解析后的流程节点
 }
 
 type Info struct {

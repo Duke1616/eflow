@@ -14,7 +14,7 @@ import (
 	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
@@ -23,7 +23,6 @@ import (
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	"github.com/ecodeclub/ekit/retry"
 	"github.com/gotomicro/ego/core/elog"
-	"github.com/mitchellh/mapstructure"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 )
@@ -33,17 +32,17 @@ import (
 //go:generate mockgen -source=./base.go -package=strategymocks -destination=../mocks/strategy.mock.go -typed Service
 type Service interface {
 	// FetchRequiredData 并行获取流程运行的基础通知元数据
-	FetchRequiredData(ctx context.Context, info Info, nodes []easyflow.Node) (*NotificationData, error)
+	FetchRequiredData(ctx context.Context, info Info, nodes []*flowdsl.Node) (*NotificationData, error)
 	// FetchTasksWithRetry 在引擎异步落库任务时重试查询任务信息
 	FetchTasksWithRetry(ctx context.Context, info Info) ([]model.Task, error)
-	// GetNodeProperty 查询获取指定流程节点的属性配置快照
-	GetNodeProperty(info Info, nodeID string) ([]easyflow.Node, any, error)
+	// GetNode 查询获取指定流程节点的统一 DSL 节点模型
+	GetNode(info Info, nodeID string) ([]*flowdsl.Node, *flowdsl.Node, error)
 	// IsGlobalNotify 校验全局消息通知开关配置是否开启
 	IsGlobalNotify(wf domain.Workflow) bool
 	// PrepareCommonFields 解析工单数据构建通用属性公示字段
 	PrepareCommonFields(info Info, data *NotificationData) []notification.Field
 	// ResolveAssignees 并发解析当前节点的审批人名单并自动同步注入
-	ResolveAssignees(ctx context.Context, info *Info, assignees []easyflow.Assignee) ([]domain.User, error)
+	ResolveAssignees(ctx context.Context, info *Info, assignees []flowdsl.Assignee) ([]domain.User, error)
 	// SafeGo 安全执行带 Panic 恢复机制的异步延时任务
 	SafeGo(ctx context.Context, timeout time.Duration, fn func(ctx context.Context))
 	// PassTask 调用工作流引擎接口物理流转推进指定任务
@@ -94,7 +93,7 @@ func (s *service) FindTaskForms(ctx context.Context, ticketId int64) ([]domain.F
 	return s.orderSvc.ListTaskFormsByTicketID(ctx, ticketId)
 }
 
-func (s *service) ResolveAssignees(ctx context.Context, info *Info, assignees []easyflow.Assignee) ([]domain.User, error) {
+func (s *service) ResolveAssignees(ctx context.Context, info *Info, assignees []flowdsl.Assignee) ([]domain.User, error) {
 	if info == nil {
 		return nil, fmt.Errorf("流程上下文不能为空")
 	}
@@ -189,13 +188,12 @@ func (s *service) queryDomainUsers(ctx context.Context, userIDs []int64, staticN
 }
 
 // extractStaticUsernames 提取审批规则中明确指定的直接用户名或发起人
-func extractStaticUsernames(assignees []easyflow.Assignee, createBy string) []string {
-	names := lo.FlatMap(assignees, func(a easyflow.Assignee, _ int) []string {
-		a = a.Normalize()
+func extractStaticUsernames(assignees []flowdsl.Assignee, createBy string) []string {
+	names := lo.FlatMap(assignees, func(a flowdsl.Assignee, _ int) []string {
 		switch a.Rule {
-		case easyflow.APPOINT:
+		case flowdsl.APPOINT:
 			return a.Values
-		case easyflow.FOUNDER:
+		case flowdsl.FOUNDER:
 			if len(a.Values) > 0 && strings.TrimSpace(a.Values[0]) != "" {
 				return []string{a.Values[0]}
 			}
@@ -243,7 +241,7 @@ type NotificationData struct {
 	TName            string
 }
 
-func (s *service) FetchRequiredData(ctx context.Context, info Info, nodes []easyflow.Node) (*NotificationData, error) {
+func (s *service) FetchRequiredData(ctx context.Context, info Info, nodes []*flowdsl.Node) (*NotificationData, error) {
 	var data NotificationData
 	errGroup, ctx := errgroup.WithContext(ctx)
 
@@ -335,10 +333,10 @@ func (s *service) getRules(ctx context.Context, oInfo domain.Ticket) ([]rule.Rul
 	return rules, t.Name, nil
 }
 
-func (s *service) automationOutput(ctx context.Context, instanceId int, nodes []easyflow.Node) (map[string]interface{}, error) {
+func (s *service) automationOutput(ctx context.Context, instanceId int, nodes []*flowdsl.Node) (map[string]interface{}, error) {
 	mergedResult := make(map[string]interface{})
 	for _, node := range nodes {
-		if node.Type != "automation" {
+		if node.Type != flowdsl.NodeAutoTask {
 			continue
 		}
 		if result, err := s.fetchResult(ctx, instanceId, node.ID); err == nil {
@@ -367,7 +365,7 @@ func (s *service) fetchResult(ctx context.Context, instanceID int, nodeID string
 	return data, nil
 }
 
-func (s *service) GetNodeProperty(info Info, nodeID string) ([]easyflow.Node, any, error) {
+func (s *service) GetNode(info Info, nodeID string) ([]*flowdsl.Node, *flowdsl.Node, error) {
 	nodes := info.Nodes
 	var err error
 	if len(nodes) == 0 {
@@ -377,11 +375,11 @@ func (s *service) GetNodeProperty(info Info, nodeID string) ([]easyflow.Node, an
 		}
 	}
 
-	node, ok := lo.Find(nodes, func(src easyflow.Node) bool {
-		return src.ID == nodeID
+	node, ok := lo.Find(nodes, func(src *flowdsl.Node) bool {
+		return src != nil && src.ID == nodeID
 	})
 	if ok {
-		return nodes, node.Properties, nil
+		return nodes, node, nil
 	}
 	return nodes, nil, fmt.Errorf("未找到节点 %s", nodeID)
 }
@@ -397,25 +395,24 @@ func (s *service) IsGlobalNotify(wf domain.Workflow) bool {
 // buildRecipientSelectors 将 EFlow 的审批规则转换为 EAlert 通用接收对象。
 // 工单模板字段、流程发起人等仅在这里处理，EAlert 不感知这些业务概念。
 func (s *service) buildRecipientSelectors(ctx context.Context, info *Info,
-	assignees []easyflow.Assignee) ([]*notificationv1.RecipientSelector, error) {
+	assignees []flowdsl.Assignee) ([]*notificationv1.RecipientSelector, error) {
 	if info == nil {
 		return nil, fmt.Errorf("流程上下文不能为空")
 	}
 	selectors := make([]*notificationv1.RecipientSelector, 0, len(assignees))
 	for _, assignee := range assignees {
-		assignee = assignee.Normalize()
 		if assignee.Rule == "" {
 			return nil, fmt.Errorf("审批规则类型不能为空")
 		}
 
 		switch assignee.Rule {
-		case easyflow.APPOINT:
+		case flowdsl.APPOINT:
 			ids, err := s.userIDsByUsernames(ctx, assignee.Values)
 			if err != nil {
 				return nil, err
 			}
 			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_USER, ids)
-		case easyflow.TEMPLATE:
+		case flowdsl.TEMPLATE:
 			usernames := lo.FlatMap(assignee.Values, func(field string, _ int) []string {
 				if value, ok := info.Ticket.Data[field]; ok {
 					return s.extractUsernamesFromField(field, value)
@@ -427,7 +424,7 @@ func (s *service) buildRecipientSelectors(ctx context.Context, info *Info,
 				return nil, err
 			}
 			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_USER, ids)
-		case easyflow.FOUNDER, easyflow.LEADER, easyflow.MAIN_LEADER:
+		case flowdsl.FOUNDER, flowdsl.LEADER, flowdsl.MainLeader:
 			username := info.Ticket.CreateBy
 			if len(assignee.Values) > 0 && strings.TrimSpace(assignee.Values[0]) != "" {
 				username = assignee.Values[0]
@@ -441,25 +438,25 @@ func (s *service) buildRecipientSelectors(ctx context.Context, info *Info,
 			}
 			typeName := notificationv1.RecipientSelectorType_RECIPIENT_USER
 			switch assignee.Rule {
-			case easyflow.LEADER:
+			case flowdsl.LEADER:
 				typeName = notificationv1.RecipientSelectorType_RECIPIENT_DEPARTMENT_LEADER
-			case easyflow.MAIN_LEADER:
+			case flowdsl.MainLeader:
 				typeName = notificationv1.RecipientSelectorType_RECIPIENT_SUPERVISING_LEADER
 			}
 			selectors = appendUserSelector(selectors, typeName, ids)
-		case easyflow.DEPARTMENT:
+		case flowdsl.DEPARTMENT:
 			ids, err := parseRecipientIDs(assignee.Values)
 			if err != nil {
 				return nil, fmt.Errorf("解析部门 ID 失败: %w", err)
 			}
 			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_DEPARTMENT, ids)
-		case easyflow.TEAM:
+		case flowdsl.TEAM:
 			ids, err := parseRecipientIDs(assignee.Values)
 			if err != nil {
 				return nil, fmt.Errorf("解析团队 ID 失败: %w", err)
 			}
 			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_TEAM, ids)
-		case easyflow.ON_CALL:
+		case flowdsl.OnCall:
 			ids, err := parseRecipientIDs(assignee.Values)
 			if err != nil {
 				return nil, fmt.Errorf("解析值班计划 ID 失败: %w", err)
@@ -548,21 +545,12 @@ func (s *service) extractUsernamesFromField(fieldName string, value interface{})
 	}
 }
 
-func UnmarshalNodes(wf domain.Workflow) ([]easyflow.Node, error) {
-	var nodes []easyflow.Node
-	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-		Result:  &nodes,
-		TagName: "json",
-	})
+func UnmarshalNodes(wf domain.Workflow) ([]*flowdsl.Node, error) {
+	graph, err := flowdsl.Parse(wf.FlowData)
 	if err != nil {
 		return nil, err
 	}
-
-	if err = decoder.Decode(wf.FlowData.Nodes); err != nil {
-		return nil, err
-	}
-
-	return nodes, nil
+	return graph.GetOrderedNodes(), nil
 }
 
 type RecipientMap struct {

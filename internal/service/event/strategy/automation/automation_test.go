@@ -6,13 +6,13 @@ import (
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	sendermocks "github.com/Duke1616/eflow/internal/pkg/notification/mocks"
 	strategymocks "github.com/Duke1616/eflow/internal/service/event/mocks"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
 	"github.com/Duke1616/eflow/internal/service/event/strategy/automation"
-
+	"github.com/gotomicro/ego/core/elog"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -31,6 +31,7 @@ func (s *AutomationTestSuite) SetupTest() {
 	s.mockSender = sendermocks.NewMockNotificationSender(s.ctrl)
 
 	s.strategy = automation.NewNotification(s.mockBase, s.mockSender)
+	s.mockBase.EXPECT().Logger().Return(elog.DefaultLogger).AnyTimes()
 }
 
 func (s *AutomationTestSuite) TearDownTest() {
@@ -48,11 +49,15 @@ func (s *AutomationTestSuite) TestSend() {
 		},
 	}
 
-	// 1. Mock GetNodeProperty
-	s.mockBase.EXPECT().GetNodeProperty(info, "auto1").Return([]easyflow.Node{}, map[string]interface{}{
-		"is_notify":     true,
-		"notify_method": []int64{2}, // ProcessNowSend
-	}, nil).Times(2)
+	// 1. Mock GetNode
+	s.mockBase.EXPECT().GetNode(info, "auto1").Return([]*flowdsl.Node{}, &flowdsl.Node{
+		ID:       "auto1",
+		Type:     flowdsl.NodeAutoTask,
+		AutoTask: &flowdsl.AutoTaskConfig{
+			IsNotify:     true,
+			NotifyMethod: []int64{2}, // ProcessNowSend
+		},
+	}, nil)
 
 	// 2. Mock IsGlobalNotify
 	s.mockBase.EXPECT().IsGlobalNotify(gomock.Any()).Return(true)

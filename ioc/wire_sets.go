@@ -10,7 +10,7 @@ import (
 	"github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/event"
 	ticketEvent "github.com/Duke1616/eflow/internal/event/ticket"
-	eflowEasyflow "github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/compiler"
 	"github.com/Duke1616/eflow/internal/grpc"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
@@ -62,7 +62,7 @@ var (
 		workflowSvc.NewWorkflowService,
 		workflowSvc.NewTemplateSyncer,
 		workflow.NewHandler,
-		eflowEasyflow.NewLogicFlowToEngineConvert,
+		compiler.NewDefaultCompositeCompiler,
 	)
 
 	// EngineSet 流程引擎核心模块的 Provider 集合
@@ -70,6 +70,8 @@ var (
 		dao.NewProcessEngineDAO,
 		repository.NewProcessEngineRepository,
 		engineSvc.NewEngineService,
+		InitFlowxEngine,
+		InitEngineDispatcher,
 	)
 
 	// TaskSet 自动化任务模块 Provider 集合

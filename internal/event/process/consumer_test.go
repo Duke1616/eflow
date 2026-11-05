@@ -7,6 +7,7 @@ import (
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/event"
+	"github.com/Duke1616/eflow/internal/service/engine"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/gotomicro/ego/core/elog"
@@ -16,22 +17,43 @@ import (
 
 type stubTicketService struct {
 	ticketSvc.Service
-	ticket domain.Ticket
-	getErr error
+	ticket  domain.Ticket
+	getErr  error
+	bindErr error
+	bindId  int
 }
 
 func (s *stubTicketService) GetByID(_ context.Context, _ int64) (domain.Ticket, error) {
 	return s.ticket, s.getErr
 }
 
+func (s *stubTicketService) BindProcessInstanceID(_ context.Context, _ int64, instanceId int) error {
+	s.bindId = instanceId
+	return s.bindErr
+}
+
 type stubWorkflowService struct {
 	workflowSvc.Service
+	workflow   domain.Workflow
 	findCalled bool
 }
 
 func (s *stubWorkflowService) Find(_ context.Context, _ int64) (domain.Workflow, error) {
 	s.findCalled = true
-	return domain.Workflow{}, nil
+	return s.workflow, nil
+}
+
+type stubLauncher struct {
+	called bool
+	req    engine.ProcessLaunchReq
+	res    engine.ProcessLaunchResult
+	err    error
+}
+
+func (s *stubLauncher) Launch(_ context.Context, req engine.ProcessLaunchReq) (engine.ProcessLaunchResult, error) {
+	s.called = true
+	s.req = req
+	return s.res, s.err
 }
 
 func TestProcessEventConsumer_HandleTask_Idempotent(t *testing.T) {
@@ -39,7 +61,11 @@ func TestProcessEventConsumer_HandleTask_Idempotent(t *testing.T) {
 		name           string
 		evt            event.TicketEvent
 		ticketSvc      *stubTicketService
+		workflow       domain.Workflow
+		launcher       *stubLauncher
 		wantFindCalled bool
+		wantLaunch     bool
+		wantBindId     int
 		wantErr        bool
 	}{
 		{
@@ -54,6 +80,7 @@ func TestProcessEventConsumer_HandleTask_Idempotent(t *testing.T) {
 				},
 			},
 			wantFindCalled: false,
+			wantLaunch:     false,
 			wantErr:        false,
 		},
 		{
@@ -63,14 +90,42 @@ func TestProcessEventConsumer_HandleTask_Idempotent(t *testing.T) {
 				getErr: errors.New("db error"),
 			},
 			wantFindCalled: false,
+			wantLaunch:     false,
 			wantErr:        true,
+		},
+		{
+			name: "未绑定实例时成功调度Launcher并发起",
+			evt:  event.TicketEvent{Id: 102, WorkflowId: 88, Variables: `{"days":3}`},
+			ticketSvc: &stubTicketService{
+				ticket: domain.Ticket{
+					Id:       102,
+					CreateBy: "alex",
+				},
+			},
+			workflow: domain.Workflow{
+				Id:         88,
+				Name:       "请假单",
+				EngineType: domain.EngineTypeFlowx,
+			},
+			launcher: &stubLauncher{
+				res: engine.ProcessLaunchResult{InstanceId: 102, InstanceKey: "inst_102"},
+			},
+			wantFindCalled: true,
+			wantLaunch:     true,
+			wantBindId:     102,
+			wantErr:        false,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			wfStub := &stubWorkflowService{}
+			wfStub := &stubWorkflowService{workflow: tc.workflow}
+			launcher := tc.launcher
+			if launcher == nil {
+				launcher = &stubLauncher{}
+			}
 			consumer := &ProcessEventConsumer{
+				launcher:    launcher,
 				workFlowSvc: wfStub,
 				ticketSvc:   tc.ticketSvc,
 				logger:      elog.DefaultLogger,
@@ -83,6 +138,10 @@ func TestProcessEventConsumer_HandleTask_Idempotent(t *testing.T) {
 				require.NoError(t, err)
 			}
 			assert.Equal(t, tc.wantFindCalled, wfStub.findCalled)
+			assert.Equal(t, tc.wantLaunch, launcher.called)
+			if tc.wantBindId > 0 {
+				assert.Equal(t, tc.wantBindId, tc.ticketSvc.bindId)
+			}
 		})
 	}
 }

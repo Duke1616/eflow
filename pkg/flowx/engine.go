@@ -89,12 +89,14 @@ type IProcessOperator interface {
 	Revoke(ctx context.Context, req RevokeReq) error
 	// GetTimeline 按执行批次提取流转时间线
 	GetTimeline(ctx context.Context, instanceID string) ([]model.TimelineEvent, error)
+	// GetTask 根据任务物理 ID 获取单条审批任务详情
+	GetTask(ctx context.Context, taskID string) (*model.Task, error)
 }
 
 // IProcessAdmin 流程定义部署与组件注册管理视角接口，供初始化、后台管理或运维脚手架使用
 type IProcessAdmin interface {
-	// Deploy 部署/发布流程定义版本
-	Deploy(ctx context.Context, def model.ProcessDefinition) error
+	// Deploy 部署/发布流程定义版本。若 def.Version <= 0 则自动获取已发布最大版本并原子递增 (+1)，返回最终生效的流程定义快照
+	Deploy(ctx context.Context, def model.ProcessDefinition) (model.ProcessDefinition, error)
 	// RegisterHook 注册节点同步守卫与动态算人 Hook
 	RegisterHook(name string, handler HookHandler) Engine
 	// AddListener 注册全局生命周期事件监听器 (观察者模式)
@@ -194,18 +196,27 @@ func (e *flowEngine) Use(mws ...middleware.Middleware) Engine {
 }
 
 // Deploy 部署流程定义快照（发布期自动执行静态拓扑与语法校验，并预热进入只读执行缓存）
-func (e *flowEngine) Deploy(ctx context.Context, def model.ProcessDefinition) error {
-	if def.Version <= 0 {
-		def.Version = 1
-	}
+// 若 def.Version <= 0，则由引擎自动查询已发布的最大版本号并原子递增 (+1)，返回生效后的定义实体
+func (e *flowEngine) GetTask(ctx context.Context, taskID string) (*model.Task, error) {
+	return e.storage.GetTask(ctx, taskID)
+}
+
+func (e *flowEngine) Deploy(ctx context.Context, def model.ProcessDefinition) (model.ProcessDefinition, error) {
 	if err := def.Validate(); err != nil {
-		return fmt.Errorf("%w: %s", ErrInvalidDefinition, err.Error())
+		return model.ProcessDefinition{}, fmt.Errorf("%w: %s", ErrInvalidDefinition, err.Error())
+	}
+	if def.Version <= 0 {
+		latestVersion, err := e.storage.GetLatestVersion(ctx, def.Key)
+		if err != nil {
+			return model.ProcessDefinition{}, fmt.Errorf("获取流程最新版本失败: %w", err)
+		}
+		def.Version = latestVersion + 1
 	}
 	if err := e.storage.SaveDefinition(ctx, def); err != nil {
-		return err
+		return model.ProcessDefinition{}, err
 	}
 	e.planCache.Put(def)
-	return nil
+	return def, nil
 }
 
 // DoTx 在物理本地事务闭包内执行操作，异常自动回滚

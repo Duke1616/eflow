@@ -3,7 +3,8 @@ package workflow
 import (
 	"errors"
 
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	easyflow "github.com/Duke1616/eflow/internal/pkg/compiler/easyflow"
+	"github.com/Duke1616/eflow/pkg/flowx"
 	"github.com/ecodeclub/ginx"
 )
 
@@ -20,10 +21,14 @@ var (
 // 若为流程图校验失败（拓扑非法），直接将校验信息透传给前端展示；
 // 其他错误统一返回系统错误。
 func toDeployResult(err error) ginx.Result {
-	var validateErr *easyflow.ValidateError
-	if errors.As(err, &validateErr) {
+	if validateErr, ok := errors.AsType[*easyflow.ValidateError](err); ok {
 		res := deployValidateResult
 		res.Msg = validateErr.Error()
+		return res
+	}
+	if errors.Is(err, flowx.ErrInvalidDefinition) {
+		res := deployValidateResult
+		res.Msg = err.Error()
 		return res
 	}
 	return SystemErrorResult

@@ -6,6 +6,7 @@ import (
 	taskEvent "github.com/Duke1616/eflow/internal/event/task"
 	templateEvent "github.com/Duke1616/eflow/internal/event/template"
 	ticketEvent "github.com/Duke1616/eflow/internal/event/ticket"
+	"github.com/Duke1616/eflow/internal/service/engine"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
@@ -17,11 +18,12 @@ import (
 
 func InitProcessEventConsumer(
 	q mq.MQ,
+	dispatcher engine.IEngineDispatcher,
 	workFlowSvc workflowSvc.Service,
 	ticketSvc ticketSvc.Service,
 ) (*process.ProcessEventConsumer, error) {
 	consumer := mqx.NewResilientConsumer(q, event.CreateProcessEventName, "process_instance_starter")
-	return process.NewProcessEventConsumer(workFlowSvc, ticketSvc, consumer), nil
+	return process.NewProcessEventConsumer(dispatcher, workFlowSvc, ticketSvc, consumer), nil
 }
 
 func InitExecuteResultConsumer(q mq.MQ, svc taskSvc.Service) (*taskEvent.ExecuteResultConsumer, error) {

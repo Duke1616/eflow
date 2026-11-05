@@ -7,13 +7,12 @@ import (
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	sendermocks "github.com/Duke1616/eflow/internal/pkg/notification/mocks"
 	strategymocks "github.com/Duke1616/eflow/internal/service/event/mocks"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
 	"github.com/Duke1616/eflow/internal/service/event/strategy/carbon_copy"
-
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
@@ -51,9 +50,9 @@ func (s *CarbonCopyTestSuite) TestSend() {
 		},
 	}
 
-	// 1. Mock GetNodeProperty
-	s.mockBase.EXPECT().GetNodeProperty(info, "cc1").Return([]easyflow.Node{}, map[string]interface{}{
-		"is_cc": true,
+	// 1. Mock GetNode
+	s.mockBase.EXPECT().GetNode(info, "cc1").Return([]*flowdsl.Node{}, &flowdsl.Node{
+		ID: "cc1",
 	}, nil)
 
 	// 2. Mock FetchRequiredData
@@ -85,11 +84,11 @@ func (s *CarbonCopyTestSuite) TestSend() {
 	// Mock PrepareCommonFields
 	s.mockBase.EXPECT().PrepareCommonFields(gomock.Any(), gomock.Any()).Return([]notification.Field{})
 
-	// Mock Sender.Send
-	s.mockSender.EXPECT().Send(gomock.Any(), gomock.Any()).Return(notification.NewSuccessResponse(0, "success"), nil)
+	// Mock Sender.BatchSend
+	s.mockSender.EXPECT().BatchSend(gomock.Any(), gomock.Any()).Return(notification.NewSuccessResponse(0, "success"), nil)
 
 	// Mock PassTask
-	s.mockBase.EXPECT().PassTask(gomock.Any(), 1001, "抄送节点自动通过").Return(nil)
+	s.mockBase.EXPECT().PassTask(gomock.Any(), 1001, "抄送系统自动通过").Return(nil)
 
 	resp, err := s.strategy.Send(ctx, info)
 	s.NoError(err)

@@ -2,19 +2,18 @@ package carbon_copy
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	"github.com/Duke1616/eflow/internal/pkg/notification/sender"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
 	"github.com/Duke1616/eflow/internal/service/event/errs"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
-	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
+	"github.com/samber/lo"
 )
 
 type Notification struct {
@@ -30,14 +29,10 @@ func NewNotification(base strategy.Service, sender sender.NotificationSender) *N
 }
 
 func (n *Notification) Send(ctx context.Context, info strategy.Info) (notification.Response, error) {
-	// 1. 获取节点属性
-	nodes, rawProps, err := n.GetNodeProperty(info, info.CurrentNode.NodeID)
+	// 1. 获取节点信息
+	nodes, node, err := n.GetNode(info, info.CurrentNode.NodeID)
 	if err != nil {
 		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), err.Error()), err
-	}
-	property, err := easyflow.ToNodeProperty[easyflow.UserProperty](easyflow.Node{Properties: rawProps})
-	if err != nil {
-		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), fmt.Sprintf("节点属性解析失败: %v", err)), err
 	}
 
 	// 2. 加载基础数据
@@ -47,7 +42,11 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 	}
 
 	// 3. 解析抄送人员并自动同步到节点
-	users, err := n.ResolveAssignees(ctx, &info, property.NormalizeAssignees())
+	var assignees []flowdsl.Assignee
+	if userCfg, isUser := node.AsUserTask(); isUser {
+		assignees = userCfg.Assignees
+	}
+	users, err := n.ResolveAssignees(ctx, &info, assignees)
 	if err != nil {
 		return notification.NewErrorResponse(string(errs.ErrorCodeResolveRuleFailed), err.Error()), err
 	}
@@ -73,7 +72,7 @@ func (n *Notification) asyncHandleCarbonCopy(ctx context.Context, info strategy.
 		title := rule.GenerateCCTitle(data.StartUser.DisplayName, data.TName)
 		fields := n.PrepareCommonFields(info, data)
 
-		ns := slice.Map(tasks, func(idx int, src model.Task) notification.Notification {
+		ns := lo.Map(tasks, func(src model.Task, _ int) notification.Notification {
 			receiver := userMap.GetID(src.UserID)
 			return notification.Notification{
 				Channel:    notification.Channel(info.Channel),
@@ -83,27 +82,21 @@ func (n *Notification) asyncHandleCarbonCopy(ctx context.Context, info strategy.
 					Name:     domain.NotifyTypeCC,
 					Title:    title,
 					Fields:   fields,
-					Values:   notification.GenerateCallbackValues(info.Ticket.Id, "", info.Ticket.TenantID),
+					Values:   notification.GenerateCallbackValues(info.Ticket.Id, src.TaskID, info.Ticket.TenantID),
 					HideForm: true,
 				},
 			}
 		})
 
-		for _, msg := range ns {
-			if _, err = n.sender.Send(ctx, msg); err != nil {
-				n.Logger().Error("Notification 消息发送失败", elog.FieldErr(err), elog.String("receiver", msg.Receiver))
-			}
+		if _, err = n.sender.BatchSend(ctx, ns); err != nil {
+			n.Logger().Error("CarbonCopy 批量发送消息失败", elog.FieldErr(err))
 		}
 	}
 
-	// 3. 立即自动通过
-	for _, t := range tasks {
-		if err = n.PassTask(ctx, t.TaskID, "抄送节点自动通过"); err != nil {
-			n.Logger().Error("抄送节点自动通过失败", elog.FieldErr(err), elog.Any("taskId", t.TaskID))
-		}
-
-		if t.IsCosigned != 1 {
-			return
+	// 3. 自动通过任务流转
+	for _, task := range tasks {
+		if err = n.PassTask(ctx, task.TaskID, "抄送系统自动通过"); err != nil {
+			n.Logger().Error("CarbonCopy 自动流转失败", elog.FieldErr(err), elog.Int("taskId", task.TaskID))
 		}
 	}
 }

@@ -11,7 +11,7 @@ import (
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/event"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/repository"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
@@ -62,29 +62,31 @@ type Service interface {
 	// Transfer 将当前审批任务转签指派给其他用户
 	Transfer(ctx context.Context, taskId int, operator string, isAdmin bool, targetUsers []string) error
 	// GetTaskFormConfig 获取指定任务节点在当时流程版本中定义的表单字段列表
-	GetTaskFormConfig(ctx context.Context, taskId int, workflowId int64) ([]easyflow.Field, error)
+	GetTaskFormConfig(ctx context.Context, taskId int, workflowId int64) ([]flowdsl.Field, error)
 }
 
 type ticketService struct {
-	repo        repository.TicketRepository
-	templateSvc templateSvc.Service
-	engineSvc   engineSvc.Service
-	workflowSvc workflowSvc.Service
-	producer    TicketEventProducer
-	l           *elog.Component
+	repo             repository.TicketRepository
+	templateSvc      templateSvc.Service
+	engineSvc        engineSvc.Service
+	engineDispatcher engineSvc.IEngineDispatcher
+	workflowSvc      workflowSvc.Service
+	producer         TicketEventProducer
+	l                *elog.Component
 }
 
 // NewService 构造工单业务服务实现类
 func NewService(repo repository.TicketRepository, templateSvc templateSvc.Service,
-	engineSvc engineSvc.Service, workflowSvc workflowSvc.Service,
-	producer TicketEventProducer) Service {
+	engineSvc engineSvc.Service, engineDispatcher engineSvc.IEngineDispatcher,
+	workflowSvc workflowSvc.Service, producer TicketEventProducer) Service {
 	return &ticketService{
-		repo:        repo,
-		templateSvc: templateSvc,
-		engineSvc:   engineSvc,
-		workflowSvc: workflowSvc,
-		producer:    producer,
-		l:           elog.DefaultLogger,
+		repo:             repo,
+		templateSvc:      templateSvc,
+		engineSvc:        engineSvc,
+		engineDispatcher: engineDispatcher,
+		workflowSvc:      workflowSvc,
+		producer:         producer,
+		l:                elog.DefaultLogger,
 	}
 }
 
@@ -242,68 +244,73 @@ func (s *ticketService) ListTaskFormsByTicketID(ctx context.Context, ticketID in
 
 // Pass 审批通过当前代办的流程节点，包含数据合并、必填校验与动态快照记录
 func (s *ticketService) Pass(ctx context.Context, taskId int, operator string, isAdmin bool, comment string, extraData map[string]interface{}) error {
-	// 1. 获取审批任务明细
-	taskInfo, err := s.engineSvc.TaskInfo(ctx, taskId)
+	tID := engineSvc.NewID(taskId)
+	taskInfo, err := s.engineDispatcher.GetTaskContext(ctx, tID)
 	if err != nil {
-		return fmt.Errorf("获取任务详情失败: %w", err)
+		return fmt.Errorf("获取任务明细失败: %w", err)
 	}
 
 	// 2. 领域层自卫校验：断言是否已被处理及操作人权限
-	if err = domain.ValidateTaskOperable(taskInfo.UserID, taskInfo.IsFinished == 1, operator, isAdmin); err != nil {
+	if err = domain.ValidateTaskOperable(taskInfo.Assignee, taskInfo.IsFinished, operator, isAdmin); err != nil {
 		return err
 	}
 
 	// 3. 记录管理员代办审计日志
-	if isAdmin && taskInfo.UserID != operator {
+	if isAdmin && taskInfo.Assignee != operator {
 		s.l.Info("管理员代办他人审批任务[同意]",
 			elog.String("admin", operator),
 			elog.Int("taskId", taskId),
-			elog.String("originalAssignee", taskInfo.UserID),
+			elog.String("originalAssignee", taskInfo.Assignee),
 		)
 	}
 
 	// 4. 查询流程实例
-	instance, err := s.engineSvc.GetInstanceByID(ctx, taskInfo.ProcInstID)
+	instance, err := s.engineSvc.GetInstanceByID(ctx, taskInfo.ProcessInstanceID.Int())
 	if err != nil {
 		return err
 	}
 
 	// 5. 锁定当时发布的版本快照
-	snapshot, err := s.workflowSvc.GetWorkflowSnapshot(ctx, taskInfo.ProcID, instance.ProcVersion)
+	snapshot, err := s.workflowSvc.GetWorkflowSnapshot(ctx, taskInfo.ProcessID, instance.ProcVersion)
 	if err != nil {
 		s.l.Error("获取快照版本失败", elog.FieldErr(err),
-			elog.Int("流程ID", taskInfo.ProcID),
+			elog.Int("流程ID", taskInfo.ProcessID),
 			elog.Int("流程版本", instance.ProcVersion))
 		return err
 	}
 
-	// 6. 解析 node 节点数据并定位当前执行节点
-	nodes, _ := easyflow.ParseNodes(snapshot.FlowData.Nodes)
-	node, ok := lo.Find(nodes, func(node easyflow.Node) bool {
-		return node.ID == taskInfo.NodeID
-	})
+	// 6. 解析标准拓扑图并定位当前执行节点
+	graph, err := flowdsl.Parse(snapshot.FlowData)
+	if err != nil {
+		return fmt.Errorf("解析流程拓扑失败: %w", err)
+	}
+	node, ok := graph.GetNode(taskInfo.NodeID)
 	if !ok {
 		return fmt.Errorf("当前执行节点在流程图中不存在: %s", taskInfo.NodeID)
 	}
 
-	property, err := easyflow.ToNodeProperty[easyflow.UserProperty](node)
-	if err != nil {
-		return err
+	var nodeFields []flowdsl.Field
+	if userCfg, isUser := node.AsUserTask(); isUser {
+		nodeFields = userCfg.Fields
 	}
 
 	// 7. 若无表单字段需要录入，则直接触发引擎通过
-	if len(property.Fields) == 0 {
-		return s.engineSvc.Pass(ctx, taskId, comment)
+	if len(nodeFields) == 0 {
+		return s.engineDispatcher.Pass(ctx, engineSvc.TaskPassReq{
+			TaskId:   tID,
+			Operator: operator,
+			Comment:  comment,
+		})
 	}
 
 	// 8. 执行必填与格式正则校验，汇总合并更新项及快照数据
-	mergeData, formValues, err := s.collectAndValidateFields(property.Fields, extraData)
+	mergeData, formValues, err := s.collectAndValidateFields(nodeFields, extraData)
 	if err != nil {
 		return err
 	}
 
 	// 9. 查询对应的关联工单实体
-	ticket, err := s.repo.DetailByProcessInstId(ctx, taskInfo.ProcInstID)
+	ticket, err := s.repo.DetailByProcessInstId(ctx, taskInfo.ProcessInstanceID.Int())
 	if err != nil {
 		return fmt.Errorf("查询工单实体关联失败: %w", err)
 	}
@@ -320,16 +327,21 @@ func (s *ticketService) Pass(ctx context.Context, taskId int, operator string, i
 		return fmt.Errorf("物理归档任务快照失败: %w", err)
 	}
 
-	return s.engineSvc.Pass(ctx, taskId, comment)
+	return s.engineDispatcher.Pass(ctx, engineSvc.TaskPassReq{
+		TaskId:    tID,
+		Operator:  operator,
+		Comment:   comment,
+		Variables: mergeData,
+	})
 }
 
 // collectAndValidateFields 校验表单字段约束，并分别汇总待合并入工单的业务属性和快照属性
-func (s *ticketService) collectAndValidateFields(fields []easyflow.Field, extraData map[string]interface{}) (map[string]interface{}, []domain.FormValue, error) {
+func (s *ticketService) collectAndValidateFields(fields []flowdsl.Field, extraData map[string]interface{}) (map[string]interface{}, []domain.FormValue, error) {
 	mergeData := make(map[string]interface{})
 	var formValues []domain.FormValue
 
 	for _, field := range fields {
-		if field.Type == easyflow.FieldTips {
+		if field.Type == flowdsl.FieldTips {
 			continue
 		}
 
@@ -356,26 +368,31 @@ func (s *ticketService) collectAndValidateFields(fields []easyflow.Field, extraD
 
 // Reject 审批节点驳回
 func (s *ticketService) Reject(ctx context.Context, taskId int, operator string, isAdmin bool, comment string) error {
-	taskInfo, err := s.engineSvc.TaskInfo(ctx, taskId)
+	tID := engineSvc.NewID(taskId)
+	taskInfo, err := s.engineDispatcher.GetTaskContext(ctx, tID)
 	if err != nil {
 		return fmt.Errorf("获取任务明细失败: %w", err)
 	}
 
 	// 领域层自卫校验：断言是否已被处理及操作人权限
-	if err = domain.ValidateTaskOperable(taskInfo.UserID, taskInfo.IsFinished == 1, operator, isAdmin); err != nil {
+	if err = domain.ValidateTaskOperable(taskInfo.Assignee, taskInfo.IsFinished, operator, isAdmin); err != nil {
 		return err
 	}
 
 	// 记录管理员代办审计日志
-	if isAdmin && taskInfo.UserID != operator {
+	if isAdmin && taskInfo.Assignee != operator {
 		s.l.Info("管理员代办他人审批任务[驳回]",
 			elog.String("admin", operator),
 			elog.Int("taskId", taskId),
-			elog.String("originalAssignee", taskInfo.UserID),
+			elog.String("originalAssignee", taskInfo.Assignee),
 		)
 	}
 
-	return s.engineSvc.Reject(ctx, taskId, comment)
+	return s.engineDispatcher.Reject(ctx, engineSvc.TaskRejectReq{
+		TaskId:   tID,
+		Operator: operator,
+		Comment:  comment,
+	})
 }
 
 // Transfer 审批任务转签指派
@@ -408,44 +425,35 @@ func (s *ticketService) Transfer(ctx context.Context, taskId int, operator strin
 }
 
 // GetTaskFormConfig 获取指定任务节点在流程版本中定义的表单字段配置
-func (s *ticketService) GetTaskFormConfig(ctx context.Context, taskId int, workflowId int64) ([]easyflow.Field, error) {
-	info, err := s.engineSvc.TaskInfo(ctx, taskId)
+func (s *ticketService) GetTaskFormConfig(ctx context.Context, taskId int, workflowId int64) ([]flowdsl.Field, error) {
+	tID := engineSvc.NewID(taskId)
+	taskCtx, err := s.engineDispatcher.GetTaskContext(ctx, tID)
 	if err != nil {
 		return nil, err
 	}
 
-	inst, err := s.engineSvc.GetInstanceByID(ctx, info.ProcInstID)
+	wf, err := s.workflowSvc.FindInstanceFlow(ctx, workflowId, taskCtx.ProcessID, taskCtx.ProcessVersion)
 	if err != nil {
 		return nil, err
 	}
 
-	wf, err := s.workflowSvc.FindInstanceFlow(ctx, workflowId, inst.ProcID, inst.ProcVersion)
+	graph, err := flowdsl.Parse(wf.FlowData)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("解析流程拓扑失败: %w", err)
+	}
+	node, ok := graph.GetNode(taskCtx.NodeID)
+	if !ok {
+		return []flowdsl.Field{}, nil
 	}
 
-	nodes, err := easyflow.ParseNodes(wf.FlowData.Nodes)
-	if err != nil {
-		return nil, err
+	if userCfg, isUser := node.AsUserTask(); isUser {
+		return userCfg.Fields, nil
 	}
-
-	targetNode, found := lo.Find(nodes, func(node easyflow.Node) bool {
-		return node.ID == info.NodeID
-	})
-	if !found {
-		return []easyflow.Field{}, nil
-	}
-
-	property, err1 := easyflow.ToNodeProperty[easyflow.UserProperty](targetNode)
-	if err1 != nil {
-		return nil, err1
-	}
-
-	return property.Fields, nil
+	return []flowdsl.Field{}, nil
 }
 
 // validateField 校验表单字段的规则约束
-func (s *ticketService) validateField(field easyflow.Field, exists bool, val any) error {
+func (s *ticketService) validateField(field flowdsl.Field, exists bool, val any) error {
 	if field.Required && (!exists || val == nil || val == "") {
 		return fmt.Errorf("%w: [%s] 为必填项，请输入填写", ValidationError, field.Name)
 	}

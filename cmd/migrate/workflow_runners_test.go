@@ -8,7 +8,6 @@ import (
 
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/stretchr/testify/require"
 )
@@ -28,8 +27,8 @@ func (s stubRunnerCatalog) ListByCodebookID(ctx context.Context, codebookID int6
 func legacyWorkflowRecord(properties map[string]interface{}) []flowRecord {
 	return []flowRecord{{
 		table: "workflow", id: 7, tenantID: 3,
-		flowData: dao.LogicFlow{Nodes: []domain.FlowNode{
-			{"id": "deploy", "type": "automation", "properties": properties},
+		flowData: domain.CanvasData{"nodes": []any{
+			map[string]any{"id": "deploy", "type": "automation", "properties": properties},
 		}},
 	}}
 }

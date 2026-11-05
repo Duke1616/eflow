@@ -9,13 +9,13 @@ import (
 	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	easyflow "github.com/Duke1616/eflow/internal/pkg/compiler/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 )
 
-// Service 流程引擎服务接口
+// Service 流程引擎服务接口（面向基于 easy-workflow 的流程操作，包含时间线与任务查询等）
 type Service interface {
 	// ListTodoTasks 查看指定用户的待办任务列表，支持按时间排序和分页检索
 	ListTodoTasks(ctx context.Context, userId, processName string, sortByAse bool, offset, limit int) ([]domain.Instance, int64, error)
@@ -90,7 +90,7 @@ type TaskTimelineGroup struct {
 	Members []model.Task
 }
 
-// NewEngineService 初始化流程引擎服务层
+// NewEngineService 初始化流程引擎服务层（面向 easy-workflow 遗留引擎）
 func NewEngineService(repo repository.IEngineRepository) Service {
 	return &engineService{
 		repo: repo,

@@ -10,7 +10,7 @@ import (
 	teamv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/team"
 	teammocks "github.com/Duke1616/eflow/api/proto/gen/ealert/team/mocks"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	sendermocks "github.com/Duke1616/eflow/internal/pkg/notification/mocks"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
@@ -65,11 +65,15 @@ func (s *ChatTestSuite) TestSend_ExistingGroup() {
 		},
 	}
 
-	s.mockBase.EXPECT().GetNodeProperty(gomock.Any(), "chat_node_1").Return([]easyflow.Node{}, map[string]interface{}{
-		"mode":           "existing",
-		"chat_group_ids": []int64{888},
-		"title":          "工单#{{ticket_id}} - {{field.app_name}} 结果通知",
-		"is_auto":        []interface{}{"ticket_data", "user_input"},
+	s.mockBase.EXPECT().GetNode(gomock.Any(), "chat_node_1").Return([]*flowdsl.Node{}, &flowdsl.Node{
+		ID:   "chat_node_1",
+		Type: flowdsl.NodeChatGroup,
+		ChatGroup: &flowdsl.ChatGroupConfig{
+			Mode:         flowdsl.ChatGroupUseExisting,
+			ChatGroupIDs: []int64{888},
+			Title:        "工单#{{ticket_id}} - {{field.app_name}} 结果通知",
+			OutputMode:   []flowdsl.OutputMode{flowdsl.OutputTicketData, flowdsl.OutputUserInput},
+		},
 	}, nil)
 
 	s.mockBase.EXPECT().FetchRequiredData(gomock.Any(), gomock.Any(), gomock.Any()).Return(&strategy.NotificationData{

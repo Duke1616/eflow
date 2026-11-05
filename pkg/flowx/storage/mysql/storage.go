@@ -72,6 +72,23 @@ func (s *Storage) GetDefinition(ctx context.Context, key string, version int) (m
 	return toDefinitionDO(po)
 }
 
+// GetLatestVersion 根据流程业务唯一标识查询已发布的最大版本号，尚未发布过任何版本时返回 0, nil
+func (s *Storage) GetLatestVersion(ctx context.Context, key string) (int, error) {
+	var maxVersion *int
+	err := s.db.WithContext(ctx).
+		Model(&FlowDefinitionPO{}).
+		Where("proc_key = ?", key).
+		Select("MAX(version)").
+		Scan(&maxVersion).Error
+	if err != nil {
+		return 0, err
+	}
+	if maxVersion == nil {
+		return 0, nil
+	}
+	return *maxVersion, nil
+}
+
 func (s *Storage) SaveInstance(ctx context.Context, inst *model.Instance) error {
 	po, err := toInstancePO(inst)
 	if err != nil {

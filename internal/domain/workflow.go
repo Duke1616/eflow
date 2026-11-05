@@ -1,5 +1,9 @@
 package domain
 
+import (
+	"fmt"
+)
+
 // NotifyMethod 通知渠道类型定义
 type NotifyMethod uint8
 
@@ -38,6 +42,55 @@ func NotifyTemplateSetKey(notifyType NotifyType) string {
 	return "eflow.workflow.notify." + string(notifyType)
 }
 
+// EngineType 流程底层执行引擎类型定义（DDD 领域值对象）
+type EngineType string
+
+// String 转换为基础 string 字符串
+func (e EngineType) String() string {
+	return string(e)
+}
+
+const (
+	// EngineTypeEasyFlow 遗留基于第三方 easy-workflow 的图执行引擎
+	EngineTypeEasyFlow EngineType = "easy-workflow"
+	// EngineTypeFlowx 现代自研的高性能事件驱动 flowx 流程引擎
+	EngineTypeFlowx EngineType = "flowx"
+)
+
+// IsValid 校验引擎类型是否合法有效
+func (e EngineType) IsValid() bool {
+	return e == EngineTypeEasyFlow || e == EngineTypeFlowx
+}
+
+// IsFlowx 判断是否为 flowx 引擎
+func (e EngineType) IsFlowx() bool {
+	return e == EngineTypeFlowx
+}
+
+// IsEasyFlow 判断是否为 easy-workflow 引擎
+func (e EngineType) IsEasyFlow() bool {
+	return e == EngineTypeEasyFlow
+}
+
+// CanvasData 流程图画布通用原始数据（底层为 map[string]any，支持 LogicFlow、AntV X6、BPMN 等任意前端结构）
+type CanvasData map[string]any
+
+// Nodes 辅助方法：以切片形式获取画布中的节点原始数据（若存在）
+func (c CanvasData) Nodes() []any {
+	if raw, ok := c["nodes"].([]any); ok {
+		return raw
+	}
+	return nil
+}
+
+// Edges 辅助方法：以切片形式获取画布中的连线原始数据（若存在）
+func (c CanvasData) Edges() []any {
+	if raw, ok := c["edges"].([]any); ok {
+		return raw
+	}
+	return nil
+}
+
 // Workflow 工作流流程定义领域模型
 type Workflow struct {
 	Id           int64        // 工作流主键 ID
@@ -48,60 +101,31 @@ type Workflow struct {
 	Desc         string       // 流程设计说明
 	IsNotify     bool         // 是否在节点流转时触发通知
 	NotifyMethod NotifyMethod // 默认的主通知渠道类型
-	FlowData     LogicFlow    // 前端 LogicFlow 设计器直接传递并保存的画布拓扑原始数据
+	FlowData     CanvasData   // 流程图画布原始数据（中立结构，支持 LogicFlow / AntV X6 / BPMN 等）
 	ProcessId    int          // 后端依赖的流程执行引擎所生成的底层定义实例 ProcessDefID
+	EngineType   EngineType   // 关联的流程执行引擎类型（值对象：easy-workflow, flowx）
 }
 
-// FlowEdge 流程图中线条/连线的元属性描述
-type FlowEdge map[string]interface{}
-
-// FlowNode 流程图中节点(审批、网关、自动化任务等)的数据元属性
-type FlowNode map[string]interface{}
-
-// LogicFlow 承载前端 LogicFlow 画布输出的图结构数据
-type LogicFlow struct {
-	Edges []FlowEdge // 画布中的所有连线/路由信息
-	Nodes []FlowNode // 画布中的所有审批/自动/开始/结束节点数据
+// ResolveEngineType 获取有效引擎类型（为空或未指定时默认兜底为 EngineTypeEasyFlow 保障老数据兼容）
+func (w Workflow) ResolveEngineType() EngineType {
+	if w.EngineType.IsValid() {
+		return w.EngineType
+	}
+	return EngineTypeEasyFlow
 }
 
-// Edge 具体的 LogicFlow 连接线描述，供程序处理审批条件和流转路径时使用
-type Edge struct {
-	Type         string      // 线类型 (如 Polyline)
-	SourceNodeId string      // 起点节点本地 ID
-	TargetNodeId string      // 终点节点本地 ID
-	Properties   interface{} // 线的渲染与跳转判断表达式等属性
-	ID           string      // 连线唯一 ID
+// ValidateEngineType 校验流程引擎类型的合法性（空值允许，视为默认历史引擎）
+func (w Workflow) ValidateEngineType() error {
+	if w.EngineType == "" || w.EngineType.IsValid() {
+		return nil
+	}
+	return fmt.Errorf("不支持的流程引擎类型: %s", w.EngineType)
 }
 
-// Node 具体的 LogicFlow 节点描述，供引擎识别处理人、条件网关分支时使用
-type Node struct {
-	Type       string      // 节点类型 (如 userTask, gateway, autoTask)
-	Properties interface{} // 节点属性 (如审批用户、处理逻辑、网关条件等)
-	ID         string      // 节点唯一本地 ID
-}
-
-// EdgeProperty 连接线所绑定的属性
-type EdgeProperty struct {
-	Expression string // 跳转的跳转判断逻辑表达式
-}
-
-// UserProperty 审批节点（userTask）的内置业务属性
-type UserProperty struct {
-	Name     string // 属性名称
-	Approved string // 审批处理人（比如多个候选人，或是指定表达式如 ${creator}）
-}
-
-// StartProperty 开始节点所绑定的额外属性
-type StartProperty struct {
-	Name string
-}
-
-// EndProperty 结束节点所绑定的额外属性
-type EndProperty struct {
-	Name string
-}
-
-// ConditionProperty 条件网关（gateway）节点所绑定的属性
-type ConditionProperty struct {
-	Name string
+// AutomationNodeRef 流程自动化节点描述引用
+type AutomationNodeRef struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	CodebookID int64  `json:"codebook_id"`
+	RunnerID   int64  `json:"runner_id"`
 }

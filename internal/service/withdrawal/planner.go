@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/repository"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
@@ -94,13 +94,18 @@ func (p *compensationPlanner) Build(ctx context.Context, processInstanceID int) 
 		return CompensationPlan{}, fmt.Errorf("查询流程实例快照失败: %w", err)
 	}
 
+	graph, err := flowdsl.Parse(flow.FlowData)
+	if err != nil {
+		return CompensationPlan{}, fmt.Errorf("解析流程拓扑失败: %w", err)
+	}
+
 	plan := CompensationPlan{TicketID: ticket.Id, TenantID: ticket.TenantID}
 	for _, nodeID := range targetIDs {
-		property, propertyErr := p.workflows.GetAutomationProperty(easyflow.FromDomainWorkflow(flow), nodeID)
-		if propertyErr != nil {
-			return CompensationPlan{}, fmt.Errorf("查询补偿节点 %s 失败: %w", nodeID, propertyErr)
+		node, ok := graph.GetNode(nodeID)
+		if !ok {
+			return CompensationPlan{}, fmt.Errorf("查询补偿节点 %s 失败: 节点不存在", nodeID)
 		}
-		plan.Targets = append(plan.Targets, CompensationTarget{NodeID: nodeID, NodeName: property.Name})
+		plan.Targets = append(plan.Targets, CompensationTarget{NodeID: nodeID, NodeName: node.Name})
 	}
 	return plan, nil
 }

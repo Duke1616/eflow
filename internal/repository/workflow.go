@@ -130,13 +130,11 @@ func (repo *workflowRepository) CreateSnapshot(ctx context.Context, workflow dom
 		WorkflowId:     workflow.Id,
 		ProcessId:      processID,
 		ProcessVersion: processVersion,
+		EngineType:     workflow.ResolveEngineType().String(),
 		Name:           workflow.Name,
-		FlowData: sqlx.JsonField[dao.LogicFlow]{
-			Val: dao.LogicFlow{
-				Edges: workflow.FlowData.Edges,
-				Nodes: workflow.FlowData.Nodes,
-			},
-			Valid: true,
+		FlowData: sqlx.JsonField[domain.CanvasData]{
+			Val:   workflow.FlowData,
+			Valid: len(workflow.FlowData) > 0,
 		},
 	})
 }
@@ -148,13 +146,11 @@ func (repo *workflowRepository) FindSnapshot(ctx context.Context, processID, pro
 	}
 
 	return domain.Workflow{
-		Id:        s.WorkflowId,
-		ProcessId: s.ProcessId,
-		Name:      s.Name,
-		FlowData: domain.LogicFlow{
-			Edges: s.FlowData.Val.Edges,
-			Nodes: s.FlowData.Val.Nodes,
-		},
+		Id:         s.WorkflowId,
+		ProcessId:  s.ProcessId,
+		EngineType: domain.EngineType(s.EngineType),
+		Name:       s.Name,
+		FlowData:   s.FlowData.Val,
 	}, nil
 }
 
@@ -169,14 +165,12 @@ func (repo *workflowRepository) toEntity(req domain.Workflow) dao.Workflow {
 		Owner:        req.Owner,
 		Desc:         req.Desc,
 		ProcessId:    req.ProcessId,
+		EngineType:   req.ResolveEngineType().String(),
 		NotifyMethod: req.NotifyMethod.ToUint8(),
 		IsNotify:     req.IsNotify,
-		FlowData: sqlx.JsonField[dao.LogicFlow]{
-			Val: dao.LogicFlow{
-				Edges: req.FlowData.Edges,
-				Nodes: req.FlowData.Nodes,
-			},
-			Valid: true,
+		FlowData: sqlx.JsonField[domain.CanvasData]{
+			Val:   req.FlowData,
+			Valid: len(req.FlowData) > 0,
 		},
 	}
 }
@@ -190,11 +184,9 @@ func (repo *workflowRepository) toDomain(w dao.Workflow) domain.Workflow {
 		Owner:        w.Owner,
 		Desc:         w.Desc,
 		ProcessId:    w.ProcessId,
+		EngineType:   domain.EngineType(w.EngineType),
 		NotifyMethod: domain.NotifyMethod(w.NotifyMethod),
 		IsNotify:     w.IsNotify,
-		FlowData: domain.LogicFlow{
-			Edges: w.FlowData.Val.Edges,
-			Nodes: w.FlowData.Val.Nodes,
-		},
+		FlowData:     w.FlowData.Val,
 	}
 }

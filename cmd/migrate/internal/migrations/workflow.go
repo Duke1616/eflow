@@ -9,8 +9,8 @@ import (
 
 // mongoLogicFlow MongoDB 中的 LogicFlow 画布拓扑源数据实体
 type mongoLogicFlow struct {
-	Edges []domain.FlowEdge `bson:"edges"`
-	Nodes []domain.FlowNode `bson:"nodes"`
+	Edges []map[string]any `bson:"edges"`
+	Nodes []map[string]any `bson:"nodes"`
 }
 
 // mongoWorkflow MongoDB 中的工作流定义源数据实体
@@ -54,10 +54,10 @@ func (workflowMigrator) Convert(src mongoWorkflow) dao.Workflow {
 		Owner:      src.Owner,
 		Desc:       src.Desc,
 		ProcessId:  src.ProcessID,
-		FlowData: sqlx.JsonField[dao.LogicFlow]{
-			Val: dao.LogicFlow{
-				Edges: src.FlowData.Edges,
-				Nodes: src.FlowData.Nodes,
+		FlowData: sqlx.JsonField[domain.CanvasData]{
+			Val: domain.CanvasData{
+				"edges": src.FlowData.Edges,
+				"nodes": src.FlowData.Nodes,
 			},
 			Valid: src.FlowData.Edges != nil || src.FlowData.Nodes != nil,
 		},

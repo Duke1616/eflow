@@ -20,6 +20,9 @@ type IDefinitionStorage interface {
 
 	// GetDefinition 根据业务唯一标识与版本号加载流程图定义，不存在时返回 ErrDefinitionNotFound
 	GetDefinition(ctx context.Context, key string, version int) (model.ProcessDefinition, error)
+
+	// GetLatestVersion 根据流程业务唯一标识查询已发布的最大版本号，尚未发布过任何版本时返回 0, nil
+	GetLatestVersion(ctx context.Context, key string) (int, error)
 }
 
 // IInstanceStorage 流程实例运行态存储接口，负责实例生命周期推进与状态快照管理

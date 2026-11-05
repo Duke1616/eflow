@@ -6,6 +6,7 @@ import (
 
 	"github.com/Duke1616/eflow/internal/domain"
 	flowxconv "github.com/Duke1616/eflow/internal/pkg/compiler/flowx"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 )
 
 // flowxCompiler 现代自研 flowx 引擎的画布编译器实现
@@ -20,7 +21,7 @@ func NewFlowxCompiler() IWorkflowCompiler {
 	}
 }
 
-func (c *flowxCompiler) EngineType() string {
+func (c *flowxCompiler) EngineType() EngineType {
 	return EngineTypeFlowx
 }
 
@@ -30,7 +31,12 @@ func (c *flowxCompiler) Compile(_ context.Context, wf domain.Workflow) (CompileR
 		procKey = fmt.Sprintf("wf_temp_%s", wf.Name)
 	}
 
-	def, err := c.converter.Convert(procKey, wf.Name, 1, wf.FlowData)
+	graph, err := flowdsl.Parse(wf.FlowData)
+	if err != nil {
+		return CompileResult{}, fmt.Errorf("解析流程画布失败: %w", err)
+	}
+
+	def, err := c.converter.Convert(procKey, wf.Name, graph)
 	if err != nil {
 		return CompileResult{}, fmt.Errorf("flowx 画布编译失败: %w", err)
 	}

@@ -51,6 +51,20 @@ func (m *Storage) GetDefinition(ctx context.Context, key string, version int) (m
 	return def, nil
 }
 
+// GetLatestVersion 根据流程业务唯一标识查询已发布的最大版本号，尚未发布过任何版本时返回 0, nil
+func (m *Storage) GetLatestVersion(ctx context.Context, key string) (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	maxVersion := 0
+	for _, def := range m.definitions {
+		if def.Key == key && def.Version > maxVersion {
+			maxVersion = def.Version
+		}
+	}
+	return maxVersion, nil
+}
+
 func (m *Storage) SaveInstance(ctx context.Context, inst *model.Instance) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

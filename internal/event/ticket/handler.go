@@ -3,6 +3,7 @@ package ticket
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,7 +13,7 @@ import (
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	"github.com/Duke1616/eflow/internal/pkg/notification/sender"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
@@ -463,16 +464,18 @@ func (h *larkCallbackHandler) uploadImage(ctx context.Context, buf []byte) (*str
 }
 
 func (h *larkCallbackHandler) getJsCode(wf domain.Workflow, edgeMap map[string][]string, nodeStatusMap map[string]int) (string, error) {
-	edges := slice.Map(wf.FlowData.Edges, func(idx int, src domain.FlowEdge) map[string]interface{} {
-		return src
+	highlighted, err := flowdsl.HighlightCanvas(wf.FlowData, flowdsl.ExecutionTrace{
+		TraversedEdges: edgeMap,
+		NodeStatusMap:  nodeStatusMap,
 	})
-	nodes := slice.Map(wf.FlowData.Nodes, func(idx int, src domain.FlowNode) map[string]interface{} {
-		return src
-	})
-	return easyflow.GetJsCode(easyflow.LogicFlow{
-		Edges: edges,
-		Nodes: nodes,
-	}, edgeMap, nodeStatusMap)
+	if err != nil {
+		return "", err
+	}
+	dataJSON, err := json.Marshal(highlighted)
+	if err != nil {
+		return "", fmt.Errorf("序列化高亮画布数据失败: %w", err)
+	}
+	return fmt.Sprintf("window.__DATA__ = %s;", dataJSON), nil
 }
 
 func (h *larkCallbackHandler) withdraw(ctx context.Context, callback LarkCallback, remark string) error {

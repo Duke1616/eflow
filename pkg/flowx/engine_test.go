@@ -99,7 +99,37 @@ func (s *EngineTestSuite) TestDeploy() {
 				return m
 			},
 			run: func(ctx context.Context, e Engine) error {
-				return e.Deploy(ctx, buildValidDefinition())
+				deployed, err := e.Deploy(ctx, buildValidDefinition())
+				if err != nil {
+					return err
+				}
+				assert.Equal(s.T(), 1, deployed.Version)
+				return nil
+			},
+		},
+		{
+			name: "版本未指定自动自增_基于最大版本+1",
+			before: func() storage.IStorage {
+				m := storagemocks.NewMockIStorage(s.ctrl)
+				// 历史已有最大版本 2
+				m.EXPECT().GetLatestVersion(gomock.Any(), "proc_test").Return(2, nil)
+				m.EXPECT().SaveDefinition(gomock.Any(), gomock.Any()).
+					DoAndReturn(func(_ context.Context, d model.ProcessDefinition) error {
+						assert.Equal(s.T(), 3, d.Version)
+						assert.Equal(s.T(), "proc_test", d.Key)
+						return nil
+					})
+				return m
+			},
+			run: func(ctx context.Context, e Engine) error {
+				def := buildValidDefinition()
+				def.Version = 0 // 未指定版本
+				deployed, err := e.Deploy(ctx, def)
+				if err != nil {
+					return err
+				}
+				assert.Equal(s.T(), 3, deployed.Version)
+				return nil
 			},
 		},
 		{
@@ -112,7 +142,8 @@ func (s *EngineTestSuite) TestDeploy() {
 					Key:   "bad_proc",
 					Nodes: []model.NodeSpec{{ID: "start", Type: model.NodeStart}},
 				}
-				return e.Deploy(ctx, badDef)
+				_, err := e.Deploy(ctx, badDef)
+				return err
 			},
 			wantErr:   ErrInvalidDefinition,
 			errSubStr: "流程必须至少包含 1 个结束节点",
@@ -126,7 +157,8 @@ func (s *EngineTestSuite) TestDeploy() {
 				return m
 			},
 			run: func(ctx context.Context, e Engine) error {
-				return e.Deploy(ctx, buildValidDefinition())
+				_, err := e.Deploy(ctx, buildValidDefinition())
+				return err
 			},
 			errSubStr: "db disk full",
 		},

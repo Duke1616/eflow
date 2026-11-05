@@ -6,7 +6,7 @@ import (
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	sendermocks "github.com/Duke1616/eflow/internal/pkg/notification/mocks"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
@@ -53,7 +53,7 @@ func (s *StartTestSuite) TestSend_RevokeCardToStarter() {
 	}
 
 	s.mockBase.EXPECT().IsGlobalNotify(gomock.Any()).Return(true)
-	s.mockBase.EXPECT().GetNodeProperty(gomock.Any(), "start_node").Return([]easyflow.Node{}, map[string]interface{}{}, nil)
+	s.mockBase.EXPECT().GetNode(gomock.Any(), "start_node").Return([]*flowdsl.Node{}, &flowdsl.Node{ID: "start_node"}, nil)
 	s.mockBase.EXPECT().FetchRequiredData(gomock.Any(), gomock.Any(), gomock.Any()).Return(&strategy.NotificationData{
 		TName: "资源申请",
 		StartUser: domain.User{

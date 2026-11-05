@@ -19,9 +19,10 @@ type Workflow struct {
 	Icon         string                    `gorm:"column:icon;type:varchar(256);comment:'流程设计器图标'"`
 	Owner        string                    `gorm:"column:owner;type:varchar(128);comment:'流程设计所有者/管理员'"`
 	Desc         string                    `gorm:"column:desc;type:text;comment:'流程说明描述'"`
-	ProcessId    int                       `gorm:"column:process_id;type:int;comment:'关联工作流引擎部署的流程模型ID'"`
-	FlowData     sqlx.JsonField[LogicFlow] `gorm:"column:flow_data;type:json;comment:'LogicFlow图形化流程拓扑节点关系json'"`
-	IsNotify     bool                      `gorm:"column:is_notify;type:tinyint(1);default:0;comment:'流程审批流转时是否触发发送通知'"`
+	ProcessId    int                              `gorm:"column:process_id;type:int;comment:'关联工作流引擎部署的流程模型ID'"`
+	EngineType   string                           `gorm:"column:engine_type;type:varchar(32);not null;default:'easy-workflow';comment:'工作流引擎类型(easy-workflow/flowx)'"`
+	FlowData     sqlx.JsonField[domain.CanvasData] `gorm:"column:flow_data;type:json;comment:'图形化流程拓扑节点关系json'"`
+	IsNotify     bool                             `gorm:"column:is_notify;type:tinyint(1);default:0;comment:'流程审批流转时是否触发发送通知'"`
 	NotifyMethod uint8                     `gorm:"column:notify_method;type:tinyint unsigned;comment:'流程通知首选投递渠道类型'"`
 	Ctime        int64                     `gorm:"column:ctime;type:bigint;comment:'创建时间(毫秒)'"`
 	Utime        int64                     `gorm:"column:utime;type:bigint;comment:'修改时间(毫秒)'"`
@@ -32,12 +33,6 @@ func (Workflow) TableName() string {
 	return "workflow"
 }
 
-// LogicFlow 前端流程设计器对应的 JSON 表达结构
-type LogicFlow struct {
-	Edges []domain.FlowEdge `json:"edges"`
-	Nodes []domain.FlowNode `json:"nodes"`
-}
-
 // Snapshot 流程定义发布版本画布快照物理实体
 type Snapshot struct {
 	Id             int64                     `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'快照唯一自增ID'"`
@@ -45,9 +40,10 @@ type Snapshot struct {
 	WorkflowId     int64                     `gorm:"column:workflow_id;type:bigint;not null;uniqueIndex:uix_wf_process_version;comment:'绑定的工作流定义ID'"`
 	ProcessId      int                       `gorm:"column:process_id;type:int;not null;uniqueIndex:uix_wf_process_version;comment:'关联引擎部署的流程模型ID'"`
 	ProcessVersion int                       `gorm:"column:process_version;type:int;not null;uniqueIndex:uix_wf_process_version;comment:'对应流程发布版本号'"`
-	Name           string                    `gorm:"column:name;type:varchar(128);not null;comment:'快照名字'"`
-	FlowData       sqlx.JsonField[LogicFlow] `gorm:"column:flow_data;type:json;comment:'发布快照时对应的画布拓扑结构数据json'"`
-	Ctime          int64                     `gorm:"column:ctime;type:bigint;comment:'创建时间(毫秒)'"`
+	EngineType     string                    `gorm:"column:engine_type;type:varchar(32);not null;default:'easy-workflow';comment:'工作流引擎类型(easy-workflow/flowx)'"`
+	Name           string                           `gorm:"column:name;type:varchar(128);not null;comment:'快照名字'"`
+	FlowData       sqlx.JsonField[domain.CanvasData] `gorm:"column:flow_data;type:json;comment:'发布快照时对应的画布拓扑结构数据json'"`
+	Ctime          int64                            `gorm:"column:ctime;type:bigint;comment:'创建时间(毫秒)'"`
 }
 
 // TableName 指定物理表名
@@ -208,7 +204,7 @@ func (g *gormWorkflowDAO) CreateSnapshot(ctx context.Context, snapshot Snapshot)
 	snapshot.Ctime = time.Now().UnixMilli()
 	return g.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "workflow_id"}, {Name: "process_id"}, {Name: "process_version"}},
-		DoUpdates: clause.AssignmentColumns([]string{"name", "flow_data", "ctime"}),
+		DoUpdates: clause.AssignmentColumns([]string{"name", "engine_type", "flow_data", "ctime"}),
 	}).Create(&snapshot).Error
 }
 

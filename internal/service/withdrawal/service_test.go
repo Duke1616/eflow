@@ -124,7 +124,7 @@ func (s *compensationPlannerStub) Apply(context.Context, int, CompensationPlan) 
 	return s.applyErr
 }
 
-func (s *processRevokerStub) Revoke(int, bool, string) error {
+func (s *processRevokerStub) Revoke(_ context.Context, _ int, _ bool, _ string) error {
 	s.calls++
 	return s.err
 }

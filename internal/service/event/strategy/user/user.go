@@ -8,14 +8,14 @@ import (
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	"github.com/Duke1616/eflow/internal/pkg/notification/sender"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
 	"github.com/Duke1616/eflow/internal/service/event/errs"
 	"github.com/Duke1616/eflow/internal/service/event/strategy"
-	"github.com/ecodeclub/ekit/slice"
 	"github.com/gotomicro/ego/core/elog"
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -36,19 +36,18 @@ func NewNotification(base strategy.Service, sender sender.NotificationSender,
 }
 
 func (n *Notification) Send(ctx context.Context, info strategy.Info) (notification.Response, error) {
-	// 1. 获取当前节点信息
-	nodes, rawProps, err := n.GetNodeProperty(info, info.CurrentNode.NodeID)
-	if err != nil {
-		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), err.Error()), fmt.Errorf("%w: %v", errs.ErrNodeNotConfigured, err)
-	}
-
-	property, err := easyflow.ToNodeProperty[easyflow.UserProperty](easyflow.Node{Properties: rawProps})
+	// 1. 获取当前节点信息（基于统一 DSL 图模型）
+	nodes, node, err := n.GetNode(info, info.CurrentNode.NodeID)
 	if err != nil {
 		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), err.Error()), fmt.Errorf("%w: %v", errs.ErrNodeNotConfigured, err)
 	}
 
 	// 2. 解析审批人
-	users, _ := n.ResolveAssignees(ctx, &info, property.NormalizeAssignees())
+	var assignees []flowdsl.Assignee
+	if userCfg, isUser := node.AsUserTask(); isUser {
+		assignees = userCfg.Assignees
+	}
+	users, _ := n.ResolveAssignees(ctx, &info, assignees)
 	if len(users) == 0 {
 		n.Logger().Warn("未解析到有效审批通知接收人，跳过本次通知发送",
 			elog.String("nodeID", info.CurrentNode.NodeID),
@@ -64,14 +63,14 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 
 	// 4. 异步处理
 	n.SafeGo(ctx, 3*time.Minute, func(sendCtx context.Context) {
-		n.asyncSendNotification(sendCtx, info, property, data, strategy.NewRecipientMap(users, info.Channel))
+		n.asyncSendNotification(sendCtx, info, node, data, strategy.NewRecipientMap(users, info.Channel))
 	})
 
 	return notification.NewSuccessResponse(0, "success"), nil
 }
 
 func (n *Notification) asyncSendNotification(ctx context.Context, info strategy.Info,
-	property easyflow.UserProperty, data *strategy.NotificationData, userMap strategy.RecipientMap) {
+	node *flowdsl.Node, data *strategy.NotificationData, userMap strategy.RecipientMap) {
 	// 1. 尝试拉取任务，支持重试（引擎异步落库需时间）
 	tasks, err := n.FetchTasksWithRetry(ctx, info)
 	if err != nil {
@@ -80,7 +79,7 @@ func (n *Notification) asyncSendNotification(ctx context.Context, info strategy.
 	}
 
 	// 2. 准备通知元数据（模板、标题、抄送自动处理）
-	template, title := n.prepareNotificationMetadata(ctx, property, data, tasks)
+	template, title := n.prepareNotificationMetadata(ctx, node, data, tasks)
 
 	// 3. 全局通知校验（确保抄送自动通过已执行后校验）
 	if ok := n.IsGlobalNotify(info.Workflow); !ok {
@@ -97,7 +96,11 @@ func (n *Notification) asyncSendNotification(ctx context.Context, info strategy.
 
 	// 5. 发行标准通知卡片
 	fields := n.PrepareCommonFields(info, data)
-	notifications := slice.Map(tasks, func(idx int, src model.Task) notification.Notification {
+	var formFields []flowdsl.Field
+	if userCfg, isUser := node.AsUserTask(); isUser {
+		formFields = userCfg.Fields
+	}
+	notifications := lo.Map(tasks, func(src model.Task, _ int) notification.Notification {
 		receiver := userMap.GetID(src.UserID)
 		return notification.Notification{
 			Channel:    notification.Channel(info.Channel),
@@ -107,7 +110,7 @@ func (n *Notification) asyncSendNotification(ctx context.Context, info strategy.
 				Name:   template,
 				Title:  title,
 				Fields: fields,
-				InputFields: slice.Map(property.Fields, func(idx int, src easyflow.Field) notification.InputField {
+				InputFields: lo.Map(formFields, func(src flowdsl.Field, _ int) notification.InputField {
 					return notification.InputField{
 						Name:     src.Name,
 						Key:      src.Key,
@@ -115,10 +118,10 @@ func (n *Notification) asyncSendNotification(ctx context.Context, info strategy.
 						Required: src.Required,
 						Value:    src.Value,
 						ReadOnly: src.ReadOnly,
-						Options: slice.Map(src.Options, func(idx int, src easyflow.Option) notification.InputOption {
+						Options: lo.Map(src.Options, func(opt flowdsl.Option, _ int) notification.InputOption {
 							return notification.InputOption{
-								Label: src.Label,
-								Value: src.Value,
+								Label: opt.Label,
+								Value: opt.Value,
 							}
 						}),
 						Props: src.Props,
@@ -136,7 +139,7 @@ func (n *Notification) asyncSendNotification(ctx context.Context, info strategy.
 }
 
 func (n *Notification) prepareNotificationMetadata(ctx context.Context,
-	property easyflow.UserProperty, data *strategy.NotificationData, tasks []model.Task) (domain.NotifyType, string) {
+	_ *flowdsl.Node, data *strategy.NotificationData, _ []model.Task) (domain.NotifyType, string) {
 	return domain.NotifyTypeApproval, rule.GenerateTitle(data.StartUser.DisplayName, data.TName)
 }
 

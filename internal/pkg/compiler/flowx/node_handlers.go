@@ -1,10 +1,9 @@
 package flowx
 
 import (
-	"fmt"
 	"strings"
 
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/pkg/flowx/model"
 	"github.com/samber/lo"
 )
@@ -12,16 +11,12 @@ import (
 // StartNodeConverter 开始节点转换器
 type StartNodeConverter struct{}
 
-func (c *StartNodeConverter) Type() string { return NodeTypeStart }
+func (c *StartNodeConverter) Type() flowdsl.NodeType { return flowdsl.NodeStart }
 
-func (c *StartNodeConverter) Convert(_ *ConvertContext, raw Node) (model.NodeSpec, error) {
-	prop, _ := DecodeProperty[easyflow.StartProperty](raw.Properties)
-	name := DefaultNameStart
-	if strings.TrimSpace(prop.Name) != "" {
-		name = prop.Name
-	}
+func (c *StartNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
+	name := lo.Ternary(strings.TrimSpace(node.Name) != "", node.Name, DefaultNameStart)
 	return model.NodeSpec{
-		ID:   raw.ID,
+		ID:   node.ID,
 		Name: name,
 		Type: model.NodeStart,
 	}, nil
@@ -30,16 +25,12 @@ func (c *StartNodeConverter) Convert(_ *ConvertContext, raw Node) (model.NodeSpe
 // EndNodeConverter 结束办结节点转换器
 type EndNodeConverter struct{}
 
-func (c *EndNodeConverter) Type() string { return NodeTypeEnd }
+func (c *EndNodeConverter) Type() flowdsl.NodeType { return flowdsl.NodeEnd }
 
-func (c *EndNodeConverter) Convert(_ *ConvertContext, raw Node) (model.NodeSpec, error) {
-	prop, _ := DecodeProperty[easyflow.EndProperty](raw.Properties)
-	name := DefaultNameEnd
-	if strings.TrimSpace(prop.Name) != "" {
-		name = prop.Name
-	}
+func (c *EndNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
+	name := lo.Ternary(strings.TrimSpace(node.Name) != "", node.Name, DefaultNameEnd)
 	return model.NodeSpec{
-		ID:   raw.ID,
+		ID:   node.ID,
 		Name: name,
 		Type: model.NodeEnd,
 	}, nil
@@ -48,37 +39,27 @@ func (c *EndNodeConverter) Convert(_ *ConvertContext, raw Node) (model.NodeSpec,
 // UserNodeConverter 人工审批与抄送节点转换器
 type UserNodeConverter struct{}
 
-func (c *UserNodeConverter) Type() string { return NodeTypeUser }
+func (c *UserNodeConverter) Type() flowdsl.NodeType { return flowdsl.NodeUserTask }
 
-func (c *UserNodeConverter) Convert(_ *ConvertContext, raw Node) (model.NodeSpec, error) {
-	prop, err := DecodeProperty[easyflow.UserProperty](raw.Properties)
-	if err != nil {
-		return model.NodeSpec{}, fmt.Errorf("解析用户节点属性失败 [id=%s]: %w", raw.ID, err)
+func (c *UserNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
+	name := lo.Ternary(strings.TrimSpace(node.Name) != "", node.Name, DefaultNameUser)
+	userCfg, _ := node.AsUserTask()
+
+	isCC := userCfg != nil && userCfg.IsCC
+	isCosigned := userCfg != nil && userCfg.IsCosigned
+	var (
+		assignees       []string
+		hasDynamicRules bool
+	)
+	if userCfg != nil {
+		assignees, hasDynamicRules = c.resolveAssignees(userCfg.Assignees)
 	}
 
-	name := DefaultNameUser
-	if strings.TrimSpace(prop.Name) != "" {
-		name = prop.Name
-	}
+	nodeType := lo.Ternary(isCC, model.NodeCarbonCopy, model.NodeApproval)
+	signRule := lo.Ternary(isCosigned, model.SignAllPass, model.SignOneVote)
 
-	// 1. 判断节点角色：抄送 (CC) vs 人工审批 (Approval)
-	nodeType := model.NodeApproval
-	if prop.IsCC {
-		nodeType = model.NodeCarbonCopy
-	}
-
-	// 2. 审批规则仲裁：会签 (ALL_PASS) vs 或签 (ONE_VOTE)
-	signRule := model.SignOneVote
-	if prop.IsCosigned {
-		signRule = model.SignAllPass
-	}
-
-	// 3. 规范化提取分配规则，并转换为标准 URN 标识符
-	assignees, hasDynamicRules := c.resolveAssignees(prop)
-
-	// 4. 组装节点规格
 	spec := model.NodeSpec{
-		ID:        raw.ID,
+		ID:        node.ID,
 		Name:      name,
 		Type:      nodeType,
 		SignRule:  signRule,
@@ -87,7 +68,6 @@ func (c *UserNodeConverter) Convert(_ *ConvertContext, raw Node) (model.NodeSpec
 		Props:     make(map[string]any),
 	}
 
-	// 若存在动态算人规则（如 team / oncall / leader / department），自动挂载算人 Hook
 	if hasDynamicRules {
 		spec.Hooks = append(spec.Hooks, "dynamic_assignee_resolver")
 	}
@@ -95,49 +75,39 @@ func (c *UserNodeConverter) Convert(_ *ConvertContext, raw Node) (model.NodeSpec
 	return spec, nil
 }
 
-// resolveAssignees 将 LogicFlow 配置的多维度分配规则归一化为 URN 格式
-func (c *UserNodeConverter) resolveAssignees(prop easyflow.UserProperty) ([]string, bool) {
-	rules := prop.NormalizeAssignees()
+// resolveAssignees 将标准 Assignee 分配规则归一化为 URN 标识符
+func (c *UserNodeConverter) resolveAssignees(assignees []flowdsl.Assignee) ([]string, bool) {
 	var (
 		result          []string
 		hasDynamicRules bool
 	)
 
-	for _, a := range rules {
+	for _, a := range assignees {
 		switch a.Rule {
-		case easyflow.APPOINT:
-			// 静态指定用户
+		case flowdsl.APPOINT:
 			for _, val := range a.Values {
 				if trimmed := strings.TrimSpace(val); trimmed != "" {
 					result = append(result, trimmed)
 				}
 			}
-		case easyflow.FOUNDER:
-			// 发起人自身
+		case flowdsl.FOUNDER, flowdsl.LEADER, flowdsl.MainLeader:
 			result = append(result, "leader:starter")
 			hasDynamicRules = true
-		case easyflow.LEADER, easyflow.MAIN_LEADER:
-			// 直属领导或分管领导
-			result = append(result, "leader:starter")
-			hasDynamicRules = true
-		case easyflow.TEAM:
-			// 团队人员
+		case flowdsl.TEAM:
 			for _, val := range a.Values {
 				if trimmed := strings.TrimSpace(val); trimmed != "" {
 					result = append(result, "team:"+trimmed)
 					hasDynamicRules = true
 				}
 			}
-		case easyflow.ON_CALL:
-			// 值班人员
+		case flowdsl.OnCall:
 			for _, val := range a.Values {
 				if trimmed := strings.TrimSpace(val); trimmed != "" {
 					result = append(result, "oncall:"+trimmed)
 					hasDynamicRules = true
 				}
 			}
-		case easyflow.DEPARTMENT:
-			// 部门人员
+		case flowdsl.DEPARTMENT:
 			for _, val := range a.Values {
 				if trimmed := strings.TrimSpace(val); trimmed != "" {
 					result = append(result, "dept:"+trimmed)
@@ -145,7 +115,6 @@ func (c *UserNodeConverter) resolveAssignees(prop easyflow.UserProperty) ([]stri
 				}
 			}
 		default:
-			// 兜底直接使用 values
 			for _, val := range a.Values {
 				if trimmed := strings.TrimSpace(val); trimmed != "" {
 					result = append(result, trimmed)
@@ -160,11 +129,11 @@ func (c *UserNodeConverter) resolveAssignees(prop easyflow.UserProperty) ([]stri
 // ParallelGatewayConverter 并行网关转换器 (AND)
 type ParallelGatewayConverter struct{}
 
-func (c *ParallelGatewayConverter) Type() string { return NodeTypeParallel }
+func (c *ParallelGatewayConverter) Type() flowdsl.NodeType { return flowdsl.NodeGatewayParallel }
 
-func (c *ParallelGatewayConverter) Convert(_ *ConvertContext, raw Node) (model.NodeSpec, error) {
+func (c *ParallelGatewayConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
 	return model.NodeSpec{
-		ID:   raw.ID,
+		ID:   node.ID,
 		Name: DefaultNameParallel,
 		Type: model.NodeGatewayParallel,
 	}, nil
@@ -173,11 +142,11 @@ func (c *ParallelGatewayConverter) Convert(_ *ConvertContext, raw Node) (model.N
 // InclusionGatewayConverter 包容网关转换器 (OR)
 type InclusionGatewayConverter struct{}
 
-func (c *InclusionGatewayConverter) Type() string { return NodeTypeInclusion }
+func (c *InclusionGatewayConverter) Type() flowdsl.NodeType { return flowdsl.NodeGatewayInclusive }
 
-func (c *InclusionGatewayConverter) Convert(_ *ConvertContext, raw Node) (model.NodeSpec, error) {
+func (c *InclusionGatewayConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
 	return model.NodeSpec{
-		ID:   raw.ID,
+		ID:   node.ID,
 		Name: DefaultNameInclusion,
 		Type: model.NodeGatewayInclusive,
 	}, nil
@@ -186,25 +155,13 @@ func (c *InclusionGatewayConverter) Convert(_ *ConvertContext, raw Node) (model.
 // SelectiveGatewayConverter 排他网关转换器 (XOR)
 type SelectiveGatewayConverter struct{}
 
-func (c *SelectiveGatewayConverter) Type() string { return NodeTypeSelective }
+func (c *SelectiveGatewayConverter) Type() flowdsl.NodeType { return flowdsl.NodeGatewayExclusive }
 
-func (c *SelectiveGatewayConverter) Convert(_ *ConvertContext, raw Node) (model.NodeSpec, error) {
+func (c *SelectiveGatewayConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
+	name := lo.Ternary(strings.TrimSpace(node.Name) != "", node.Name, DefaultNameSelective)
 	return model.NodeSpec{
-		ID:   raw.ID,
-		Name: DefaultNameSelective,
-		Type: model.NodeGatewayExclusive,
-	}, nil
-}
-
-// ConditionGatewayConverter 兼容旧版 condition 节点（映射为排他网关）
-type ConditionGatewayConverter struct{}
-
-func (c *ConditionGatewayConverter) Type() string { return NodeTypeCondition }
-
-func (c *ConditionGatewayConverter) Convert(_ *ConvertContext, raw Node) (model.NodeSpec, error) {
-	return model.NodeSpec{
-		ID:   raw.ID,
-		Name: "条件网关",
+		ID:   node.ID,
+		Name: name,
 		Type: model.NodeGatewayExclusive,
 	}, nil
 }
@@ -212,25 +169,23 @@ func (c *ConditionGatewayConverter) Convert(_ *ConvertContext, raw Node) (model.
 // AutomationNodeConverter 自动化作业任务转换器
 type AutomationNodeConverter struct{}
 
-func (c *AutomationNodeConverter) Type() string { return NodeTypeAuto }
+func (c *AutomationNodeConverter) Type() flowdsl.NodeType { return flowdsl.NodeAutoTask }
 
-func (c *AutomationNodeConverter) Convert(_ *ConvertContext, raw Node) (model.NodeSpec, error) {
-	prop, _ := DecodeProperty[easyflow.AutomationProperty](raw.Properties)
-	name := "自动化任务"
-	if strings.TrimSpace(prop.Name) != "" {
-		name = prop.Name
-	}
+func (c *AutomationNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
+	name := lo.Ternary(strings.TrimSpace(node.Name) != "", node.Name, "自动化任务")
 
 	props := make(map[string]any)
-	if prop.CodebookId > 0 {
-		props["codebook_id"] = prop.CodebookId
-	}
-	if prop.RunnerID > 0 {
-		props["runner_id"] = prop.RunnerID
+	if autoCfg, ok := node.AsAutoTask(); ok {
+		if autoCfg.CodebookID > 0 {
+			props["codebook_id"] = autoCfg.CodebookID
+		}
+		if autoCfg.RunnerID > 0 {
+			props["runner_id"] = autoCfg.RunnerID
+		}
 	}
 
 	return model.NodeSpec{
-		ID:         raw.ID,
+		ID:         node.ID,
 		Name:       name,
 		Type:       model.NodeTask,
 		WorkerType: "automation",

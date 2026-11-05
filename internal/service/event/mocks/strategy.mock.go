@@ -16,7 +16,7 @@ import (
 
 	model "github.com/Bunny3th/easy-workflow/workflow/model"
 	domain "github.com/Duke1616/eflow/internal/domain"
-	easyflow "github.com/Duke1616/eflow/internal/pkg/easyflow"
+	flowdsl "github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	notification "github.com/Duke1616/eflow/internal/pkg/notification"
 	strategy "github.com/Duke1616/eflow/internal/service/event/strategy"
 	elog "github.com/gotomicro/ego/core/elog"
@@ -48,7 +48,7 @@ func (m *MockService) EXPECT() *MockServiceMockRecorder {
 }
 
 // FetchRequiredData mocks base method.
-func (m *MockService) FetchRequiredData(ctx context.Context, info strategy.Info, nodes []easyflow.Node) (*strategy.NotificationData, error) {
+func (m *MockService) FetchRequiredData(ctx context.Context, info strategy.Info, nodes []*flowdsl.Node) (*strategy.NotificationData, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchRequiredData", ctx, info, nodes)
 	ret0, _ := ret[0].(*strategy.NotificationData)
@@ -75,13 +75,13 @@ func (c *MockServiceFetchRequiredDataCall) Return(arg0 *strategy.NotificationDat
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockServiceFetchRequiredDataCall) Do(f func(context.Context, strategy.Info, []easyflow.Node) (*strategy.NotificationData, error)) *MockServiceFetchRequiredDataCall {
+func (c *MockServiceFetchRequiredDataCall) Do(f func(context.Context, strategy.Info, []*flowdsl.Node) (*strategy.NotificationData, error)) *MockServiceFetchRequiredDataCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceFetchRequiredDataCall) DoAndReturn(f func(context.Context, strategy.Info, []easyflow.Node) (*strategy.NotificationData, error)) *MockServiceFetchRequiredDataCall {
+func (c *MockServiceFetchRequiredDataCall) DoAndReturn(f func(context.Context, strategy.Info, []*flowdsl.Node) (*strategy.NotificationData, error)) *MockServiceFetchRequiredDataCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -164,42 +164,42 @@ func (c *MockServiceFindTaskFormsCall) DoAndReturn(f func(context.Context, int64
 	return c
 }
 
-// GetNodeProperty mocks base method.
-func (m *MockService) GetNodeProperty(info strategy.Info, nodeID string) ([]easyflow.Node, any, error) {
+// GetNode mocks base method.
+func (m *MockService) GetNode(info strategy.Info, nodeID string) ([]*flowdsl.Node, *flowdsl.Node, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetNodeProperty", info, nodeID)
-	ret0, _ := ret[0].([]easyflow.Node)
-	ret1, _ := ret[1].(any)
+	ret := m.ctrl.Call(m, "GetNode", info, nodeID)
+	ret0, _ := ret[0].([]*flowdsl.Node)
+	ret1, _ := ret[1].(*flowdsl.Node)
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }
 
-// GetNodeProperty indicates an expected call of GetNodeProperty.
-func (mr *MockServiceMockRecorder) GetNodeProperty(info, nodeID any) *MockServiceGetNodePropertyCall {
+// GetNode indicates an expected call of GetNode.
+func (mr *MockServiceMockRecorder) GetNode(info, nodeID any) *MockServiceGetNodeCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNodeProperty", reflect.TypeOf((*MockService)(nil).GetNodeProperty), info, nodeID)
-	return &MockServiceGetNodePropertyCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNode", reflect.TypeOf((*MockService)(nil).GetNode), info, nodeID)
+	return &MockServiceGetNodeCall{Call: call}
 }
 
-// MockServiceGetNodePropertyCall wrap *gomock.Call
-type MockServiceGetNodePropertyCall struct {
+// MockServiceGetNodeCall wrap *gomock.Call
+type MockServiceGetNodeCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockServiceGetNodePropertyCall) Return(arg0 []easyflow.Node, arg1 any, arg2 error) *MockServiceGetNodePropertyCall {
+func (c *MockServiceGetNodeCall) Return(arg0 []*flowdsl.Node, arg1 *flowdsl.Node, arg2 error) *MockServiceGetNodeCall {
 	c.Call = c.Call.Return(arg0, arg1, arg2)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockServiceGetNodePropertyCall) Do(f func(strategy.Info, string) ([]easyflow.Node, any, error)) *MockServiceGetNodePropertyCall {
+func (c *MockServiceGetNodeCall) Do(f func(strategy.Info, string) ([]*flowdsl.Node, *flowdsl.Node, error)) *MockServiceGetNodeCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceGetNodePropertyCall) DoAndReturn(f func(strategy.Info, string) ([]easyflow.Node, any, error)) *MockServiceGetNodePropertyCall {
+func (c *MockServiceGetNodeCall) DoAndReturn(f func(strategy.Info, string) ([]*flowdsl.Node, *flowdsl.Node, error)) *MockServiceGetNodeCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -357,7 +357,7 @@ func (c *MockServicePrepareCommonFieldsCall) DoAndReturn(f func(strategy.Info, *
 }
 
 // ResolveAssignees mocks base method.
-func (m *MockService) ResolveAssignees(ctx context.Context, info *strategy.Info, assignees []easyflow.Assignee) ([]domain.User, error) {
+func (m *MockService) ResolveAssignees(ctx context.Context, info *strategy.Info, assignees []flowdsl.Assignee) ([]domain.User, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ResolveAssignees", ctx, info, assignees)
 	ret0, _ := ret[0].([]domain.User)
@@ -384,13 +384,13 @@ func (c *MockServiceResolveAssigneesCall) Return(arg0 []domain.User, arg1 error)
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockServiceResolveAssigneesCall) Do(f func(context.Context, *strategy.Info, []easyflow.Assignee) ([]domain.User, error)) *MockServiceResolveAssigneesCall {
+func (c *MockServiceResolveAssigneesCall) Do(f func(context.Context, *strategy.Info, []flowdsl.Assignee) ([]domain.User, error)) *MockServiceResolveAssigneesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockServiceResolveAssigneesCall) DoAndReturn(f func(context.Context, *strategy.Info, []easyflow.Assignee) ([]domain.User, error)) *MockServiceResolveAssigneesCall {
+func (c *MockServiceResolveAssigneesCall) DoAndReturn(f func(context.Context, *strategy.Info, []flowdsl.Assignee) ([]domain.User, error)) *MockServiceResolveAssigneesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

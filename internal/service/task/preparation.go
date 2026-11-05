@@ -8,13 +8,13 @@ import (
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 )
 
 const taskPreparationOperation = "准备"
 
 type preparation struct {
-	automation easyflow.AutomationProperty
+	automation flowdsl.AutoTaskConfig
 	input      domain.TaskArgs
 }
 
@@ -72,10 +72,16 @@ func (s *taskService) resolvePreparation(ctx context.Context, task domain.Task,
 	if err != nil {
 		return preparation{}, s.taskError(task.ID, taskPreparationOperation, err)
 	}
-	automation, err := s.workflows.GetAutomationProperty(easyflow.FromDomainWorkflow(flow), task.NodeID)
+	graph, err := flowdsl.Parse(flow.FlowData)
 	if err != nil {
 		return preparation{}, s.taskError(task.ID, taskPreparationOperation, err)
 	}
+	node, ok := graph.GetNode(task.NodeID)
+	autoCfg, isAuto := node.AsAutoTask()
+	if !ok || !isAuto {
+		return preparation{}, s.taskError(task.ID, taskPreparationOperation, fmt.Errorf("自动化节点 %s 未配置", task.NodeID))
+	}
+	automation := *autoCfg
 	input, err := s.assembleRuntimeArgs(ctx, ticket)
 	if err != nil {
 		return preparation{automation: automation}, s.taskError(task.ID, taskPreparationOperation, err)
@@ -84,10 +90,10 @@ func (s *taskService) resolvePreparation(ctx context.Context, task domain.Task,
 }
 
 func (s *taskService) resolveRunner(ctx context.Context, templateID int64, nodeID string,
-	automation easyflow.AutomationProperty, input domain.TaskArgs) (domain.RunnerRouteDecision, error) {
+	automation flowdsl.AutoTaskConfig, input domain.TaskArgs) (domain.RunnerRouteDecision, error) {
 	decision := domain.RunnerRouteDecision{DefaultRunnerID: automation.RunnerID}
 	if templateID > 0 && s.dispatches != nil {
-		runner, ruleID, err := s.resolveRunnerByDispatch(ctx, templateID, nodeID, automation.CodebookId, input)
+		runner, ruleID, err := s.resolveRunnerByDispatch(ctx, templateID, nodeID, automation.CodebookID, input)
 		if err != nil {
 			return domain.RunnerRouteDecision{}, err
 		}
@@ -104,9 +110,9 @@ func (s *taskService) resolveRunner(ctx context.Context, templateID int64, nodeI
 	if err != nil {
 		return domain.RunnerRouteDecision{}, fmt.Errorf("查询默认执行单元失败: %w", err)
 	}
-	if defaultRunner.CodebookID != automation.CodebookId {
+	if defaultRunner.CodebookID != automation.CodebookID {
 		return domain.RunnerRouteDecision{}, fmt.Errorf(
-			"默认执行单元 %d 未绑定自动化节点脚本 %d", defaultRunner.ID, automation.CodebookId)
+			"默认执行单元 %d 未绑定自动化节点脚本 %d", defaultRunner.ID, automation.CodebookID)
 	}
 	decision.SelectedRunnerID = defaultRunner.ID
 	return decision, nil

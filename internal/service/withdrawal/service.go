@@ -9,6 +9,7 @@ import (
 
 	"github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Duke1616/eflow/internal/repository"
+	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 )
 
 var ErrAutomationRunning = errors.New("自动化任务正在执行，暂时无法撤回")
@@ -28,18 +29,23 @@ type service struct {
 	revoker processRevoker
 }
 
-func NewService(repo repository.WithdrawalRepository, planner CompensationPlanner) Service {
-	return newService(repo, planner, engineRevoker{})
+func NewService(repo repository.WithdrawalRepository, planner CompensationPlanner, dispatcher engineSvc.IEngineDispatcher) Service {
+	return newService(repo, planner, engineRevoker{dispatcher: dispatcher})
 }
 
 type processRevoker interface {
 	// Revoke 将指定流程实例交由流程引擎撤回。
-	Revoke(processInstanceID int, force bool, username string) error
+	Revoke(ctx context.Context, processInstanceID int, force bool, username string) error
 }
 
-type engineRevoker struct{}
+type engineRevoker struct {
+	dispatcher engineSvc.IEngineDispatcher
+}
 
-func (engineRevoker) Revoke(processInstanceID int, force bool, username string) error {
+func (r engineRevoker) Revoke(ctx context.Context, processInstanceID int, force bool, username string) error {
+	if r.dispatcher != nil {
+		return r.dispatcher.Revoke(ctx, engineSvc.NewID(processInstanceID), force, username)
+	}
 	return engine.InstanceRevoke(processInstanceID, force, username)
 }
 
@@ -76,7 +82,7 @@ func (s *service) Revoke(ctx context.Context, processInstanceID int, force bool,
 		}
 	}()
 
-	if err := s.revoker.Revoke(processInstanceID, force, username); err != nil {
+	if err := s.revoker.Revoke(ctx, processInstanceID, force, username); err != nil {
 		return err
 	}
 	revoked = true

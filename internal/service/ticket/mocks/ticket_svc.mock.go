@@ -14,7 +14,7 @@ import (
 	reflect "reflect"
 
 	domain "github.com/Duke1616/eflow/internal/domain"
-	easyflow "github.com/Duke1616/eflow/internal/pkg/easyflow"
+	flowdsl "github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -130,10 +130,10 @@ func (mr *MockServiceMockRecorder) GetByProcessInstanceID(ctx, instanceId any) *
 }
 
 // GetTaskFormConfig mocks base method.
-func (m *MockService) GetTaskFormConfig(ctx context.Context, taskId int, workflowId int64) ([]easyflow.Field, error) {
+func (m *MockService) GetTaskFormConfig(ctx context.Context, taskId int, workflowId int64) ([]flowdsl.Field, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetTaskFormConfig", ctx, taskId, workflowId)
-	ret0, _ := ret[0].([]easyflow.Field)
+	ret0, _ := ret[0].([]flowdsl.Field)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

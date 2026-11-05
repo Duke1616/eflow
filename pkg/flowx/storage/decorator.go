@@ -28,6 +28,10 @@ func (d *Decorator) GetDefinition(ctx context.Context, key string, version int) 
 	return d.target.GetDefinition(ctx, key, version)
 }
 
+func (d *Decorator) GetLatestVersion(ctx context.Context, key string) (int, error) {
+	return d.target.GetLatestVersion(ctx, key)
+}
+
 func (d *Decorator) SaveInstance(ctx context.Context, inst *model.Instance) error {
 	return d.target.SaveInstance(ctx, inst)
 }

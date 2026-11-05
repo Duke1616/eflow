@@ -5,22 +5,20 @@ import (
 	"testing"
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/stretchr/testify/require"
 )
 
 func TestLogicFlow_Deploy_Benchmark(t *testing.T) {
 	testCases := []struct {
 		name         string
-		workflow     Workflow
+		flow         map[string]any
 		expectedJSON string
 	}{
 		{
 			name: "环境发版 (Agent 发版)",
-			workflow: Workflow{
-				Name:  "环境发版",
-				Owner: "admin",
-				FlowData: LogicFlow{
-					Nodes: []map[string]interface{}{
+			flow: map[string]any{
+				"nodes": []map[string]any{
 						{"id": "6f9f19dd-e986-46b0-aacb-b27f29462fcf", "type": "start", "properties": map[string]interface{}{"is_notify": true}},
 						{"id": "e45dc192-147e-49c9-be02-22139fbef53c", "type": "end"},
 						{"id": "f8c6bc45-0626-4288-a4a6-537259aa8ccb", "type": "selective"},
@@ -38,7 +36,7 @@ func TestLogicFlow_Deploy_Benchmark(t *testing.T) {
 						{"id": "80852ea2-0de3-421f-8c75-0527f9999067", "type": "user", "properties": map[string]interface{}{"name": "123", "is_cc": true, "rule": "founder"}},
 						{"id": "f9f1fe1e-6882-4c2d-942b-24bf9f3fa039", "type": "chat", "properties": map[string]interface{}{"name": "群通知", "title": "发版执行结果", "mode": "existing"}},
 					},
-					Edges: []map[string]interface{}{
+				"edges": []map[string]any{
 						{"id": "e1", "sourceNodeId": "6f9f19dd-e986-46b0-aacb-b27f29462fcf", "targetNodeId": "80852ea2-0de3-421f-8c75-0527f9999067"},
 						{"id": "e2", "sourceNodeId": "80852ea2-0de3-421f-8c75-0527f9999067", "targetNodeId": "f8c6bc45-0626-4288-a4a6-537259aa8ccb"},
 						{"id": "e3", "sourceNodeId": "f8c6bc45-0626-4288-a4a6-537259aa8ccb", "targetNodeId": "a13994d0-7e6f-49db-adf9-adceb1971ab6"},
@@ -59,7 +57,6 @@ func TestLogicFlow_Deploy_Benchmark(t *testing.T) {
 						{"id": "e_end", "sourceNodeId": "f9f1fe1e-6882-4c2d-942b-24bf9f3fa039", "targetNodeId": "e45dc192-147e-49c9-be02-22139fbef53c"},
 					},
 				},
-			},
 			expectedJSON: `{
 				"ProcessName": "环境发版",
 				"Source": "工单系统",
@@ -69,11 +66,8 @@ func TestLogicFlow_Deploy_Benchmark(t *testing.T) {
 		},
 		{
 			name: "并行测试",
-			workflow: Workflow{
-				Name:  "并行测试",
-				Owner: "admin",
-				FlowData: LogicFlow{
-					Nodes: []map[string]interface{}{
+			flow: map[string]any{
+				"nodes": []map[string]any{
 						{"id": "86a7c39c-28a3-4875-b08d-56b4223e2903", "type": "start", "properties": map[string]interface{}{"height": 40, "width": 40}},
 						{"id": "37a7885b-6b04-4bf5-9c26-53abc005d20b", "type": "end", "properties": map[string]interface{}{"height": 40, "width": 40}},
 						{"id": "c21ae10c-6f62-4d0d-91cb-daaa7965807b", "type": "user", "properties": map[string]interface{}{"name": "领导", "approved": []string{"luankz"}, "rule": "appoint"}},
@@ -90,7 +84,7 @@ func TestLogicFlow_Deploy_Benchmark(t *testing.T) {
 						{"id": "6fb0e7ec-8fdf-46a2-9ef8-d629fdae65c0", "type": "parallel"},
 						{"id": "f6a7a752-ed54-4bff-ae87-689b797dac92", "type": "user", "properties": map[string]interface{}{"name": "提交人", "rule": "founder"}},
 					},
-					Edges: []map[string]interface{}{
+				"edges": []map[string]any{
 						{"id": "97333e79-ec3b-46ff-a548-888426e3c584", "sourceNodeId": "c21ae10c-6f62-4d0d-91cb-daaa7965807b", "targetNodeId": "37a7885b-6b04-4bf5-9c26-53abc005d20b"},
 						{"id": "69fb51e5-e141-4a5e-b280-6b311a719326", "sourceNodeId": "e2717c58-9946-4b26-99ab-2f034163365d", "targetNodeId": "117fa0c6-e0f6-4222-adfc-7e7d3b5103e3", "properties": map[string]interface{}{"expression": "$name = '张三'"}},
 						{"id": "4c0cd2ff-9c3b-4ae2-b977-4d2760a39062", "sourceNodeId": "e2717c58-9946-4b26-99ab-2f034163365d", "targetNodeId": "3f1761ee-57c6-437c-83a5-53450f7966a9", "properties": map[string]interface{}{"expression": "$name = '李四'"}},
@@ -110,7 +104,6 @@ func TestLogicFlow_Deploy_Benchmark(t *testing.T) {
 						{"id": "a4d1405e-b6eb-46a5-855b-295b9683fd95", "sourceNodeId": "f6a7a752-ed54-4bff-ae87-689b797dac92", "targetNodeId": "2d514c1e-b79d-46a4-aef8-65a83130495d"},
 					},
 				},
-			},
 			expectedJSON: `{
 				"ProcessName":"并行测试",
 				"Source":"工单系统",
@@ -124,7 +117,10 @@ func TestLogicFlow_Deploy_Benchmark(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			process, err := converter.Convert(tc.workflow)
+			graph, err := flowdsl.Parse(tc.flow)
+			require.NoError(t, err)
+
+			process, err := converter.Convert(tc.name, graph)
 			require.NoError(t, err)
 
 			var expectedProcess model.Process

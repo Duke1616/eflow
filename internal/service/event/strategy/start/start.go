@@ -38,7 +38,7 @@ func (s *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 		elog.String("node_id", info.CurrentNode.NodeID))
 
 	// 3. 加载基础通知元数据
-	nodes, _, err := s.GetNodeProperty(info, info.CurrentNode.NodeID)
+	nodes, _, err := s.GetNode(info, info.CurrentNode.NodeID)
 	if err != nil {
 		return notification.NewErrorResponse(string(errs.ErrorCodeNodeNotConfigured), err.Error()), fmt.Errorf("%w: %v", errs.ErrNodeNotConfigured, err)
 	}

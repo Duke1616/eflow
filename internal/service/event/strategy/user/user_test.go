@@ -10,7 +10,7 @@ import (
 
 	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	sendermocks "github.com/Duke1616/eflow/internal/pkg/notification/mocks"
 	strategymocks "github.com/Duke1616/eflow/internal/service/event/mocks"
@@ -61,13 +61,17 @@ func (s *UserTestSuite) TestSend_StandardApproval() {
 		},
 	}
 
-	s.mockBase.EXPECT().GetNodeProperty(gomock.Any(), "audit_node").Return([]easyflow.Node{}, map[string]interface{}{
-		"fields": []interface{}{
-			map[string]interface{}{
-				"name":     "审批意见",
-				"key":      "remark",
-				"type":     "string",
-				"required": true,
+	s.mockBase.EXPECT().GetNode(gomock.Any(), "audit_node").Return(nil, &flowdsl.Node{
+		ID:   "audit_node",
+		Type: flowdsl.NodeUserTask,
+		UserTask: &flowdsl.UserTaskConfig{
+			Fields: []flowdsl.Field{
+				{
+					Name:     "审批意见",
+					Key:      "remark",
+					Type:     "string",
+					Required: true,
+				},
 			},
 		},
 	}, nil)
@@ -146,7 +150,7 @@ func (s *UserTestSuite) TestSend_AlertOrder() {
 		},
 	}
 
-	s.mockBase.EXPECT().GetNodeProperty(gomock.Any(), "alert_node").Return([]easyflow.Node{}, map[string]interface{}{}, nil)
+	s.mockBase.EXPECT().GetNode(gomock.Any(), "alert_node").Return(nil, &flowdsl.Node{}, nil)
 	s.mockBase.EXPECT().ResolveAssignees(gomock.Any(), gomock.Any(), gomock.Any()).Return([]domain.User{
 		{Username: "op1", LarkUserId: "fs_op1"},
 	}, nil)

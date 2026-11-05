@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
@@ -26,7 +25,7 @@ func TestCompensationPlannerBuildIsReadOnly(t *testing.T) {
 		taskRepo, withdrawals, tasks,
 		&plannerTicketServiceStub{ticket: domain.Ticket{Id: 42, TenantID: 7, WorkflowId: 9}},
 		&plannerEngineServiceStub{instance: domain.Instance{ProcID: 10, ProcVersion: 2}},
-		&plannerWorkflowServiceStub{property: easyflow.AutomationProperty{Name: "权限回收"}},
+		&plannerWorkflowServiceStub{nodeName: "权限回收"},
 	)
 
 	plan, err := planner.Build(context.Background(), 101)
@@ -118,14 +117,22 @@ func (s *plannerEngineServiceStub) GetInstanceByID(context.Context, int) (domain
 
 type plannerWorkflowServiceStub struct {
 	workflowSvc.Service
-	property easyflow.AutomationProperty
+	nodeName string
 }
 
 func (s *plannerWorkflowServiceStub) FindInstanceFlow(context.Context, int64, int, int) (domain.Workflow, error) {
-	return domain.Workflow{}, nil
-}
-
-func (s *plannerWorkflowServiceStub) GetAutomationProperty(easyflow.Workflow,
-	string) (easyflow.AutomationProperty, error) {
-	return s.property, nil
+	return domain.Workflow{
+		FlowData: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "compensation",
+					"type": "automation",
+					"properties": map[string]any{
+						"name": s.nodeName,
+					},
+				},
+			},
+			"edges": []map[string]any{},
+		},
+	}, nil
 }

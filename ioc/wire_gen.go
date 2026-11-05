@@ -12,7 +12,7 @@ import (
 	"github.com/Duke1616/eflow/internal/client/etask"
 	ticket3 "github.com/Duke1616/eflow/internal/event/ticket"
 	"github.com/Duke1616/eflow/internal/grpc"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/compiler"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/internal/service/dispatch"
@@ -54,9 +54,10 @@ func InitApp() (*App, error) {
 	iWorkflowRepository := repository.NewWorkflowRepository(iWorkflowDAO)
 	iEngineDAO := dao.NewProcessEngineDAO(db)
 	iEngineRepository := repository.NewProcessEngineRepository(iEngineDAO)
-	engineService := engine.NewEngineService(iEngineRepository)
-	converter := easyflow.NewLogicFlowToEngineConvert()
-	workflowService := workflow.NewWorkflowService(iWorkflowRepository, engineService, converter)
+	flowxEngine := InitFlowxEngine(db)
+	iEngineDispatcher := InitEngineDispatcher(iEngineRepository, flowxEngine)
+	iCompositeCompiler := compiler.NewDefaultCompositeCompiler()
+	workflowService := workflow.NewWorkflowService(iWorkflowRepository, iEngineDispatcher, iCompositeCompiler)
 	workflowHandler := workflow2.NewHandler(workflowService)
 	taskDAO := dao.NewTaskDAO(db)
 	taskRepository := repository.NewTaskRepository(taskDAO)
@@ -69,6 +70,7 @@ func InitApp() (*App, error) {
 	etaskConn := InitETASKGrpcClient(registry)
 	etaskClient := etask.NewETASKClient(etaskConn)
 	runnerCatalog := etask.NewRunnerCatalog(etaskClient)
+	engineService := engine.NewEngineService(iEngineRepository)
 	ticketDAO := dao.NewTicketDAO(db)
 	taskFormDAO := dao.NewTaskFormDAO(db)
 	ticketRepository := repository.NewTicketRepository(ticketDAO, taskFormDAO)
@@ -77,7 +79,7 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	ticketService := ticket.NewService(ticketRepository, service, engineService, workflowService, ticketEventProducer)
+	ticketService := ticket.NewService(ticketRepository, service, engineService, iEngineDispatcher, workflowService, ticketEventProducer)
 	dispatchDAO := dao.NewDispatchDAO(db)
 	dispatchRepository := repository.NewDispatchRepository(dispatchDAO)
 	templateReader := dispatch.NewTemplateReader(iTemplateRepository)
@@ -94,7 +96,7 @@ func InitApp() (*App, error) {
 	ratingService := rating.NewService(ticketRepository, ticketRatingRepository)
 	queryService := ticket.NewQueryService(ticketRepository, engineService, userServiceClient, ratingService)
 	compensationPlanner := withdrawal.NewCompensationPlanner(taskRepository, withdrawalRepository, taskService, ticketService, engineService, workflowService)
-	withdrawalService := withdrawal.NewService(withdrawalRepository, compensationPlanner)
+	withdrawalService := withdrawal.NewService(withdrawalRepository, compensationPlanner, iEngineDispatcher)
 	ticketHandler := ticket2.NewHandler(ticketService, queryService, userServiceClient, withdrawalService, ratingService)
 	dispatchHandler := dispatch2.NewHandler(dispatchService)
 	listener := InitListener()
@@ -127,7 +129,7 @@ func InitApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	processEventConsumer, err := InitProcessEventConsumer(mq, workflowService, ticketService)
+	processEventConsumer, err := InitProcessEventConsumer(mq, iEngineDispatcher, workflowService, ticketService)
 	if err != nil {
 		return nil, err
 	}

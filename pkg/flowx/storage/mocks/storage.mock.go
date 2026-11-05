@@ -18,6 +18,253 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
+// MockIDefinitionStorage is a mock of IDefinitionStorage interface.
+type MockIDefinitionStorage struct {
+	ctrl     *gomock.Controller
+	recorder *MockIDefinitionStorageMockRecorder
+	isgomock struct{}
+}
+
+// MockIDefinitionStorageMockRecorder is the mock recorder for MockIDefinitionStorage.
+type MockIDefinitionStorageMockRecorder struct {
+	mock *MockIDefinitionStorage
+}
+
+// NewMockIDefinitionStorage creates a new mock instance.
+func NewMockIDefinitionStorage(ctrl *gomock.Controller) *MockIDefinitionStorage {
+	mock := &MockIDefinitionStorage{ctrl: ctrl}
+	mock.recorder = &MockIDefinitionStorageMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockIDefinitionStorage) EXPECT() *MockIDefinitionStorageMockRecorder {
+	return m.recorder
+}
+
+// GetDefinition mocks base method.
+func (m *MockIDefinitionStorage) GetDefinition(ctx context.Context, key string, version int) (model.ProcessDefinition, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDefinition", ctx, key, version)
+	ret0, _ := ret[0].(model.ProcessDefinition)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetDefinition indicates an expected call of GetDefinition.
+func (mr *MockIDefinitionStorageMockRecorder) GetDefinition(ctx, key, version any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDefinition", reflect.TypeOf((*MockIDefinitionStorage)(nil).GetDefinition), ctx, key, version)
+}
+
+// GetLatestVersion mocks base method.
+func (m *MockIDefinitionStorage) GetLatestVersion(ctx context.Context, key string) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLatestVersion", ctx, key)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetLatestVersion indicates an expected call of GetLatestVersion.
+func (mr *MockIDefinitionStorageMockRecorder) GetLatestVersion(ctx, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLatestVersion", reflect.TypeOf((*MockIDefinitionStorage)(nil).GetLatestVersion), ctx, key)
+}
+
+// SaveDefinition mocks base method.
+func (m *MockIDefinitionStorage) SaveDefinition(ctx context.Context, def model.ProcessDefinition) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveDefinition", ctx, def)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SaveDefinition indicates an expected call of SaveDefinition.
+func (mr *MockIDefinitionStorageMockRecorder) SaveDefinition(ctx, def any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveDefinition", reflect.TypeOf((*MockIDefinitionStorage)(nil).SaveDefinition), ctx, def)
+}
+
+// MockIInstanceStorage is a mock of IInstanceStorage interface.
+type MockIInstanceStorage struct {
+	ctrl     *gomock.Controller
+	recorder *MockIInstanceStorageMockRecorder
+	isgomock struct{}
+}
+
+// MockIInstanceStorageMockRecorder is the mock recorder for MockIInstanceStorage.
+type MockIInstanceStorageMockRecorder struct {
+	mock *MockIInstanceStorage
+}
+
+// NewMockIInstanceStorage creates a new mock instance.
+func NewMockIInstanceStorage(ctrl *gomock.Controller) *MockIInstanceStorage {
+	mock := &MockIInstanceStorage{ctrl: ctrl}
+	mock.recorder = &MockIInstanceStorageMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockIInstanceStorage) EXPECT() *MockIInstanceStorageMockRecorder {
+	return m.recorder
+}
+
+// GetInstance mocks base method.
+func (m *MockIInstanceStorage) GetInstance(ctx context.Context, id string) (*model.Instance, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetInstance", ctx, id)
+	ret0, _ := ret[0].(*model.Instance)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetInstance indicates an expected call of GetInstance.
+func (mr *MockIInstanceStorageMockRecorder) GetInstance(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInstance", reflect.TypeOf((*MockIInstanceStorage)(nil).GetInstance), ctx, id)
+}
+
+// GetInstanceForUpdate mocks base method.
+func (m *MockIInstanceStorage) GetInstanceForUpdate(ctx context.Context, id string) (*model.Instance, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetInstanceForUpdate", ctx, id)
+	ret0, _ := ret[0].(*model.Instance)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetInstanceForUpdate indicates an expected call of GetInstanceForUpdate.
+func (mr *MockIInstanceStorageMockRecorder) GetInstanceForUpdate(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInstanceForUpdate", reflect.TypeOf((*MockIInstanceStorage)(nil).GetInstanceForUpdate), ctx, id)
+}
+
+// SaveInstance mocks base method.
+func (m *MockIInstanceStorage) SaveInstance(ctx context.Context, inst *model.Instance) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveInstance", ctx, inst)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SaveInstance indicates an expected call of SaveInstance.
+func (mr *MockIInstanceStorageMockRecorder) SaveInstance(ctx, inst any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveInstance", reflect.TypeOf((*MockIInstanceStorage)(nil).SaveInstance), ctx, inst)
+}
+
+// MockITaskStorage is a mock of ITaskStorage interface.
+type MockITaskStorage struct {
+	ctrl     *gomock.Controller
+	recorder *MockITaskStorageMockRecorder
+	isgomock struct{}
+}
+
+// MockITaskStorageMockRecorder is the mock recorder for MockITaskStorage.
+type MockITaskStorageMockRecorder struct {
+	mock *MockITaskStorage
+}
+
+// NewMockITaskStorage creates a new mock instance.
+func NewMockITaskStorage(ctrl *gomock.Controller) *MockITaskStorage {
+	mock := &MockITaskStorage{ctrl: ctrl}
+	mock.recorder = &MockITaskStorageMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockITaskStorage) EXPECT() *MockITaskStorageMockRecorder {
+	return m.recorder
+}
+
+// GetTask mocks base method.
+func (m *MockITaskStorage) GetTask(ctx context.Context, id string) (*model.Task, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetTask", ctx, id)
+	ret0, _ := ret[0].(*model.Task)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetTask indicates an expected call of GetTask.
+func (mr *MockITaskStorageMockRecorder) GetTask(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTask", reflect.TypeOf((*MockITaskStorage)(nil).GetTask), ctx, id)
+}
+
+// GetTaskForUpdate mocks base method.
+func (m *MockITaskStorage) GetTaskForUpdate(ctx context.Context, id string) (*model.Task, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetTaskForUpdate", ctx, id)
+	ret0, _ := ret[0].(*model.Task)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetTaskForUpdate indicates an expected call of GetTaskForUpdate.
+func (mr *MockITaskStorageMockRecorder) GetTaskForUpdate(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTaskForUpdate", reflect.TypeOf((*MockITaskStorage)(nil).GetTaskForUpdate), ctx, id)
+}
+
+// ListTasksByInstance mocks base method.
+func (m *MockITaskStorage) ListTasksByInstance(ctx context.Context, instID string) ([]*model.Task, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListTasksByInstance", ctx, instID)
+	ret0, _ := ret[0].([]*model.Task)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListTasksByInstance indicates an expected call of ListTasksByInstance.
+func (mr *MockITaskStorageMockRecorder) ListTasksByInstance(ctx, instID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTasksByInstance", reflect.TypeOf((*MockITaskStorage)(nil).ListTasksByInstance), ctx, instID)
+}
+
+// SaveTasks mocks base method.
+func (m *MockITaskStorage) SaveTasks(ctx context.Context, tasks []*model.Task) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveTasks", ctx, tasks)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SaveTasks indicates an expected call of SaveTasks.
+func (mr *MockITaskStorageMockRecorder) SaveTasks(ctx, tasks any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveTasks", reflect.TypeOf((*MockITaskStorage)(nil).SaveTasks), ctx, tasks)
+}
+
+// UpdateTask mocks base method.
+func (m *MockITaskStorage) UpdateTask(ctx context.Context, task *model.Task) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateTask", ctx, task)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateTask indicates an expected call of UpdateTask.
+func (mr *MockITaskStorageMockRecorder) UpdateTask(ctx, task any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateTask", reflect.TypeOf((*MockITaskStorage)(nil).UpdateTask), ctx, task)
+}
+
+// UpdateTasksStatus mocks base method.
+func (m *MockITaskStorage) UpdateTasksStatus(ctx context.Context, taskIDs []string, status model.TaskStatus) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateTasksStatus", ctx, taskIDs, status)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateTasksStatus indicates an expected call of UpdateTasksStatus.
+func (mr *MockITaskStorageMockRecorder) UpdateTasksStatus(ctx, taskIDs, status any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateTasksStatus", reflect.TypeOf((*MockITaskStorage)(nil).UpdateTasksStatus), ctx, taskIDs, status)
+}
+
 // MockIStorage is a mock of IStorage interface.
 type MockIStorage struct {
 	ctrl     *gomock.Controller
@@ -85,6 +332,21 @@ func (m *MockIStorage) GetInstanceForUpdate(ctx context.Context, id string) (*mo
 func (mr *MockIStorageMockRecorder) GetInstanceForUpdate(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInstanceForUpdate", reflect.TypeOf((*MockIStorage)(nil).GetInstanceForUpdate), ctx, id)
+}
+
+// GetLatestVersion mocks base method.
+func (m *MockIStorage) GetLatestVersion(ctx context.Context, key string) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLatestVersion", ctx, key)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetLatestVersion indicates an expected call of GetLatestVersion.
+func (mr *MockIStorageMockRecorder) GetLatestVersion(ctx, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLatestVersion", reflect.TypeOf((*MockIStorage)(nil).GetLatestVersion), ctx, key)
 }
 
 // GetTask mocks base method.
@@ -283,6 +545,21 @@ func (m *MockITxStorage) GetInstanceForUpdate(ctx context.Context, id string) (*
 func (mr *MockITxStorageMockRecorder) GetInstanceForUpdate(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInstanceForUpdate", reflect.TypeOf((*MockITxStorage)(nil).GetInstanceForUpdate), ctx, id)
+}
+
+// GetLatestVersion mocks base method.
+func (m *MockITxStorage) GetLatestVersion(ctx context.Context, key string) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLatestVersion", ctx, key)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetLatestVersion indicates an expected call of GetLatestVersion.
+func (mr *MockITxStorageMockRecorder) GetLatestVersion(ctx, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLatestVersion", reflect.TypeOf((*MockITxStorage)(nil).GetLatestVersion), ctx, key)
 }
 
 // GetTask mocks base method.
