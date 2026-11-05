@@ -355,3 +355,36 @@ func (v *TicketTaskView) ResolveStep(steps []Instance, displayNames map[string]s
 		v.ProcInstCreateTime = steps[0].CreateTime
 	}
 }
+
+// ResolveViews 根据流程待办步骤和用户真实姓名字典，将工单展开为独立的任务视图切片
+// 解释设计原因：当工单存在并行审批分支（如网关并行分流产生多个待办节点）时，一个待办步骤对应一行独立的任务视图，
+// 前端可通过内置的 spanMethod 与 setTableRowSpan 自动实现工单公共信息的垂直跨行合并（Rowspan），
+// 让“当前步骤”与“当前处理人”在表格中形成一一对应的子行，彻底解决逗号拼接导致对应关系模糊的问题。
+func (t *Ticket) ResolveViews(steps []Instance, displayNames map[string]string) []TicketTaskView {
+	if len(steps) == 0 {
+		return []TicketTaskView{{
+			Ticket:      *t,
+			CurrentStep: t.Status.DefaultStepName(),
+		}}
+	}
+
+	return lo.Map(steps, func(s Instance, _ int) TicketTaskView {
+		approver := s.ApprovedBy
+		if name, ok := displayNames[s.ApprovedBy]; ok && name != "" {
+			approver = name
+		}
+
+		stepName := s.CurrentNodeName
+		if stepName == "" {
+			stepName = t.Status.DefaultStepName()
+		}
+
+		return TicketTaskView{
+			Ticket:             *t,
+			TaskID:             s.TaskID,
+			CurrentStep:        stepName,
+			ApprovedBy:         approver,
+			ProcInstCreateTime: s.CreateTime,
+		}
+	})
+}

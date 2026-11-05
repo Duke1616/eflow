@@ -473,29 +473,32 @@ func extractChannelActionEvent(cte *larkcallback.CardActionTriggerEvent) domain.
 	actionValue := cte.Event.Action.Value
 	formValue := cte.Event.Action.FormValue
 
-	userID := ""
-	if cte.Event.Operator != nil && cte.Event.Operator.UserID != nil {
-		userID = *cte.Event.Operator.UserID
+	// 1. 安全解引用操作人 ID（借助 lo.FromPtr 实现空指针安全防护）
+	var userID string
+	if cte.Event.Operator != nil {
+		userID = lo.FromPtr(cte.Event.Operator.UserID)
 	}
 
-	msgID := ""
+	var msgID string
 	if cte.Event.Context != nil {
 		msgID = cte.Event.Context.OpenMessageID
 	}
 
-	comment := ""
-	if formValue != nil {
-		if c, ok := formValue["comment"].(string); ok {
-			comment = c
-			// 移除 comment 避免污染动态表单提交的数据集
-			delete(formValue, "comment")
-		}
+	// 2. 提取并清理批注（直接就地安全清理，避免额外分配新 map）
+	var comment string
+	if c, ok := formValue["comment"].(string); ok {
+		comment = c
+		delete(formValue, "comment")
 	}
+
+	// 3. 优雅回退动作类型（使用 lo.CoalesceOrEmpty 优先使用 Action.Name，为空时回退使用 Action.Value["action"]）
+	valAction, _ := actionValue["action"].(string)
+	actionName := strings.TrimSpace(lo.CoalesceOrEmpty(cte.Event.Action.Name, valAction))
 
 	return domain.ChannelActionEvent{
 		Channel:       domain.ChannelFeishu,
 		ChannelUserID: userID,
-		Action:        domain.ChannelActionType(cte.Event.Action.Name),
+		Action:        domain.ChannelActionType(actionName),
 		TenantID:      parseMapInt64(actionValue, "tenant_id"),
 		TicketID:      parseMapInt64(actionValue, "ticket_id"),
 		TaskID:        int(parseMapInt64(actionValue, "task_id")),

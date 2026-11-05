@@ -91,6 +91,56 @@ func TestQueryService_ListUserInitiated(t *testing.T) {
 				assert.Equal(t, "已撤回", views[1].CurrentStep)
 			},
 		},
+		{
+			name:     "工单存在网关并行分支审批时展开为多条记录以支持前端表格跨行合并",
+			username: "luankz",
+			offset:   0,
+			limit:    10,
+			mockSetup: func(repo *repomocks.MockTicketRepository,
+				engineSvc *enginemocks.MockService,
+				userSvc *usermocks.MockUserServiceClient) {
+				tickets := []domain.Ticket{
+					{
+						Id: 2735, CreateBy: "luankz", Status: domain.PROCESS,
+						Process: domain.Process{InstanceId: 2001},
+					},
+				}
+				repo.EXPECT().ListTicket(gomock.Any(), "luankz", gomock.Any(), int64(0), int64(10)).
+					Return(tickets, nil)
+				repo.EXPECT().CountTicket(gomock.Any(), "luankz", gomock.Any()).
+					Return(int64(1), nil)
+
+				// 流程引擎返回两个处于等待审批中的并行节点：后端与前端
+				engineSvc.EXPECT().ListPendingStepsOfMyTask(gomock.Any(), []int{2001}, "luankz").
+					Return([]domain.Instance{
+						{ProcInstID: 2001, CurrentNodeName: "后端", ApprovedBy: "peicy", TaskID: 5242},
+						{ProcInstID: 2001, CurrentNodeName: "前端", ApprovedBy: "luankz", TaskID: 5243},
+					}, nil)
+
+				userSvc.EXPECT().QueryByUsernames(gomock.Any(), gomock.Any()).
+					Return(&userv1.QueryUsersResp{
+						Users: []*userv1.User{
+							{Username: "peicy", DisplayName: "裴承运"},
+							{Username: "luankz", DisplayName: "栾凯朝"},
+						},
+					}, nil)
+			},
+			wantCount: 2, // 同一工单按步骤展开为 2 条视图记录
+			wantTotal: 1, // 工单基础分页总数维持 1
+			check: func(t *testing.T, views []domain.TicketTaskView) {
+				// 第一条视图对应“后端”分支
+				assert.Equal(t, int64(2735), views[0].Ticket.Id)
+				assert.Equal(t, "后端", views[0].CurrentStep)
+				assert.Equal(t, "裴承运", views[0].ApprovedBy)
+				assert.Equal(t, 5242, views[0].TaskID)
+
+				// 第二条视图对应“前端”分支，工单主体数据完全一致，供前端根据 ID 合并行
+				assert.Equal(t, int64(2735), views[1].Ticket.Id)
+				assert.Equal(t, "前端", views[1].CurrentStep)
+				assert.Equal(t, "栾凯朝", views[1].ApprovedBy)
+				assert.Equal(t, 5243, views[1].TaskID)
+			},
+		},
 	}
 
 	for _, tc := range testCases {

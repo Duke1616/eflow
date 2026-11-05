@@ -10,6 +10,8 @@ import (
 	sendermocks "github.com/Duke1616/eflow/internal/pkg/notification/mocks"
 	channelmocks "github.com/Duke1616/eflow/internal/service/channel/mocks"
 	"github.com/gotomicro/ego/core/elog"
+	larkcallback "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -99,4 +101,34 @@ func TestLarkCallbackHandler_Handle_StateGuard(t *testing.T) {
 
 func getTestLogger() *elog.Component {
 	return elog.DefaultLogger.With(elog.FieldComponentName("TestLarkCallbackHandler"))
+}
+
+func TestExtractChannelActionEvent_ActionFallback(t *testing.T) {
+	// 模拟飞书回执卡片上的“查看进度”按钮交互：Name 为空，Action 存放在 Value["action"] 中
+	cte := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Name: "",
+				Value: map[string]interface{}{
+					"action":    "progress",
+					"ticket_id": "2735",
+					"task_id":   "5246",
+					"tenant_id": "2",
+				},
+			},
+			Operator: &larkcallback.Operator{
+				UserID: lo.ToPtr("bcegag66"),
+			},
+			Context: &larkcallback.Context{
+				OpenMessageID: "om_123456",
+			},
+		},
+	}
+
+	evt := extractChannelActionEvent(cte)
+	require.Equal(t, domain.ChannelActionProgress, evt.Action)
+	require.Equal(t, int64(2735), evt.TicketID)
+	require.Equal(t, 5246, evt.TaskID)
+	require.Equal(t, int64(2), evt.TenantID)
+	require.Equal(t, "bcegag66", evt.ChannelUserID)
 }

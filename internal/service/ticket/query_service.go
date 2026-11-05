@@ -96,11 +96,9 @@ func (q *queryService) ListUserInitiated(ctx context.Context, username string, o
 	// 3. 批量解析待办处理人真实姓名字典
 	displayNames := q.resolveDisplayNames(ctx, processTasks)
 
-	// 4. 以工单实体为基准 1:1 装配，确保没有未完工人工待办的任务（如已撤回、自动化中）不被意外漏掉
-	views := lo.Map(tickets, func(ticket domain.Ticket, _ int) domain.TicketTaskView {
-		view := domain.TicketTaskView{Ticket: ticket}
-		view.ResolveStep(tasksByProcInst[ticket.Process.InstanceId], displayNames)
-		return view
+	// 4. 以工单实体为基准展开待办视图，当存在并行多分支时展开为多条独立的视图记录供前端进行 Rowspan 合并
+	views := lo.FlatMap(tickets, func(ticket domain.Ticket, _ int) []domain.TicketTaskView {
+		return ticket.ResolveViews(tasksByProcInst[ticket.Process.InstanceId], displayNames)
 	})
 
 	return views, total, nil
