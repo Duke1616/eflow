@@ -9,11 +9,11 @@ import (
 	"github.com/ecodeclub/ekit/slice"
 )
 
-func (repo *ticketRepository) CreateTaskForm(ctx context.Context, taskId int, ticketId int64, fields []domain.FormValue) error {
+func (repo *ticketRepository) CreateTaskForm(ctx context.Context, taskId domain.ID, ticketId int64, fields []domain.FormValue) error {
 	forms := slice.Map(fields, func(idx int, src domain.FormValue) dao.TaskForm {
 		return dao.TaskForm{
 			TicketId: ticketId,
-			TaskId:   taskId,
+			TaskId:   taskId.Int(),
 			Name:     src.Name,
 			Key:      src.Key,
 			Type:     src.Type,

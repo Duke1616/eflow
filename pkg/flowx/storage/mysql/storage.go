@@ -184,6 +184,32 @@ func (s *Storage) ListTasksByInstance(ctx context.Context, instID string) ([]*mo
 	}), nil
 }
 
+func (s *Storage) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
+	var (
+		pos   []FlowTaskPO
+		total int64
+	)
+	query := s.db.WithContext(ctx).Model(&FlowTaskPO{}).
+		Where("assignee = ? AND status = ?", assignee, uint8(model.TaskPending))
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return nil, 0, nil
+	}
+
+	err := query.Order("ctime DESC").Offset(offset).Limit(limit).Find(&pos).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	tasks := lo.Map(pos, func(po FlowTaskPO, _ int) *model.Task {
+		return toTaskDO(po)
+	})
+	return tasks, total, nil
+}
+
 func (s *Storage) UpdateTask(ctx context.Context, task *model.Task) error {
 	po := toTaskPO(task)
 	res := s.db.WithContext(ctx).Model(&FlowTaskPO{}).

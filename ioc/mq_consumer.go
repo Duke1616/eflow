@@ -19,12 +19,12 @@ import (
 
 func InitProcessEventConsumer(
 	q mq.MQ,
-	dispatcher engine.IEngineDispatcher,
+	engine engine.IEngine,
 	workFlowSvc workflowSvc.Service,
 	ticketSvc ticketSvc.Service,
 ) (*process.ProcessEventConsumer, error) {
 	consumer := mqx.NewResilientConsumer(q, event.CreateProcessEventName, "process_instance_starter")
-	return process.NewProcessEventConsumer(dispatcher, workFlowSvc, ticketSvc, consumer), nil
+	return process.NewProcessEventConsumer(engine, workFlowSvc, ticketSvc, consumer), nil
 }
 
 func InitExecuteResultConsumer(q mq.MQ, svc taskSvc.Service) (*taskEvent.ExecuteResultConsumer, error) {

@@ -10,8 +10,8 @@ import (
 
 // loadOrDeployDefinition 加载已发布流程定义，或自动部署请求中附带的临时流程快照
 func (e *flowEngine) loadOrDeployDefinition(ctx context.Context, req StartReq) (model.ProcessDefinition, error) {
-	if req.Def != nil {
-		def, err := e.Deploy(ctx, *req.Def)
+	if req.Def.Key != "" {
+		def, err := e.Deploy(ctx, req.Def)
 		if err != nil {
 			return model.ProcessDefinition{}, fmt.Errorf("部署流程定义失败: %w", err)
 		}

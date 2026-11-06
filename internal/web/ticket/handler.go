@@ -128,7 +128,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 }
 
 func (h *Handler) GetTaskFormConfig(ctx *ginx.Context, req TaskFormConfigReq) (ginx.Result, error) {
-	fields, err := h.svc.GetTaskFormConfig(ctx.Context, req.TaskId, req.WorkflowId)
+	fields, err := h.svc.GetTaskFormConfig(ctx.Context, req.TaskId.String(), req.WorkflowId)
 	if err != nil {
 		return systemErrorResult, err
 	}
@@ -201,7 +201,7 @@ func (h *Handler) TodoByUser(ctx *ginx.Context, req Todo) (ginx.Result, error) {
 }
 
 func (h *Handler) Transfer(ctx *ginx.Context, req TransferReq) (ginx.Result, error) {
-	if req.TaskId <= 0 {
+	if req.TaskId == "" {
 		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
 	}
 	if len(req.Usernames) == 0 {
@@ -213,7 +213,7 @@ func (h *Handler) Transfer(ctx *ginx.Context, req TransferReq) (ginx.Result, err
 		return systemErrorResult, err
 	}
 
-	err = h.svc.Transfer(ctx.Context, req.TaskId, user.Username, user.IsAdmin, req.Usernames)
+	err = h.svc.Transfer(ctx.Context, req.TaskId.String(), user.Username, user.IsAdmin, req.Usernames)
 	if err != nil {
 		if errors.Is(err, domain.ErrTaskUnauthorized) {
 			return ginx.Result{Code: 403, Msg: err.Error()}, nil
@@ -239,7 +239,7 @@ func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, er
 	}
 
 	// 权限判定：只有工单发起人或系统管理员允许撤回该工单
-	ticket, err := h.svc.GetByProcessInstanceID(ctx.Context, req.InstanceId)
+	ticket, err := h.svc.GetByProcessInstance(ctx.Context, req.InstanceId)
 	if err != nil {
 		if errors.Is(err, domain.ErrTicketNotAccessible) {
 			return ticketNotAccessibleResult, nil
@@ -293,11 +293,15 @@ func (h *Handler) SubmitRating(ctx *ginx.Context, req SubmitRatingReq) (ginx.Res
 }
 
 func (h *Handler) Pass(ctx *ginx.Context, req PassOrderReq) (ginx.Result, error) {
+	if req.TaskId == "" {
+		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
+	}
+
 	user, err := h.getSessUser(ctx)
 	if err != nil {
 		return systemErrorResult, err
 	}
-	if err = h.svc.Pass(ctx.Context, req.TaskId, user.Username, user.IsAdmin, req.Comment, req.ExtraData); err != nil {
+	if err = h.svc.Pass(ctx.Context, req.TaskId.String(), user.Username, user.IsAdmin, req.Comment, req.ExtraData); err != nil {
 		if errors.Is(err, domain.ErrTaskUnauthorized) {
 			return ginx.Result{Code: 403, Msg: err.Error()}, nil
 		}
@@ -314,12 +318,16 @@ func (h *Handler) Pass(ctx *ginx.Context, req PassOrderReq) (ginx.Result, error)
 }
 
 func (h *Handler) Reject(ctx *ginx.Context, req RejectOrderReq) (ginx.Result, error) {
+	if req.TaskId == "" {
+		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
+	}
+
 	user, err := h.getSessUser(ctx)
 	if err != nil {
 		return systemErrorResult, err
 	}
 
-	err = h.svc.Reject(ctx.Context, req.TaskId, user.Username, user.IsAdmin, req.Comment)
+	err = h.svc.Reject(ctx.Context, req.TaskId.String(), user.Username, user.IsAdmin, req.Comment)
 	if err != nil {
 		if errors.Is(err, domain.ErrTaskUnauthorized) {
 			return ginx.Result{Code: 403, Msg: err.Error()}, nil
@@ -357,7 +365,7 @@ func (h *Handler) StartUser(ctx *ginx.Context, req StartUserReq) (ginx.Result, e
 }
 
 func (h *Handler) Detail(ctx *ginx.Context, req DetailProcessInstIdReq) (ginx.Result, error) {
-	ticket, err := h.svc.GetByProcessInstanceID(ctx.Context, req.ProcessInstanceId)
+	ticket, err := h.svc.GetByProcessInstance(ctx.Context, req.ProcessInstanceId)
 	if err != nil {
 		if errors.Is(err, domain.ErrTicketNotAccessible) {
 			return ticketNotAccessibleResult, nil
@@ -408,7 +416,7 @@ func (h *Handler) TaskTimeline(ctx *ginx.Context, req TaskTimelineReq) (ginx.Res
 func toVoTaskRecords(records []domain.TaskRecord) []TaskRecord {
 	return lo.Map(records, func(src domain.TaskRecord, _ int) TaskRecord {
 		return TaskRecord{
-			Nodename:     src.Nodename,
+			NodeName:     src.NodeName,
 			ApprovedBy:   src.ApprovedBy,
 			IsCosigned:   src.IsCosigned,
 			Status:       src.Status,
@@ -476,7 +484,7 @@ func (h *Handler) toVoTicket(req domain.Ticket) Ticket {
 		Id:                   req.Id,
 		TemplateId:           req.TemplateId,
 		Starter:              req.CreateBy,
-		ProcessInstanceId:    req.Process.InstanceId,
+		ProcessInstanceId:    req.Process.InstanceID.Int(),
 		Provide:              req.Provide.ToUint8(),
 		Status:               req.Status.ToUint8(),
 		WorkflowId:           req.WorkflowId,
@@ -517,7 +525,7 @@ func (h *Handler) toVoTicketViews(views []domain.TicketTaskView) []Ticket {
 
 func (h *Handler) toVoTicketView(view domain.TicketTaskView) Ticket {
 	vo := h.toVoTicket(view.Ticket)
-	if view.TaskID > 0 {
+	if view.TaskID != nil && view.TaskID != 0 && view.TaskID != "" {
 		vo.TaskId = view.TaskID
 	}
 	if view.CurrentStep != "" {
@@ -578,19 +586,4 @@ func (h *Handler) getSessUsername(ctx *ginx.Context) (string, error) {
 		return "", err
 	}
 	return user.Username, nil
-}
-
-// Upstream 查询指定任务节点的上游处理节点及历史流转进度
-func (h *Handler) Upstream(ctx *ginx.Context) (ginx.Result, error) {
-	taskID, err := ctx.Param("task_id").AsInt()
-	if err != nil {
-		return systemErrorResult, err
-	}
-
-	upstream, err := h.querySvc.Upstream(ctx.Context, taskID)
-	if err != nil {
-		return ginx.Result{}, err
-	}
-
-	return ginx.Result{Data: upstream}, nil
 }

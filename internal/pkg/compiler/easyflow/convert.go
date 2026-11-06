@@ -1,32 +1,5 @@
 package easyflow
 
-import (
-	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
-)
-
-// 节点类型标识，映射统一领域标准 NodeType
-const (
-	NodeTypeStart     = flowdsl.NodeStart
-	NodeTypeEnd       = flowdsl.NodeEnd
-	NodeTypeUser      = flowdsl.NodeUserTask
-	NodeTypeCondition = flowdsl.NodeGatewayCondition
-	NodeTypeParallel  = flowdsl.NodeGatewayParallel
-	NodeTypeInclusion = flowdsl.NodeGatewayInclusive
-	NodeTypeSelective = flowdsl.NodeGatewayExclusive
-	NodeTypeAuto      = flowdsl.NodeAutoTask
-	NodeTypeChat      = flowdsl.NodeChatGroup
-)
-
-// 节点默认名称
-const (
-	DefaultNameStart     = "Start"
-	DefaultNameEnd       = "End"
-	DefaultNameUser      = "审批节点"
-	DefaultNameParallel  = "并行网关"
-	DefaultNameInclusion = "包容网关"
-	DefaultNameSelective = "条件并行网关"
-)
-
 // 系统内置用户标识
 const (
 	UserStarter        = "$starter"   // 工单发起人

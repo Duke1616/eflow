@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bunny3th/easy-workflow/workflow/model"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/callback"
 	"github.com/Duke1616/eflow/internal/client/eiam"
@@ -51,7 +50,7 @@ type larkCallbackHandler struct {
 	logger           *elog.Component
 	cfg              callbackConfig
 	channelActionSvc channelSvc.IChannelActionService
-	engineSvc        engineSvc.Service
+	engine           engineSvc.IEngine
 	svc              ticketSvc.Service
 	templateSvc      templateSvc.Service
 	userSvc          eiam.IUserClient
@@ -64,7 +63,7 @@ type larkCallbackHandler struct {
 // NewLarkCallbackHandler 构造飞书卡片业务处理器
 func NewLarkCallbackHandler(
 	channelActionSvc channelSvc.IChannelActionService,
-	engineSvc engineSvc.Service,
+	engine engineSvc.IEngine,
 	svc ticketSvc.Service,
 	templateSvc templateSvc.Service,
 	userSvc eiam.IUserClient,
@@ -77,7 +76,7 @@ func NewLarkCallbackHandler(
 		logger:           elog.DefaultLogger.With(elog.FieldComponentName("LarkCallbackHandler")),
 		cfg:              getLarkCallbackConfig(),
 		channelActionSvc: channelActionSvc,
-		engineSvc:        engineSvc,
+		engine:           engine,
 		svc:              svc,
 		templateSvc:      templateSvc,
 		userSvc:          userSvc,
@@ -138,7 +137,7 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt domain.ChannelActi
 
 	h.logger.Debug("获取跨渠道标准化交互信息", elog.Any("evt", evt),
 		elog.Int64("ticket_id", evt.TicketID),
-		elog.Int("task_id", evt.TaskID),
+		elog.String("task_id", evt.TaskID.String()),
 	)
 
 	// 核心业务调度：统筹身份精准解析、权限判定与底层工单流转
@@ -219,22 +218,17 @@ func (h *larkCallbackHandler) progress(ctx context.Context, ticketId int64, user
 		return err
 	}
 
-	inst, err := h.engineSvc.GetInstanceByID(taskCtx, ticketDetail.Process.InstanceId)
+	view, err := h.engine.GetInstanceExecutionView(taskCtx, ticketDetail.Process.EngineType, ticketDetail.Process.InstanceID, ticketDetail.Status.ToUint8())
 	if err != nil {
 		return err
 	}
 
-	wf, err := h.workflowSvc.FindInstanceFlow(taskCtx, ticketDetail.WorkflowId, inst.ProcID, inst.ProcVersion)
+	wf, err := h.workflowSvc.FindInstanceFlow(taskCtx, ticketDetail.WorkflowId, view.ProcessID, view.ProcessVersion)
 	if err != nil {
 		return err
 	}
 
-	edges, nodeStatusMap, approvalUsers, err := h.parserEdges(taskCtx, ticketDetail, wf.ProcessId)
-	if err != nil {
-		return err
-	}
-
-	injectData, err := h.getJsCode(wf, edges, nodeStatusMap)
+	injectData, err := h.getJsCode(wf, view.TraversedEdges, view.NodeStatusMap)
 	if err != nil {
 		return err
 	}
@@ -278,35 +272,7 @@ func (h *larkCallbackHandler) progress(ctx context.Context, ticketId int64, user
 		return err
 	}
 
-	return h.sendImage(taskCtx, imageKey, approvalUsers, userId)
-}
-
-func (h *larkCallbackHandler) parserEdges(ctx context.Context, o domain.Ticket,
-	processId int) (map[string][]string, map[string]int, []string, error) {
-	record, _, err := h.engineSvc.TaskRecord(ctx, o.Process.InstanceId, 0, 1000)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	// 使用 lo.Associate 将任务切片转为 nodeID -> status 映射，避免手写状态字典循环
-	nodeStatusMap := lo.Associate(record, func(task model.Task) (string, int) {
-		return task.NodeID, task.Status
-	})
-
-	// 提取待审批处理人并使用 lo.Uniq 进行去重，避免多分支/会签节点重复查询
-	users := lo.Uniq(lo.FilterMap(record, func(src model.Task, _ int) (string, bool) {
-		if src.Status == 0 && src.IsFinished == 0 && src.UserID != "" {
-			return src.UserID, true
-		}
-		return "", false
-	}))
-
-	edges, err := h.engineSvc.GetTraversedEdges(ctx, record, o.Process.InstanceId, processId, o.Status.ToUint8())
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	return edges, nodeStatusMap, users, nil
+	return h.sendImage(taskCtx, imageKey, view.PendingUsers, userId)
 }
 
 func (h *larkCallbackHandler) sendImage(ctx context.Context, imageKey *string, approvalUsers []string, userId string) error {
@@ -445,7 +411,7 @@ func (h *larkCallbackHandler) withdraw(ctx context.Context, evt domain.ChannelAc
 
 func getCallbackValue(evt domain.ChannelActionEvent) []notification.Value {
 	// 优雅利用统一装配生成器获取 ticket_id, task_id 和 tenant_id 标准三元组
-	values := notification.GenerateCallbackValues(evt.TicketID, strconv.Itoa(evt.TaskID), evt.TenantID)
+	values := notification.GenerateCallbackValues(evt.TicketID, evt.TaskID.String(), evt.TenantID)
 
 	// 追加回执卡片交互专属的 user_id 与行为参数，避免数据泄露或防重复拦截
 	values = append(values,
@@ -489,11 +455,19 @@ func extractChannelActionEvent(cte *larkcallback.CardActionTriggerEvent) domain.
 		Action:        domain.ChannelActionType(actionName),
 		TenantID:      parseMapInt64(actionValue, "tenant_id"),
 		TicketID:      parseMapInt64(actionValue, "ticket_id"),
-		TaskID:        int(parseMapInt64(actionValue, "task_id")),
+		TaskID:        parseMapDomainID(actionValue, "task_id"),
 		MessageID:     msgID,
 		Comment:       comment,
 		FormValues:    formValue,
 	}
+}
+
+// parseMapDomainID 从通用 map 中健壮解析 domain.ID（兼容数字与字符串）
+func parseMapDomainID(m map[string]interface{}, key string) domain.ID {
+	if m == nil || m[key] == nil {
+		return ""
+	}
+	return domain.NewID(fmt.Sprint(m[key]))
 }
 
 // parseMapInt64 从通用 map 中健壮解析 int64（兼容 string/float64/int/int64 等 JSON 反序列化产物）

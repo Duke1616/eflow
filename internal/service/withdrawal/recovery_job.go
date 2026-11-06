@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/gotomicro/ego/core/elog"
 )
@@ -59,7 +60,7 @@ func (j *RecoveryJob) run(ctx context.Context) error {
 			case candidate.EngineRevoked:
 				err = j.resume(candidateCtx, candidate.ProcessInstanceID)
 			case candidate.EngineActive:
-				err = j.repo.Rollback(candidateCtx, candidate.ProcessInstanceID)
+				err = j.repo.Rollback(candidateCtx, domain.NewID(candidate.ProcessInstanceID))
 			default:
 				j.logger.Warn("撤回中工单缺少活动和撤销历史流程实例",
 					elog.Int64("ticketID", candidate.TicketID),
@@ -85,6 +86,6 @@ func (j *RecoveryJob) resume(ctx context.Context, processInstanceID int) error {
 	if err = j.planner.Apply(ctx, processInstanceID, plan); err != nil {
 		return err
 	}
-	_, err = j.repo.TryFinalize(ctx, processInstanceID)
+	_, err = j.repo.TryFinalize(ctx, domain.NewID(processInstanceID))
 	return err
 }

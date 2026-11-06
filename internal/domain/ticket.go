@@ -3,9 +3,8 @@ package domain
 import (
 	"errors"
 	"fmt"
-	"strings"
+	"time"
 
-	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
 	"github.com/samber/lo"
 )
 
@@ -210,13 +209,20 @@ func (t *Ticket) CanRestartProcess() bool {
 }
 
 // Process 承载流程引擎对于该工单底层流转的实例映射信息
+// 采用 EngineType + ID 唯一事实来源 (SSOT) 规范，彻底消除具体引擎实现的差异侵入
 type Process struct {
-	InstanceId int // 绑定的流程执行引擎实例 ID (即 proc_inst 表中的 ID)
+	EngineType EngineType // 驱动该实例的流程引擎类型 (如 EASYFLOW, FLOWX)
+	InstanceID ID         // 实例全局唯一标识 (支持 Int() 与 String())
 }
 
 // IsBound 判断是否已成功绑定流程引擎实例
 func (p Process) IsBound() bool {
-	return p.InstanceId > 0
+	return !p.InstanceID.IsZero()
+}
+
+// DisplayID 返回面向底层 engineDispatcher 统一路由寻址的实例标识字符串
+func (p Process) DisplayID() string {
+	return p.InstanceID.String()
 }
 
 // NotificationParams 发送消息通知携带的特定业务参数字典
@@ -237,48 +243,10 @@ type FormValue struct {
 	Value interface{} // 用户在审批该节点时所输入的表单值数据
 }
 
-// TaskForm 流程任务某一步骤下的静态数据和审批动作表单数据实体
-type TaskForm struct {
-	Id       int64       // 快照 ID
-	TicketId int64       // 关联工单 ID
-	TaskId   int         // 关联的底层任务节点 ID
-	Name     string      // 步骤节点名称
-	Key      string      // 节点 key 标识
-	Type     string      // 快照表单类型
-	Value    interface{} // 填写的表单具体值
-	Ctime    int64       // 快照创建时间
-}
-
-var protoToDomain = map[notificationv1.Channel]Channel{
-	notificationv1.Channel_LARK_CARD: ChannelLarkCard,
-	notificationv1.Channel_EMAIL:     ChannelEmail,
-	notificationv1.Channel_IN_APP:    ChannelInApp,
-}
-
-var domainToProto = map[Channel]notificationv1.Channel{
-	ChannelLarkCard: notificationv1.Channel_LARK_CARD,
-	ChannelEmail:    notificationv1.Channel_EMAIL,
-	ChannelInApp:    notificationv1.Channel_IN_APP,
-}
-
-func ChannelToDomainProto(ch Channel) notificationv1.Channel {
-	if v, ok := domainToProto[ch]; ok {
-		return v
-	}
-	return notificationv1.Channel_CHANNEL_UNSPECIFIED
-}
-
-func ChannelToProtoDomain(ch notificationv1.Channel) Channel {
-	if v, ok := protoToDomain[ch]; ok {
-		return v
-	}
-	return ""
-}
-
 // TicketTaskView 聚合了工单业务主实体与其在底层流程引擎中的流转步骤、审批人展示信息
 type TicketTaskView struct {
 	Ticket             Ticket
-	TaskID             int
+	TaskID             any // 任务标识（自适应支持整型与字符串）
 	CurrentStep        string
 	ApprovedBy         string
 	ProcInstCreateTime any
@@ -324,43 +292,11 @@ func (t *Ticket) IsTerminal() bool {
 	return t.Status.IsTerminal()
 }
 
-// ResolveStep 根据流程待办步骤和用户真实姓名字典，自适应组装聚合视图的当前步骤与处理人
-func (v *TicketTaskView) ResolveStep(steps []Instance, displayNames map[string]string) {
-	if len(steps) == 0 {
-		v.CurrentStep = v.Ticket.Status.DefaultStepName()
-		return
-	}
-
-	nodeNames := lo.Uniq(lo.FilterMap(steps, func(s Instance, _ int) (string, bool) {
-		return s.CurrentNodeName, s.CurrentNodeName != ""
-	}))
-	if len(nodeNames) > 0 {
-		v.CurrentStep = strings.Join(nodeNames, ", ")
-	}
-
-	approvers := lo.Uniq(lo.FilterMap(steps, func(s Instance, _ int) (string, bool) {
-		if s.ApprovedBy == "" {
-			return "", false
-		}
-		if name, ok := displayNames[s.ApprovedBy]; ok && name != "" {
-			return name, true
-		}
-		return s.ApprovedBy, true
-	}))
-	if len(approvers) > 0 {
-		v.ApprovedBy = strings.Join(approvers, ", ")
-	}
-	v.TaskID = steps[0].TaskID
-	if steps[0].CreateTime != nil {
-		v.ProcInstCreateTime = steps[0].CreateTime
-	}
-}
-
 // ResolveViews 根据流程待办步骤和用户真实姓名字典，将工单展开为独立的任务视图切片
 // 解释设计原因：当工单存在并行审批分支（如网关并行分流产生多个待办节点）时，一个待办步骤对应一行独立的任务视图，
 // 前端可通过内置的 spanMethod 与 setTableRowSpan 自动实现工单公共信息的垂直跨行合并（Rowspan），
 // 让“当前步骤”与“当前处理人”在表格中形成一一对应的子行，彻底解决逗号拼接导致对应关系模糊的问题。
-func (t *Ticket) ResolveViews(steps []Instance, displayNames map[string]string) []TicketTaskView {
+func (t *Ticket) ResolveViews(steps []TodoTask, displayNames map[string]string) []TicketTaskView {
 	if len(steps) == 0 {
 		return []TicketTaskView{{
 			Ticket:      *t,
@@ -368,23 +304,28 @@ func (t *Ticket) ResolveViews(steps []Instance, displayNames map[string]string) 
 		}}
 	}
 
-	return lo.Map(steps, func(s Instance, _ int) TicketTaskView {
+	return lo.Map(steps, func(s TodoTask, _ int) TicketTaskView {
 		approver := s.ApprovedBy
 		if name, ok := displayNames[s.ApprovedBy]; ok && name != "" {
 			approver = name
 		}
 
-		stepName := s.CurrentNodeName
+		stepName := s.NodeName
 		if stepName == "" {
 			stepName = t.Status.DefaultStepName()
 		}
 
+		var createTime *time.Time
+		if !s.CreateTime.IsZero() {
+			createTime = &s.CreateTime
+		}
+
 		return TicketTaskView{
 			Ticket:             *t,
-			TaskID:             s.TaskID,
+			TaskID:             s.TaskID.String(),
 			CurrentStep:        stepName,
 			ApprovedBy:         approver,
-			ProcInstCreateTime: s.CreateTime,
+			ProcInstCreateTime: createTime,
 		}
 	})
 }

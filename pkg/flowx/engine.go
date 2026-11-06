@@ -2,6 +2,7 @@ package flowx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,8 +16,8 @@ import (
 
 // StartReq 流程实例发起请求
 type StartReq struct {
-	// 流程图定义快照（可选，若提供则自动部署；主要用于单元测试与快速演练）
-	Def *model.ProcessDefinition
+	// 流程图定义快照（可选，若提供则自动部署；主要用于单元测试与快速演练，Value Semantics 优先）
+	Def model.ProcessDefinition
 	// 流程唯一标识（当 Def 未提供时必填）
 	Key string
 	// 流程版本（可选，默认 1）
@@ -91,6 +92,12 @@ type IProcessOperator interface {
 	GetTimeline(ctx context.Context, instanceID string) ([]model.TimelineEvent, error)
 	// GetTask 根据任务物理 ID 获取单条审批任务详情
 	GetTask(ctx context.Context, taskID string) (*model.Task, error)
+	// GetInstance 根据流程实例 ID 获取当前运行态实体
+	GetInstance(ctx context.Context, instanceID string) (*model.Instance, error)
+	// Transfer 将当前审批任务转签/委托指派给新目标用户
+	Transfer(ctx context.Context, taskID string, targetUsers []string) error
+	// ListPendingTasks 分页查询指定处理人的未办结待办任务列表
+	ListPendingTasks(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error)
 }
 
 // IProcessAdmin 流程定义部署与组件注册管理视角接口，供初始化、后台管理或运维脚手架使用
@@ -195,10 +202,26 @@ func (e *flowEngine) Use(mws ...middleware.Middleware) Engine {
 	return e
 }
 
-// Deploy 部署流程定义快照（发布期自动执行静态拓扑与语法校验，并预热进入只读执行缓存）
+// GetTask Deploy 部署流程定义快照（发布期自动执行静态拓扑与语法校验，并预热进入只读执行缓存）
 // 若 def.Version <= 0，则由引擎自动查询已发布的最大版本号并原子递增 (+1)，返回生效后的定义实体
 func (e *flowEngine) GetTask(ctx context.Context, taskID string) (*model.Task, error) {
 	return e.storage.GetTask(ctx, taskID)
+}
+
+func (e *flowEngine) GetInstance(ctx context.Context, instanceID string) (*model.Instance, error) {
+	return e.storage.GetInstance(ctx, instanceID)
+}
+
+func (e *flowEngine) Transfer(ctx context.Context, taskID string, targetUsers []string) error {
+	if len(targetUsers) == 0 {
+		return errors.New("转签目标用户不能为空")
+	}
+	task, err := e.storage.GetTaskForUpdate(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	task.Assignee = targetUsers[0]
+	return e.storage.UpdateTask(ctx, task)
 }
 
 func (e *flowEngine) Deploy(ctx context.Context, def model.ProcessDefinition) (model.ProcessDefinition, error) {
@@ -301,7 +324,7 @@ func (e *flowEngine) doStart(ctx context.Context, req StartReq) (string, error) 
 	}
 
 	// 3. 广播流程启动事件
-	e.eventBus.Publish(ctx, NewNodeEvent(EventProcessStarted, inst, &startNode, req.Starter, ""))
+	e.eventBus.Publish(ctx, NewNodeEvent(EventProcessStarted, session.Instance(), &startNode, req.Starter, ""))
 
 	return instID, nil
 }
@@ -455,18 +478,18 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 	if err := session.UpdateTask(ctx, task); err != nil {
 		return err
 	}
-	e.eventBus.Publish(ctx, NewTaskEvent(EventTaskRejected, inst, &node, task, req.Operator, req.Comment))
+	e.eventBus.Publish(ctx, NewTaskEvent(EventTaskRejected, session.Instance(), &node, task, req.Operator, req.Comment))
 
 	// 2. 原子清理当前批次中其余未处理的兄弟任务
 	e.cancelPendingSiblingTasks(ctx, session, task)
 
 	// 3. 若明确指定直接终止，流程置为终态 Rejected 并广播流程终止事件
 	if req.Terminate {
-		inst.Reject()
+		session.Instance().Reject()
 		if err := session.SaveInstance(ctx); err != nil {
 			return err
 		}
-		e.eventBus.Publish(ctx, NewProcessEvent(EventProcessRejected, inst, req.Operator, req.Comment))
+		e.eventBus.Publish(ctx, NewProcessEvent(EventProcessRejected, session.Instance(), req.Operator, req.Comment))
 		return nil
 	}
 
@@ -484,7 +507,7 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 	} else {
 		tn, err := session.Plan().FindUpstreamApprovalNode(task.NodeID)
 		if err != nil {
-			inst.Reject() // 无可用上游节点，流程置为终态 Rejected
+			session.Instance().Reject() // 无可用上游节点，流程置为终态 Rejected
 			return session.SaveInstance(ctx)
 		}
 		targetNode = tn
@@ -494,9 +517,9 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 	newBatchCode := task.BatchCode + 1
 	if targetNode.Type == model.NodeStart {
 		// 回退至发起人重新编辑发起
-		inst.CurrentNode = targetNode.ID
+		session.Instance().CurrentNode = targetNode.ID
 		comment := fmt.Sprintf("由审批人 [%s] 驳回至提单人重新编辑: %s", req.Operator, req.Comment)
-		startTask := e.buildStarterTask(targetNode, inst.ID, inst.Starter, newBatchCode, comment)
+		startTask := e.buildStarterTask(targetNode, session.Instance().ID, session.Instance().Starter, newBatchCode, comment)
 		if err := session.SaveTasks(ctx, []*model.Task{startTask}); err != nil {
 			return err
 		}
@@ -551,7 +574,7 @@ func (e *flowEngine) doRevoke(ctx context.Context, req RevokeReq) error {
 		}
 		for _, pid := range pendingIDs {
 			if pt, ok := session.GetTask(pid); ok {
-				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskRevoked, inst, nil, pt, req.Operator, req.Comment))
+				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskRevoked, session.Instance(), nil, pt, req.Operator, req.Comment))
 			}
 		}
 	}
@@ -564,16 +587,16 @@ func (e *flowEngine) doRevoke(ctx context.Context, req RevokeReq) error {
 		}
 
 		newBatchCode := session.MaxBatchCode() + 1
-		inst.CurrentNode = startNode.ID
+		session.Instance().CurrentNode = startNode.ID
 		comment := fmt.Sprintf("提单人主动撤回修改: %s", req.Comment)
-		startTask := e.buildStarterTask(startNode, inst.ID, inst.Starter, newBatchCode, comment)
+		startTask := e.buildStarterTask(startNode, session.Instance().ID, session.Instance().Starter, newBatchCode, comment)
 		if err := session.SaveTasks(ctx, []*model.Task{startTask}); err != nil {
 			return err
 		}
-		e.eventBus.Publish(ctx, NewTaskEvent(EventTaskCreated, inst, &startNode, startTask, req.Operator, comment))
+		e.eventBus.Publish(ctx, NewTaskEvent(EventTaskCreated, session.Instance(), &startNode, startTask, req.Operator, comment))
 	} else {
-		inst.Cancel()
-		e.eventBus.Publish(ctx, NewProcessEvent(EventProcessCancelled, inst, req.Operator, req.Comment))
+		session.Instance().Cancel()
+		e.eventBus.Publish(ctx, NewProcessEvent(EventProcessCancelled, session.Instance(), req.Operator, req.Comment))
 	}
 
 	return session.SaveInstance(ctx)
@@ -603,4 +626,9 @@ func (e *flowEngine) GetTimeline(ctx context.Context, instanceID string) ([]mode
 		return nil, err
 	}
 	return buildTimelineFromTasks(allTasks), nil
+}
+
+// ListPendingTasks 分页查询指定处理人的未办结待办任务列表
+func (e *flowEngine) ListPendingTasks(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
+	return e.storage.ListPendingTasksByAssignee(ctx, assignee, offset, limit)
 }

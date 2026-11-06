@@ -125,7 +125,7 @@ func TestService_Deploy(t *testing.T) {
 		name        string
 		workflow    domain.Workflow
 		mockRepo    func(ctrl *gomock.Controller) repository.IWorkflowRepository
-		mockAdapter func(ctrl *gomock.Controller) engine.IEngineAdapter
+		mockAdapter func(ctrl *gomock.Controller) engine.IEngine
 		wantErr     string
 	}{
 		{
@@ -142,7 +142,7 @@ func TestService_Deploy(t *testing.T) {
 				repo.EXPECT().CreateSnapshot(gomock.Any(), gomock.Any(), 1001, 1).Return(nil)
 				return repo
 			},
-			mockAdapter: func(ctrl *gomock.Controller) engine.IEngineAdapter {
+			mockAdapter: func(ctrl *gomock.Controller) engine.IEngine {
 				return nil
 			},
 			wantErr: "",
@@ -161,10 +161,10 @@ func TestService_Deploy(t *testing.T) {
 				repo.EXPECT().CreateSnapshot(gomock.Any(), gomock.Any(), 999, 1).Return(nil)
 				return repo
 			},
-			mockAdapter: func(ctrl *gomock.Controller) engine.IEngineAdapter {
-				adapter := enginemocks.NewMockIEngineAdapter(ctrl)
+			mockAdapter: func(ctrl *gomock.Controller) engine.IEngine {
+				adapter := enginemocks.NewMockIEngine(ctrl)
 				adapter.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
-				adapter.EXPECT().Deploy(gomock.Any(), gomock.AssignableToTypeOf(&model.Process{})).Return(engine.DeployInfo{ProcessID: 999, Version: 1}, nil)
+				adapter.EXPECT().Deploy(gomock.Any(), domain.EngineTypeEasyFlow, gomock.AssignableToTypeOf(&model.Process{})).Return(domain.DeployInfo{ProcessID: 999, Version: 1}, nil)
 				return adapter
 			},
 			wantErr: "",
@@ -183,10 +183,10 @@ func TestService_Deploy(t *testing.T) {
 				repo.EXPECT().CreateSnapshot(gomock.Any(), gomock.Any(), 888, 2).Return(nil)
 				return repo
 			},
-			mockAdapter: func(ctrl *gomock.Controller) engine.IEngineAdapter {
-				adapter := enginemocks.NewMockIEngineAdapter(ctrl)
+			mockAdapter: func(ctrl *gomock.Controller) engine.IEngine {
+				adapter := enginemocks.NewMockIEngine(ctrl)
 				adapter.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
-				adapter.EXPECT().Deploy(gomock.Any(), gomock.AssignableToTypeOf(&model.Process{})).Return(engine.DeployInfo{ProcessID: 888, Version: 2}, nil)
+				adapter.EXPECT().Deploy(gomock.Any(), domain.EngineTypeEasyFlow, gomock.AssignableToTypeOf(&model.Process{})).Return(domain.DeployInfo{ProcessID: 888, Version: 2}, nil)
 				return adapter
 			},
 			wantErr: "",
@@ -202,7 +202,7 @@ func TestService_Deploy(t *testing.T) {
 			mockRepo: func(ctrl *gomock.Controller) repository.IWorkflowRepository {
 				return repomocks.NewMockIWorkflowRepository(ctrl)
 			},
-			mockAdapter: func(ctrl *gomock.Controller) engine.IEngineAdapter {
+			mockAdapter: func(ctrl *gomock.Controller) engine.IEngine {
 				return nil
 			},
 			wantErr: "不支持的流程引擎类型: unknown-engine",
@@ -217,9 +217,9 @@ func TestService_Deploy(t *testing.T) {
 			repo := tc.mockRepo(ctrl)
 
 			flowxEngine := flowx.NewEngine(memory.NewStorage())
-			flowxDrv := flowxAdapter.NewAdapter(flowxEngine)
+			flowxDrv := flowxAdapter.NewEngine(flowxEngine)
 
-			adapters := []engine.IEngineAdapter{flowxDrv}
+			adapters := []engine.IEngine{flowxDrv}
 			if tc.mockAdapter != nil {
 				if a := tc.mockAdapter(ctrl); a != nil {
 					adapters = append(adapters, a)
@@ -246,7 +246,7 @@ func TestService_GetHighlightedGraph(t *testing.T) {
 	defer ctrl.Finish()
 
 	repo := repomocks.NewMockIWorkflowRepository(ctrl)
-	adapterMock := enginemocks.NewMockIEngineAdapter(ctrl)
+	adapterMock := enginemocks.NewMockIEngine(ctrl)
 
 	adapterMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
 
@@ -256,7 +256,7 @@ func TestService_GetHighlightedGraph(t *testing.T) {
 	}, nil).Times(2)
 
 	// 2. Mock GetInstanceExecutionView
-	adapterMock.EXPECT().GetInstanceExecutionView(gomock.Any(), engine.NewID(201), uint8(1)).Return(engine.InstanceExecutionView{
+	adapterMock.EXPECT().GetInstanceExecutionView(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID(201), uint8(1)).Return(domain.InstanceExecutionView{
 		ProcessID:      101,
 		ProcessVersion: 1,
 		TraversedEdges: map[string][]string{

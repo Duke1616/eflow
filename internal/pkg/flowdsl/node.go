@@ -1,6 +1,20 @@
 package flowdsl
 
-import "github.com/samber/lo"
+import (
+	"strings"
+
+	"github.com/samber/lo"
+)
+
+// 节点在画布未显式命名时的缺省兜底展示名称
+const (
+	DefaultNodeNameStart     = "开始"
+	DefaultNodeNameEnd       = "结束"
+	DefaultNodeNameUser      = "人工审批"
+	DefaultNodeNameParallel  = "并行网关"
+	DefaultNodeNameInclusion = "包容网关"
+	DefaultNodeNameSelective = "排他网关"
+)
 
 // Node 统一标准工作流拓扑节点领域模型。
 // 拓扑属性与各类型业务规格严格对称正交，消灭上帝对象与类型偏好。
@@ -72,4 +86,35 @@ func (n *Node) IsGateway() bool {
 		NodeGatewayInclusive,
 		NodeGatewayExclusive,
 	}, n.Type)
+}
+
+// DisplayName 获取节点显示名称，若未显式命名则自适应返回该节点类型的缺省名称
+func (n *Node) DisplayName() string {
+	if n != nil && strings.TrimSpace(n.Name) != "" {
+		return n.Name
+	}
+	if n != nil {
+		return n.Type.DefaultName()
+	}
+	return ""
+}
+
+// DefaultName 返回该节点类型的缺省中文展示名称
+func (t NodeType) DefaultName() string {
+	switch t {
+	case NodeStart:
+		return DefaultNodeNameStart
+	case NodeEnd:
+		return DefaultNodeNameEnd
+	case NodeUserTask:
+		return DefaultNodeNameUser
+	case NodeGatewayParallel:
+		return DefaultNodeNameParallel
+	case NodeGatewayInclusive:
+		return DefaultNodeNameInclusion
+	case NodeGatewayExclusive, NodeGatewayCondition, NodeGateway:
+		return DefaultNodeNameSelective
+	default:
+		return ""
+	}
 }

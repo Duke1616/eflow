@@ -7,7 +7,6 @@ import (
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/event"
-	"github.com/Duke1616/eflow/internal/service/engine"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/gotomicro/ego/core/elog"
@@ -21,14 +20,29 @@ type stubTicketService struct {
 	getErr  error
 	bindErr error
 	bindId  int
+	bindKey string
 }
 
 func (s *stubTicketService) GetByID(_ context.Context, _ int64) (domain.Ticket, error) {
 	return s.ticket, s.getErr
 }
 
+func (s *stubTicketService) BindProcess(_ context.Context, _ int64, engineType domain.EngineType, instanceID domain.ID) error {
+	if engineType == domain.EngineTypeFlowx {
+		s.bindKey = instanceID.String()
+	} else {
+		s.bindId = instanceID.Int()
+	}
+	return s.bindErr
+}
+
 func (s *stubTicketService) BindProcessInstanceID(_ context.Context, _ int64, instanceId int) error {
 	s.bindId = instanceId
+	return s.bindErr
+}
+
+func (s *stubTicketService) BindProcessInstanceKey(_ context.Context, _ int64, instanceKey string) error {
+	s.bindKey = instanceKey
 	return s.bindErr
 }
 
@@ -45,12 +59,12 @@ func (s *stubWorkflowService) Find(_ context.Context, _ int64) (domain.Workflow,
 
 type stubLauncher struct {
 	called bool
-	req    engine.ProcessLaunchReq
-	res    engine.ProcessLaunchResult
+	req    domain.ProcessLaunchReq
+	res    domain.ProcessLaunchResult
 	err    error
 }
 
-func (s *stubLauncher) Launch(_ context.Context, req engine.ProcessLaunchReq) (engine.ProcessLaunchResult, error) {
+func (s *stubLauncher) Start(_ context.Context, req domain.ProcessLaunchReq) (domain.ProcessLaunchResult, error) {
 	s.called = true
 	s.req = req
 	return s.res, s.err
@@ -66,6 +80,7 @@ func TestProcessEventConsumer_HandleTask_Idempotent(t *testing.T) {
 		wantFindCalled bool
 		wantLaunch     bool
 		wantBindId     int
+		wantBindKey    string
 		wantErr        bool
 	}{
 		{
@@ -75,7 +90,8 @@ func TestProcessEventConsumer_HandleTask_Idempotent(t *testing.T) {
 				ticket: domain.Ticket{
 					Id: 100,
 					Process: domain.Process{
-						InstanceId: 9999, // 已有实例 ID
+						EngineType: domain.EngineTypeEasyFlow,
+						InstanceID: domain.NewID(9999), // 已有实例 ID
 					},
 				},
 			},
@@ -108,11 +124,14 @@ func TestProcessEventConsumer_HandleTask_Idempotent(t *testing.T) {
 				EngineType: domain.EngineTypeFlowx,
 			},
 			launcher: &stubLauncher{
-				res: engine.ProcessLaunchResult{InstanceId: 102, InstanceKey: "inst_102"},
+				res: domain.ProcessLaunchResult{
+					EngineType: domain.EngineTypeFlowx,
+					InstanceID: domain.NewID("inst_102"),
+				},
 			},
 			wantFindCalled: true,
 			wantLaunch:     true,
-			wantBindId:     102,
+			wantBindKey:    "inst_102",
 			wantErr:        false,
 		},
 	}
@@ -141,6 +160,9 @@ func TestProcessEventConsumer_HandleTask_Idempotent(t *testing.T) {
 			assert.Equal(t, tc.wantLaunch, launcher.called)
 			if tc.wantBindId > 0 {
 				assert.Equal(t, tc.wantBindId, tc.ticketSvc.bindId)
+			}
+			if tc.wantBindKey != "" {
+				assert.Equal(t, tc.wantBindKey, tc.ticketSvc.bindKey)
 			}
 		})
 	}

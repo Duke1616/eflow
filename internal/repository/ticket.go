@@ -19,12 +19,20 @@ type TicketRepository interface {
 	CreateTicket(ctx context.Context, req domain.Ticket) (int64, error)
 	// DetailByProcessInstId 根据工作流引擎的流程实例 ID 检索本地工单数据
 	DetailByProcessInstId(ctx context.Context, instanceId int) (domain.Ticket, error)
+	// DetailByProcessInstKey 根据工作流引擎的流程实例全局唯一 Key 检索本地工单数据
+	DetailByProcessInstKey(ctx context.Context, instanceKey string) (domain.Ticket, error)
+	// DetailByProcessInstance 根据流程实例标识（自适应整型 ID 或字符串 Key）多态检索本地工单数据
+	DetailByProcessInstance(ctx context.Context, instanceID domain.ID) (domain.Ticket, error)
 	// AccessibleDetailByProcessInstId 获取经过 PBAC AccessScope 约束的单条工单。
 	AccessibleDetailByProcessInstId(ctx context.Context, instanceId int) (domain.Ticket, error)
 	// Detail 根据主键 ID 获取指定的物理工单明细数据
 	Detail(ctx context.Context, id int64) (domain.Ticket, error)
+	// RegisterProcess 登记并将流程引擎实例类型与唯一标识回写绑定到工单记录中
+	RegisterProcess(ctx context.Context, id int64, engineType domain.EngineType, instanceID domain.ID) error
 	// RegisterProcessInstanceId 登记并将生成的流程实例 ID 回写绑定到工单记录中
 	RegisterProcessInstanceId(ctx context.Context, id int64, instanceId int) error
+	// RegisterProcessInstanceKey 登记并将生成的现代流程引擎实例全局唯一 Key 回写绑定到工单记录中
+	RegisterProcessInstanceKey(ctx context.Context, id int64, instanceKey string) error
 	// MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因
 	MarkProcessStartFailed(ctx context.Context, id int64, reason string) error
 	// PrepareProcessRestart 将流程启动失败工单原子切换回启动中状态
@@ -35,8 +43,14 @@ type TicketRepository interface {
 	CountProcessStartFailed(ctx context.Context, userId string) (int64, error)
 	// ListTicketByProcessInstanceIds 根据引擎实例 ID 集合批量高效拉取工单记录
 	ListTicketByProcessInstanceIds(ctx context.Context, instanceIds []int) ([]domain.Ticket, error)
+	// ListTicketByProcessInstanceKeys 根据现代引擎实例全局唯一 Key 集合批量高效拉取工单记录
+	ListTicketByProcessInstanceKeys(ctx context.Context, instanceKeys []string) ([]domain.Ticket, error)
+	// UpdateStatusByProcessInstance 根据流程实例标识自适应更新本地物理工单的最新审批流转状态
+	UpdateStatusByProcessInstance(ctx context.Context, instanceID domain.ID, status uint8, wtime int64) error
 	// UpdateStatusByInstanceId 根据流程实例 ID 更新本地物理工单的最新审批流转状态
 	UpdateStatusByInstanceId(ctx context.Context, instanceId int, status uint8) error
+	// UpdateStatusByInstanceKey 根据流程实例全局唯一 Key 更新本地物理工单的最新审批流转状态
+	UpdateStatusByInstanceKey(ctx context.Context, instanceKey string, status uint8, wtime int64) error
 	// ListTicket 分页检索指定用户相关的、符合指定状态集合的物理工单记录
 	ListTicket(ctx context.Context, userId string, status []int, offset, limit int64) ([]domain.Ticket, error)
 	// CountTicket 统计指定用户相关、符合指定状态集合的物理工单总记录条数
@@ -50,7 +64,7 @@ type TicketRepository interface {
 	// MergeTicketData 高效增量合并更新工单内已存盘的动态表单变量变量集
 	MergeTicketData(ctx context.Context, id int64, data map[string]interface{}) error
 	// CreateTaskForm 物理留存审批步骤所提交的控件表单字段快照记录
-	CreateTaskForm(ctx context.Context, taskId int, ticketId int64, fields []domain.FormValue) error
+	CreateTaskForm(ctx context.Context, taskId domain.ID, ticketId int64, fields []domain.FormValue) error
 	// FindTaskFormsBatch 批量依据步骤任务 ID 集合加载对应的节点表单数据映射
 	FindTaskFormsBatch(ctx context.Context, taskIds []int) (map[int][]domain.FormValue, error)
 	// FindTaskFormsByTicketID 检索并统计指定工单下所有历史步骤节点所存盘的表单数据集
@@ -83,6 +97,25 @@ func (repo *ticketRepository) DetailByProcessInstId(ctx context.Context, instanc
 	return repo.toDomain(ticket), err
 }
 
+func (repo *ticketRepository) DetailByProcessInstKey(ctx context.Context, instanceKey string) (domain.Ticket, error) {
+	ticket, err := repo.dao.DetailByProcessInstKey(ctx, instanceKey)
+	return repo.toDomain(ticket), err
+}
+
+func (repo *ticketRepository) DetailByProcessInstance(ctx context.Context, instanceID domain.ID) (domain.Ticket, error) {
+	if intID := instanceID.Int(); intID > 0 {
+		return repo.DetailByProcessInstId(ctx, intID)
+	}
+	return repo.DetailByProcessInstKey(ctx, instanceID.String())
+}
+
+func (repo *ticketRepository) UpdateStatusByProcessInstance(ctx context.Context, instanceID domain.ID, status uint8, wtime int64) error {
+	if intID := instanceID.Int(); intID > 0 {
+		return repo.dao.UpdateStatusByInstanceId(ctx, intID, status)
+	}
+	return repo.dao.UpdateStatusByInstanceKey(ctx, instanceID.String(), status, wtime)
+}
+
 func (repo *ticketRepository) AccessibleDetailByProcessInstId(ctx context.Context, instanceId int) (domain.Ticket, error) {
 	ticket, err := repo.dao.AccessibleDetailByProcessInstId(ctx, instanceId)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -96,8 +129,21 @@ func (repo *ticketRepository) Detail(ctx context.Context, id int64) (domain.Tick
 	return repo.toDomain(ticket), err
 }
 
+func (repo *ticketRepository) RegisterProcess(ctx context.Context, id int64, engineType domain.EngineType, instanceID domain.ID) error {
+	switch engineType {
+	case domain.EngineTypeFlowx:
+		return repo.dao.RegisterProcessInstanceKey(ctx, id, instanceID.String(), domain.PROCESS.ToUint8())
+	default:
+		return repo.dao.RegisterProcessInstanceId(ctx, id, instanceID.Int(), domain.PROCESS.ToUint8())
+	}
+}
+
 func (repo *ticketRepository) RegisterProcessInstanceId(ctx context.Context, id int64, instanceId int) error {
 	return repo.dao.RegisterProcessInstanceId(ctx, id, instanceId, domain.PROCESS.ToUint8())
+}
+
+func (repo *ticketRepository) RegisterProcessInstanceKey(ctx context.Context, id int64, instanceKey string) error {
+	return repo.dao.RegisterProcessInstanceKey(ctx, id, instanceKey, domain.PROCESS.ToUint8())
 }
 
 // MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因。
@@ -126,8 +172,17 @@ func (repo *ticketRepository) ListTicketByProcessInstanceIds(ctx context.Context
 	return slice.Map(tickets, func(idx int, src dao.Ticket) domain.Ticket { return repo.toDomain(src) }), err
 }
 
+func (repo *ticketRepository) ListTicketByProcessInstanceKeys(ctx context.Context, instanceKeys []string) ([]domain.Ticket, error) {
+	tickets, err := repo.dao.ListTicketByProcessInstanceKeys(ctx, instanceKeys)
+	return slice.Map(tickets, func(idx int, src dao.Ticket) domain.Ticket { return repo.toDomain(src) }), err
+}
+
 func (repo *ticketRepository) UpdateStatusByInstanceId(ctx context.Context, instanceId int, status uint8) error {
 	return repo.dao.UpdateStatusByInstanceId(ctx, instanceId, status)
+}
+
+func (repo *ticketRepository) UpdateStatusByInstanceKey(ctx context.Context, instanceKey string, status uint8, wtime int64) error {
+	return repo.dao.UpdateStatusByInstanceKey(ctx, instanceKey, status, wtime)
 }
 
 func (repo *ticketRepository) ListTicket(ctx context.Context, userId string, status []int, offset, limit int64) ([]domain.Ticket, error) {
@@ -162,7 +217,17 @@ func (repo *ticketRepository) MergeTicketData(ctx context.Context, id int64, dat
 	return repo.dao.MergeTicketData(ctx, id, data)
 }
 
+// resolveInstanceStorage 根据引擎类型决议底层持久化存储形态
+func resolveInstanceStorage(proc domain.Process) (instID int, instKey string) {
+	if proc.EngineType == domain.EngineTypeFlowx {
+		return 0, proc.InstanceID.String()
+	}
+	return proc.InstanceID.Int(), ""
+}
+
 func (repo *ticketRepository) toEntity(req domain.Ticket) dao.Ticket {
+	instID, instKey := resolveInstanceStorage(req.Process)
+
 	return dao.Ticket{
 		TenantID:             req.TenantID,
 		BizID:                req.BizID,
@@ -171,6 +236,8 @@ func (repo *ticketRepository) toEntity(req domain.Ticket) dao.Ticket {
 		Status:               req.Status.ToUint8(),
 		Provide:              req.Provide.ToUint8(),
 		WorkflowId:           req.WorkflowId,
+		ProcessInstanceId:    instID,
+		ProcessInstanceKey:   instKey,
 		CreateBy:             req.CreateBy,
 		ProcessStartError:    req.ProcessStartError,
 		ProcessStartAttempts: req.ProcessStartAttempts,
@@ -187,6 +254,19 @@ func (repo *ticketRepository) toEntity(req domain.Ticket) dao.Ticket {
 }
 
 func (repo *ticketRepository) toDomain(req dao.Ticket) domain.Ticket {
+	var proc domain.Process
+	if req.ProcessInstanceKey != "" {
+		proc = domain.Process{
+			EngineType: domain.EngineTypeFlowx,
+			InstanceID: domain.NewID(req.ProcessInstanceKey),
+		}
+	} else if req.ProcessInstanceId > 0 {
+		proc = domain.Process{
+			EngineType: domain.EngineTypeEasyFlow,
+			InstanceID: domain.NewID(req.ProcessInstanceId),
+		}
+	}
+
 	return domain.Ticket{
 		Id:                   req.Id,
 		TenantID:             req.TenantID,
@@ -196,7 +276,7 @@ func (repo *ticketRepository) toDomain(req dao.Ticket) domain.Ticket {
 		Status:               domain.Status(req.Status),
 		Provide:              domain.Provide(req.Provide),
 		WorkflowId:           req.WorkflowId,
-		Process:              domain.Process{InstanceId: req.ProcessInstanceId},
+		Process:              proc,
 		CreateBy:             req.CreateBy,
 		Data:                 req.Data.Val,
 		Ctime:                req.Ctime,

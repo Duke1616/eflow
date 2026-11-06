@@ -565,7 +565,7 @@ func (s *FlowxTestSuite) TestGateways() {
 			Build()
 
 		instID, err := engine.Start(s.ctx, StartReq{
-			Def:       &def,
+			Def:       def,
 			Starter:   "tom",
 			Variables: map[string]any{"score": 90},
 		})
@@ -593,7 +593,7 @@ func (s *FlowxTestSuite) TestGateways() {
 			Edge("join_gw", "end").
 			Build()
 
-		instID, err := engine.Start(s.ctx, StartReq{Def: &def, Starter: "tom"})
+		instID, err := engine.Start(s.ctx, StartReq{Def: def, Starter: "tom"})
 		require.NoError(s.T(), err)
 
 		tasks, _ := store.ListTasksByInstance(s.ctx, instID)
@@ -631,7 +631,7 @@ func (s *FlowxTestSuite) TestGateways() {
 
 		// 仅激活 dev 和 sec，ops 自动标记为 TaskSkipped
 		instID, err := engine.Start(s.ctx, StartReq{
-			Def:       &def,
+			Def:       def,
 			Starter:   "tom",
 			Variables: map[string]any{"is_dev": true, "is_sec": true, "is_ops": false},
 		})
@@ -684,7 +684,7 @@ func (s *FlowxTestSuite) TestNodeTask_ChainedWorkers() {
 			Edge("final_audit", "end").
 			Build()
 
-		instID, err := engine.Start(s.ctx, StartReq{Def: &def, Starter: "tom"})
+		instID, err := engine.Start(s.ctx, StartReq{Def: def, Starter: "tom"})
 		require.NoError(s.T(), err)
 
 		// 流程自动连续穿透 task_a 与 task_b，直接停留在 final_audit
@@ -713,7 +713,7 @@ func (s *FlowxTestSuite) TestTimeline_MultiBatchRejectionAudit() {
 			Edge("step_cfo", "end").
 			Build()
 
-		instID, err := engine.Start(s.ctx, StartReq{Def: &def, Starter: "tom"})
+		instID, err := engine.Start(s.ctx, StartReq{Def: def, Starter: "tom"})
 		require.NoError(s.T(), err)
 
 		// 第 1 轮初审通过
@@ -771,7 +771,7 @@ func (s *FlowxTestSuite) TestTargetedReject() {
 			Edge("first_audit", "end").
 			Build()
 
-		instID, _ := engine.Start(s.ctx, StartReq{Def: &def, Starter: "alice"})
+		instID, _ := engine.Start(s.ctx, StartReq{Def: def, Starter: "alice"})
 		tasks, _ := store.ListTasksByInstance(s.ctx, instID)
 		_ = engine.Reject(s.ctx, RejectReq{
 			TaskID:    tasks[0].ID,
@@ -798,7 +798,7 @@ func (s *FlowxTestSuite) TestTargetedReject() {
 			Edge("audit_c", "end").
 			Build()
 
-		instID, _ := engine.Start(s.ctx, StartReq{Def: &def, Starter: "alice"})
+		instID, _ := engine.Start(s.ctx, StartReq{Def: def, Starter: "alice"})
 		tasks, _ := store.ListTasksByInstance(s.ctx, instID)
 		tA, _ := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "audit_a" })
 		_ = engine.Pass(s.ctx, PassReq{TaskID: tA.ID, Operator: "user_a"})
@@ -836,7 +836,7 @@ func (s *FlowxTestSuite) TestRevoke() {
 
 	s.Run("非提单人越权撤回拦截", func() {
 		engine, _ := s.newEngine()
-		instID, _ := engine.Start(s.ctx, StartReq{Def: &def, Starter: "alice"})
+		instID, _ := engine.Start(s.ctx, StartReq{Def: def, Starter: "alice"})
 		err := engine.Revoke(s.ctx, RevokeReq{InstanceID: instID, Operator: "attacker"})
 		require.Error(s.T(), err)
 		assert.True(s.T(), errors.Is(err, ErrUnauthorizedRevoke))
@@ -844,7 +844,7 @@ func (s *FlowxTestSuite) TestRevoke() {
 
 	s.Run("提单人主动撤回直接作废工单", func() {
 		engine, store := s.newEngine()
-		instID, _ := engine.Start(s.ctx, StartReq{Def: &def, Starter: "alice"})
+		instID, _ := engine.Start(s.ctx, StartReq{Def: def, Starter: "alice"})
 		err := engine.Revoke(s.ctx, RevokeReq{InstanceID: instID, Operator: "alice", BackToStarter: false})
 		require.NoError(s.T(), err)
 
@@ -876,7 +876,7 @@ func (s *FlowxTestSuite) TestMiddlewarePipeline() {
 			Edge("audit", "end").
 			Build()
 
-		instID, err := engine.Start(s.ctx, StartReq{Def: &def, Starter: "tom"})
+		instID, err := engine.Start(s.ctx, StartReq{Def: def, Starter: "tom"})
 		require.NoError(s.T(), err)
 		assert.Equal(s.T(), []string{"in:START", "out:START"}, traceLog)
 
@@ -916,7 +916,7 @@ func (s *FlowxTestSuite) TestCompleteTask() {
 			Edge("audit_boss", "end").
 			Build()
 
-		instID, err := engine.Start(s.ctx, StartReq{Def: &def, Starter: "tom"})
+		instID, err := engine.Start(s.ctx, StartReq{Def: def, Starter: "tom"})
 		require.NoError(s.T(), err)
 
 		tasks, _ := store.ListTasksByInstance(s.ctx, instID)
@@ -966,7 +966,7 @@ func (s *FlowxTestSuite) TestCompleteTask() {
 			Edge("final_audit", "end").
 			Build()
 
-		instID, err := engine.Start(s.ctx, StartReq{Def: &def, Starter: "dev_tom"})
+		instID, err := engine.Start(s.ctx, StartReq{Def: def, Starter: "dev_tom"})
 		require.NoError(s.T(), err)
 
 		tasks, _ := store.ListTasksByInstance(s.ctx, instID)
@@ -1045,7 +1045,7 @@ func (s *FlowxTestSuite) TestEventBus_Architecture() {
 			Build()
 
 		// 尽管监听器发生 panic，流转依然安全成功
-		instID, err := engine.Start(s.ctx, StartReq{Def: &def, Starter: "tom"})
+		instID, err := engine.Start(s.ctx, StartReq{Def: def, Starter: "tom"})
 		require.NoError(s.T(), err)
 
 		tasks, _ := store.ListTasksByInstance(s.ctx, instID)

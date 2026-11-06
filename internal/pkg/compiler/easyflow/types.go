@@ -64,7 +64,7 @@ func (ctx *Context) GetOrGenerateProxyID(srcID, targetID string) string {
 	}
 
 	// 只有目标是特定网关类型时才需要代理
-	if targetNode.Type == NodeTypeParallel || targetNode.Type == NodeTypeInclusion || targetNode.Type == NodeTypeSelective {
+	if targetNode.Type == flowdsl.NodeGatewayParallel || targetNode.Type == flowdsl.NodeGatewayInclusive || targetNode.Type == flowdsl.NodeGatewayExclusive {
 		proxyID := fmt.Sprintf("proxy_%s_%s", srcID, targetID)
 		if ctx.ProxyNodes == nil {
 			ctx.ProxyNodes = make(map[string]struct{})
@@ -85,7 +85,7 @@ func (ctx *Context) GetOrGenerateProxyForGateway(conditionGatewayID, targetID st
 	}
 
 	// 只有源节点是条件网关时才需要代理
-	if conditionNode.Type == NodeTypeCondition {
+	if conditionNode.Type == flowdsl.NodeGatewayCondition {
 		proxyID := fmt.Sprintf("proxy_%s_%s", conditionGatewayID, targetID)
 		if ctx.ProxyNodes == nil {
 			ctx.ProxyNodes = make(map[string]struct{})
@@ -108,11 +108,11 @@ func (ctx *Context) createProxyNode(proxyID, srcID, targetID string) {
 	var passEvents []string
 	if targetNode != nil {
 		switch targetNode.Type {
-		case NodeTypeParallel:
+		case flowdsl.NodeGatewayParallel:
 			passEvents = []string{EventTaskParallelNodePass}
-		case NodeTypeInclusion:
+		case flowdsl.NodeGatewayInclusive:
 			passEvents = []string{EventTaskInclusionNodePass}
-		case NodeTypeSelective:
+		case flowdsl.NodeGatewayExclusive:
 			passEvents = []string{EventTaskSelectiveNodePass}
 		}
 	}

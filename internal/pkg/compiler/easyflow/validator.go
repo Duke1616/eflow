@@ -78,7 +78,7 @@ func getAllEdges(ctx *Context) []flowdsl.Edge {
 
 // isMergeGateway 判断节点是否为等待并发前置的聚合网关（parallel 或 inclusion）
 func isMergeGateway(nodeType flowdsl.NodeType) bool {
-	return nodeType == NodeTypeParallel || nodeType == NodeTypeInclusion
+	return nodeType == flowdsl.NodeGatewayParallel || nodeType == flowdsl.NodeGatewayInclusive
 }
 
 // intersectMany 计算多个切片的交集，并保证结果去重
@@ -127,12 +127,12 @@ func scanBranchDownstream(ctx *Context, startNodeID string, stopAtExclusiveJoin 
 		}
 
 		// 若为排他汇聚点（多入边的 condition 节点），说明多条互斥分支在此处已先合并为单线流转
-		if stopAtExclusiveJoin && currNode.Type == NodeTypeCondition && len(ctx.PrevNodesMap[currID]) > 1 {
+		if stopAtExclusiveJoin && currNode.Type == flowdsl.NodeGatewayCondition && len(ctx.PrevNodesMap[currID]) > 1 {
 			continue
 		}
 
 		// 若未经聚合网关直接流向了结束节点，标记并记录
-		if currNode.Type == NodeTypeEnd {
+		if currNode.Type == flowdsl.NodeEnd {
 			reachedEnd = true
 			endID = currID
 			continue
@@ -162,15 +162,15 @@ type validateSupportedNodeTypes struct{}
 
 func (v *validateSupportedNodeTypes) Validate(ctx *Context) error {
 	supportedTypes := map[flowdsl.NodeType]bool{
-		NodeTypeStart:     true,
-		NodeTypeEnd:       true,
-		NodeTypeUser:      true,
-		NodeTypeCondition: true,
-		NodeTypeParallel:  true,
-		NodeTypeInclusion: true,
-		NodeTypeSelective: true,
-		NodeTypeAuto:      true,
-		NodeTypeChat:      true,
+		flowdsl.NodeStart:            true,
+		flowdsl.NodeEnd:              true,
+		flowdsl.NodeUserTask:         true,
+		flowdsl.NodeGatewayCondition: true,
+		flowdsl.NodeGatewayParallel:  true,
+		flowdsl.NodeGatewayInclusive: true,
+		flowdsl.NodeGatewayExclusive: true,
+		flowdsl.NodeAutoTask:         true,
+		flowdsl.NodeChatGroup:        true,
 	}
 
 	badNode, found := lo.Find(lo.Values(ctx.NodesMap), func(n *flowdsl.Node) bool {
@@ -226,8 +226,8 @@ type validateStartEnd struct{}
 
 func (v *validateStartEnd) Validate(ctx *Context) error {
 	allNodes := lo.Values(ctx.NodesMap)
-	startNodes := lo.Filter(allNodes, func(n *flowdsl.Node, _ int) bool { return n.Type == NodeTypeStart })
-	endNodes := lo.Filter(allNodes, func(n *flowdsl.Node, _ int) bool { return n.Type == NodeTypeEnd })
+	startNodes := lo.Filter(allNodes, func(n *flowdsl.Node, _ int) bool { return n.Type == flowdsl.NodeStart })
+	endNodes := lo.Filter(allNodes, func(n *flowdsl.Node, _ int) bool { return n.Type == flowdsl.NodeEnd })
 
 	if len(startNodes) == 0 {
 		return newValidateError("流程缺少开始节点，请添加一个 [start] 节点")
@@ -352,7 +352,7 @@ func findCyclePath(ctx *Context, inDegree map[string]int) string {
 type validateReachability struct{}
 
 func (v *validateReachability) Validate(ctx *Context) error {
-	startNode, ok := lo.Find(lo.Values(ctx.NodesMap), func(n *flowdsl.Node) bool { return n.Type == NodeTypeStart })
+	startNode, ok := lo.Find(lo.Values(ctx.NodesMap), func(n *flowdsl.Node) bool { return n.Type == flowdsl.NodeStart })
 	if !ok {
 		return nil // 由 validateStartEnd 统一报错
 	}
@@ -386,7 +386,7 @@ func (v *validateReachability) Validate(ctx *Context) error {
 
 	// 2. 反向可达遍历（从所有 End 节点沿着入边反向追溯）
 	canReachEnd := make(map[string]bool, len(ctx.NodesMap))
-	endNodes := lo.Filter(lo.Values(ctx.NodesMap), func(n *flowdsl.Node, _ int) bool { return n.Type == NodeTypeEnd })
+	endNodes := lo.Filter(lo.Values(ctx.NodesMap), func(n *flowdsl.Node, _ int) bool { return n.Type == flowdsl.NodeEnd })
 	endQueue := lo.Map(endNodes, func(n *flowdsl.Node, _ int) string {
 		canReachEnd[n.ID] = true
 		return n.ID
@@ -426,7 +426,7 @@ type validateConditionParallelDeadlock struct{}
 
 func (v *validateConditionParallelDeadlock) Validate(ctx *Context) error {
 	for _, node := range ctx.NodesMap {
-		if node.Type != NodeTypeCondition {
+		if node.Type != flowdsl.NodeGatewayCondition {
 			continue
 		}
 
@@ -458,7 +458,7 @@ type validateParallelForkJoinPairing struct{}
 
 func (v *validateParallelForkJoinPairing) Validate(ctx *Context) error {
 	for _, node := range ctx.NodesMap {
-		if node.Type != NodeTypeParallel {
+		if node.Type != flowdsl.NodeGatewayParallel {
 			continue
 		}
 		forkEdges := ctx.GetTargetEdges(node.ID)
@@ -497,13 +497,13 @@ type validateSelectiveTargetsMustBeCondition struct{}
 
 func (v *validateSelectiveTargetsMustBeCondition) Validate(ctx *Context) error {
 	for _, node := range ctx.NodesMap {
-		if node.Type != NodeTypeSelective {
+		if node.Type != flowdsl.NodeGatewayExclusive {
 			continue
 		}
 
 		badEdge, found := lo.Find(ctx.GetTargetEdges(node.ID), func(e flowdsl.Edge) bool {
 			target := ctx.GetNodeInfo(e.Target)
-			return target == nil || target.Type != NodeTypeCondition
+			return target == nil || target.Type != flowdsl.NodeGatewayCondition
 		})
 		if found {
 			target := ctx.GetNodeInfo(badEdge.Target)
@@ -527,7 +527,7 @@ type validateSelectiveMinBranches struct{}
 
 func (v *validateSelectiveMinBranches) Validate(ctx *Context) error {
 	for _, node := range ctx.NodesMap {
-		if node.Type != NodeTypeSelective {
+		if node.Type != flowdsl.NodeGatewayExclusive {
 			continue
 		}
 		outCount := len(ctx.GetTargetEdges(node.ID))
@@ -551,7 +551,7 @@ type validateConditionEdgeExpression struct{}
 
 func (v *validateConditionEdgeExpression) Validate(ctx *Context) error {
 	for _, node := range ctx.NodesMap {
-		if node.Type != NodeTypeCondition {
+		if node.Type != flowdsl.NodeGatewayCondition {
 			continue
 		}
 		outEdges := ctx.GetTargetEdges(node.ID)
@@ -561,7 +561,7 @@ func (v *validateConditionEdgeExpression) Validate(ctx *Context) error {
 
 		isSelectiveBranch := lo.SomeBy(ctx.PrevNodesMap[node.ID], func(prevID string) bool {
 			prev := ctx.GetNodeInfo(prevID)
-			return prev != nil && prev.Type == NodeTypeSelective
+			return prev != nil && prev.Type == flowdsl.NodeGatewayExclusive
 		})
 
 		mustHaveExpr := len(outEdges) >= 2 || isSelectiveBranch
@@ -599,12 +599,12 @@ type validateNoDuplicateConditionExpressions struct{}
 func (v *validateNoDuplicateConditionExpressions) Validate(ctx *Context) error {
 	for _, node := range ctx.NodesMap {
 		switch node.Type {
-		case NodeTypeSelective:
+		case flowdsl.NodeGatewayExclusive:
 			outEdges := ctx.GetTargetEdges(node.ID)
 			seenExpr := make(map[string]string) // normalizedExpr -> conditionNodeID
 			for _, e := range outEdges {
 				condNode := ctx.GetNodeInfo(e.Target)
-				if condNode == nil || condNode.Type != NodeTypeCondition {
+				if condNode == nil || condNode.Type != flowdsl.NodeGatewayCondition {
 					continue
 				}
 				condOutEdges := ctx.GetTargetEdges(condNode.ID)
@@ -627,7 +627,7 @@ func (v *validateNoDuplicateConditionExpressions) Validate(ctx *Context) error {
 				}
 			}
 
-		case NodeTypeCondition:
+		case flowdsl.NodeGatewayCondition:
 			outEdges := ctx.GetTargetEdges(node.ID)
 			if len(outEdges) < 2 {
 				continue

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
@@ -139,17 +138,18 @@ func (s *passTaskServiceStub) ShouldAdvanceProcessTask(context.Context, int64) (
 }
 
 type passEngineStub struct {
-	engine.Service
+	engine.IEngine
 	tenantIDs []int64
 	errors    map[int]error
 }
 
-func (s *passEngineStub) GetAutomationTask(ctx context.Context, _ string, processInstanceID int) (model.Task, error) {
+func (s *passEngineStub) GetAutomationTask(ctx context.Context, instanceID domain.ID, _ string) (domain.TaskRecord, error) {
 	s.tenantIDs = append(s.tenantIDs, ctxutil.GetTenantID(ctx).Int64())
-	if err := s.errors[processInstanceID]; err != nil {
-		return model.Task{}, err
+	procInstID := instanceID.Int()
+	if err := s.errors[procInstID]; err != nil {
+		return domain.TaskRecord{}, err
 	}
-	return model.Task{TaskID: processInstanceID}, nil
+	return domain.TaskRecord{TaskID: procInstID}, nil
 }
 
-func (s *passEngineStub) Pass(context.Context, int, string) error { return nil }
+func (s *passEngineStub) Pass(context.Context, domain.TaskPassReq) error { return nil }

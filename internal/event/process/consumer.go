@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/event"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
@@ -72,10 +73,10 @@ func (c *ProcessEventConsumer) handleTask(ctx context.Context, evt event.TicketE
 	if err != nil {
 		return fmt.Errorf("查询待启动工单详情失败: %w", err)
 	}
-	if ticket.Process.InstanceId > 0 {
+	if ticket.Process.IsBound() {
 		c.logger.Info("工单已绑定流程实例，跳过重复启动",
 			elog.Int64("ticketId", evt.Id),
-			elog.Int("instanceId", ticket.Process.InstanceId))
+			elog.String("instance", ticket.Process.DisplayID()))
 		return nil
 	}
 
@@ -94,7 +95,7 @@ func (c *ProcessEventConsumer) handleTask(ctx context.Context, evt event.TicketE
 	}
 
 	// 3. 调用流程启动角色契约（多态调度，隔离底层引擎差异）
-	launchRes, err := c.launcher.Launch(ctx, engine.ProcessLaunchReq{
+	launchRes, err := c.launcher.Start(ctx, domain.ProcessLaunchReq{
 		EngineType:   flow.ResolveEngineType(),
 		TicketId:     evt.Id,
 		WorkflowId:   flow.Id,
@@ -112,9 +113,9 @@ func (c *ProcessEventConsumer) handleTask(ctx context.Context, evt event.TicketE
 		return nil
 	}
 
-	// 将生成的流程引擎实例 ID 回写反登记到对应工单上，激活流程实例绑定关系
-	if err = c.ticketSvc.BindProcessInstanceID(ctx, evt.Id, launchRes.InstanceId); err != nil {
-		return fmt.Errorf("绑定工单流程引擎实例ID失败: %w", err)
+	// 4. 统一回写引擎类型与全局实例标识，激活流程实例绑定关系
+	if err = c.ticketSvc.BindProcess(ctx, evt.Id, launchRes.EngineType, launchRes.InstanceID); err != nil {
+		return fmt.Errorf("绑定工单流程引擎实例失败: %w", err)
 	}
 	return nil
 }

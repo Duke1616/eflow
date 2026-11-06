@@ -28,7 +28,7 @@ func newFlowSession(store storage.IStorage, inst *model.Instance, plan *kernel.E
 	}
 }
 
-// Instance 获取当前流程实例只读指针
+// Instance 获取当前流程实例指针（直接操作原地状态）
 func (s *flowSession) Instance() *model.Instance {
 	return s.inst
 }
@@ -58,7 +58,7 @@ func (s *flowSession) MaxBatchCode() int {
 	maxTask := lo.MaxBy(s.tasks, func(a, b *model.Task) bool {
 		return a.BatchCode > b.BatchCode
 	})
-	if maxTask != nil && maxTask.BatchCode > 1 {
+	if maxTask.BatchCode > 1 {
 		return maxTask.BatchCode
 	}
 	return 1
@@ -102,10 +102,10 @@ func (s *flowSession) UpdateTasksStatus(ctx context.Context, taskIDs []string, s
 		return id, struct{}{}
 	})
 	now := time.Now()
-	for _, t := range s.tasks {
+	for i, t := range s.tasks {
 		if _, exists := idMap[t.ID]; exists {
-			t.Status = status
-			t.FinishTime = &now
+			s.tasks[i].Status = status
+			s.tasks[i].FinishTime = now
 		}
 	}
 	return nil

@@ -14,10 +14,9 @@ type StartNodeConverter struct{}
 func (c *StartNodeConverter) Type() flowdsl.NodeType { return flowdsl.NodeStart }
 
 func (c *StartNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
-	name := lo.Ternary(strings.TrimSpace(node.Name) != "", node.Name, DefaultNameStart)
 	return model.NodeSpec{
 		ID:   node.ID,
-		Name: name,
+		Name: node.DisplayName(),
 		Type: model.NodeStart,
 	}, nil
 }
@@ -28,10 +27,9 @@ type EndNodeConverter struct{}
 func (c *EndNodeConverter) Type() flowdsl.NodeType { return flowdsl.NodeEnd }
 
 func (c *EndNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
-	name := lo.Ternary(strings.TrimSpace(node.Name) != "", node.Name, DefaultNameEnd)
 	return model.NodeSpec{
 		ID:   node.ID,
-		Name: name,
+		Name: node.DisplayName(),
 		Type: model.NodeEnd,
 	}, nil
 }
@@ -42,7 +40,6 @@ type UserNodeConverter struct{}
 func (c *UserNodeConverter) Type() flowdsl.NodeType { return flowdsl.NodeUserTask }
 
 func (c *UserNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
-	name := lo.Ternary(strings.TrimSpace(node.Name) != "", node.Name, DefaultNameUser)
 	userCfg, _ := node.AsUserTask()
 
 	isCC := userCfg != nil && userCfg.IsCC
@@ -60,7 +57,7 @@ func (c *UserNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (mode
 
 	spec := model.NodeSpec{
 		ID:        node.ID,
-		Name:      name,
+		Name:      node.DisplayName(),
 		Type:      nodeType,
 		SignRule:  signRule,
 		Assignees: assignees,
@@ -134,7 +131,7 @@ func (c *ParallelGatewayConverter) Type() flowdsl.NodeType { return flowdsl.Node
 func (c *ParallelGatewayConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
 	return model.NodeSpec{
 		ID:   node.ID,
-		Name: DefaultNameParallel,
+		Name: node.DisplayName(),
 		Type: model.NodeGatewayParallel,
 	}, nil
 }
@@ -147,7 +144,7 @@ func (c *InclusionGatewayConverter) Type() flowdsl.NodeType { return flowdsl.Nod
 func (c *InclusionGatewayConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
 	return model.NodeSpec{
 		ID:   node.ID,
-		Name: DefaultNameInclusion,
+		Name: node.DisplayName(),
 		Type: model.NodeGatewayInclusive,
 	}, nil
 }
@@ -158,10 +155,9 @@ type SelectiveGatewayConverter struct{}
 func (c *SelectiveGatewayConverter) Type() flowdsl.NodeType { return flowdsl.NodeGatewayExclusive }
 
 func (c *SelectiveGatewayConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
-	name := lo.Ternary(strings.TrimSpace(node.Name) != "", node.Name, DefaultNameSelective)
 	return model.NodeSpec{
 		ID:   node.ID,
-		Name: name,
+		Name: node.DisplayName(),
 		Type: model.NodeGatewayExclusive,
 	}, nil
 }

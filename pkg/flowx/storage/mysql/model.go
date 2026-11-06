@@ -104,7 +104,7 @@ func toInstancePO(inst *model.Instance) (FlowInstancePO, error) {
 		Variables:   varsJSON,
 		Ctime:       inst.CreateTime.UnixMilli(),
 	}
-	if inst.FinishTime != nil {
+	if !inst.FinishTime.IsZero() {
 		po.Ftime = sql.NullInt64{Int64: inst.FinishTime.UnixMilli(), Valid: true}
 	}
 	return po, nil
@@ -130,7 +130,7 @@ func toInstanceDO(po FlowInstancePO) (*model.Instance, error) {
 		CreateTime:  time.UnixMilli(po.Ctime),
 	}
 	if po.Ftime.Valid {
-		inst.FinishTime = new(time.UnixMilli(po.Ftime.Int64))
+		inst.FinishTime = time.UnixMilli(po.Ftime.Int64)
 	}
 	return inst, nil
 }
@@ -148,7 +148,7 @@ func toTaskPO(t *model.Task) FlowTaskPO {
 		Comment:    t.Comment,
 		Ctime:      t.CreateTime.UnixMilli(),
 	}
-	if t.FinishTime != nil {
+	if !t.FinishTime.IsZero() {
 		po.Ftime = sql.NullInt64{Int64: t.FinishTime.UnixMilli(), Valid: true}
 	}
 	return po
@@ -168,7 +168,7 @@ func toTaskDO(po FlowTaskPO) *model.Task {
 		CreateTime: time.UnixMilli(po.Ctime),
 	}
 	if po.Ftime.Valid {
-		t.FinishTime = new(time.UnixMilli(po.Ftime.Int64))
+		t.FinishTime = time.UnixMilli(po.Ftime.Int64)
 	}
 	return t
 }

@@ -46,21 +46,21 @@ type Service interface {
 }
 
 type workflowService struct {
-	repo             repository.IWorkflowRepository
-	engineDispatcher engine.IEngineDispatcher
-	compiler         compiler.ICompositeCompiler
+	repo     repository.IWorkflowRepository
+	engine   engine.IEngine
+	compiler compiler.ICompositeCompiler
 }
 
 // NewWorkflowService 初始化工作流业务服务层实例
 func NewWorkflowService(
 	repo repository.IWorkflowRepository,
-	engineDispatcher engine.IEngineDispatcher,
+	engine engine.IEngine,
 	compiler compiler.ICompositeCompiler,
 ) Service {
 	return &workflowService{
-		repo:             repo,
-		engineDispatcher: engineDispatcher,
-		compiler:         compiler,
+		repo:     repo,
+		engine:   engine,
+		compiler: compiler,
 	}
 }
 
@@ -123,7 +123,7 @@ func (s *workflowService) Deploy(ctx context.Context, wf domain.Workflow) error 
 	}
 
 	// 2. 底层流程引擎调度门面统一执行部署发布
-	deployInfo, err := s.engineDispatcher.Deploy(ctx, wf.ResolveEngineType(), compileResult.RawDef)
+	deployInfo, err := s.engine.Deploy(ctx, wf.ResolveEngineType(), compileResult.RawDef)
 	if err != nil {
 		return fmt.Errorf("流程引擎部署失败: %w", err)
 	}
@@ -200,22 +200,31 @@ func (s *workflowService) GetWorkflowSnapshot(ctx context.Context, processID, ve
 	return s.repo.FindSnapshot(ctx, processID, version)
 }
 
-func (s *workflowService) FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error) {
-	// 1. 获取工作流最新版元数据模型
-	latest, err := s.Find(ctx, workflowID)
+// resolveSnapshotProcessID 决议快照检索标识（兼容 FlowX 以 workflowID 为基准与 EasyFlow 的自增 ID）
+func resolveSnapshotProcessID(workflowID int64, processID int) int {
+	if processID > 0 {
+		return processID
+	}
+	return int(workflowID)
+}
 
-	// 2. 降级容灾逻辑：如果主记录在极端场景下已被物理删除或查询失败，则完全从此刻版本快照中拉取做物理回填恢复
+func (s *workflowService) FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error) {
+	procID := resolveSnapshotProcessID(workflowID, processID)
+
+	// 1. 读取历史审批时的画布拓扑快照（单一事实来源，确保重现当时的流转图）
+	snapshot, snapErr := s.repo.FindSnapshot(ctx, procID, version)
+
+	// 2. 获取工作流最新版元数据模型
+	latest, err := s.Find(ctx, workflowID)
 	if err != nil {
-		snapshot, snapErr := s.repo.FindSnapshot(ctx, processID, version)
-		if snapErr != nil {
-			return domain.Workflow{}, err
+		if snapErr == nil {
+			return snapshot, nil // 容灾降级：主数据缺失时由快照兜底恢复
 		}
-		return snapshot, nil
+		return domain.Workflow{}, fmt.Errorf("查询工作流定义失败 [workflowID=%d]: %w", workflowID, err)
 	}
 
-	// 3. 读取快照覆盖主实体的 flow_data，以保障用户点击历史工单图渲染时看到的是当时审批时的画布拓扑，而不是最新的画布，符合设计完整性
-	snapshot, err := s.repo.FindSnapshot(ctx, processID, version)
-	if err == nil {
+	// 3. 读取快照覆盖主实体的 flow_data，以保障用户点击历史工单图渲染时看到的是当时审批时的画布拓扑
+	if snapErr == nil {
 		latest.FlowData = snapshot.FlowData
 	}
 
@@ -223,12 +232,13 @@ func (s *workflowService) FindInstanceFlow(ctx context.Context, workflowID int64
 }
 
 func (s *workflowService) GetHighlightedGraph(ctx context.Context, workflowId int64, processInstanceId int, status domain.Status) (domain.Workflow, error) {
-	if _, err := s.Find(ctx, workflowId); err != nil {
+	wf, err := s.Find(ctx, workflowId)
+	if err != nil {
 		return domain.Workflow{}, err
 	}
 
-	// 1. 通过统一引擎调度门面获取该实例的执行态点亮视图
-	execView, err := s.engineDispatcher.GetInstanceExecutionView(ctx, engine.NewID(processInstanceId), status.ToUint8())
+	// 1. 通过统一流程引擎接口获取该实例的执行态点亮视图
+	execView, err := s.engine.GetInstanceExecutionView(ctx, wf.ResolveEngineType(), domain.NewID(processInstanceId), status.ToUint8())
 	if err != nil {
 		return domain.Workflow{}, fmt.Errorf("获取流程实例执行态轨迹失败: %w", err)
 	}

@@ -309,7 +309,7 @@ func TestCompleteAttemptFinalizesSuccessfulCompensation(t *testing.T) {
 		domain.AttemptStatusSuccess, "", "")
 
 	require.NoError(t, err)
-	require.Equal(t, 101, withdrawals.processInstanceID)
+	require.Equal(t, domain.NewID(101), withdrawals.processInstanceID)
 	require.Equal(t, int64(7), withdrawals.tenantID)
 }
 
@@ -435,12 +435,12 @@ func (s *attemptRepositoryStub) Complete(_ context.Context, _ string, status dom
 
 type taskWithdrawalRepositoryStub struct {
 	repository.WithdrawalRepository
-	processInstanceID int
+	processInstanceID domain.ID
 	tenantID          int64
 }
 
 func (s *taskWithdrawalRepositoryStub) TryFinalize(ctx context.Context,
-	processInstanceID int) (bool, error) {
+	processInstanceID domain.ID) (bool, error) {
 	s.processInstanceID = processInstanceID
 	s.tenantID = ctxutil.GetTenantID(ctx).Int64()
 	return true, nil

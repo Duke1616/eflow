@@ -43,7 +43,7 @@ func (m *MockIChannelIdentityResolver) EXPECT() *MockIChannelIdentityResolverMoc
 }
 
 // ResolveUser mocks base method.
-func (m *MockIChannelIdentityResolver) ResolveUser(ctx context.Context, channel domain.ChannelType, channelUserID string, taskID int) (*userv1.User, error) {
+func (m *MockIChannelIdentityResolver) ResolveUser(ctx context.Context, channel domain.ChannelType, channelUserID string, taskID domain.ID) (*userv1.User, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ResolveUser", ctx, channel, channelUserID, taskID)
 	ret0, _ := ret[0].(*userv1.User)

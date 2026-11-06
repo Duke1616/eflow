@@ -40,8 +40,8 @@ type ChannelActionEvent struct {
 	TenantID int64 `json:"tenant_id"`
 	// TicketID 关联业务工单 ID
 	TicketID int64 `json:"ticket_id"`
-	// TaskID 关联工作流任务节点 ID
-	TaskID int `json:"task_id"`
+	// TaskID 关联工作流任务节点 ID（自适应整型数字与字符串形态）
+	TaskID ID `json:"task_id"`
 	// MessageID 外部消息/卡片唯一标识（用于回执就地更新/Patch）
 	MessageID string `json:"message_id"`
 	// Comment 用户提交的审批意见或撤销原因

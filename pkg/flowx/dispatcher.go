@@ -26,7 +26,7 @@ func newDefaultExecutors(e *flowEngine) map[model.NodeType]nodeExecutor {
 }
 
 // applyStepDecision 统一调度应用内核推导决策（保存Skip任务、汇聚等待、办结或派发新待办）
-func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession, dec *kernel.StepDecision, batchCode int, operator string) error {
+func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession, dec kernel.StepDecision, batchCode int, operator string) error {
 	inst := session.Instance()
 
 	// 1. 持久化未命中分支的 TaskSkipped 占位记录，供时间线渲染与汇聚感知

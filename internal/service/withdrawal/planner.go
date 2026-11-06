@@ -7,7 +7,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/repository"
-	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
+	"github.com/Duke1616/eflow/internal/service/engine/easyflow"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
@@ -40,12 +40,12 @@ type compensationPlanner struct {
 	withdrawalRepo repository.WithdrawalRepository
 	tasks          taskSvc.Service
 	tickets        ticketSvc.Service
-	engine         engineSvc.Service
+	engine         easyflow.Service
 	workflows      workflowSvc.Service
 }
 
 func NewCompensationPlanner(taskRepo repository.TaskRepository, withdrawalRepo repository.WithdrawalRepository,
-	tasks taskSvc.Service, tickets ticketSvc.Service, engine engineSvc.Service,
+	tasks taskSvc.Service, tickets ticketSvc.Service, engine easyflow.Service,
 	workflows workflowSvc.Service) CompensationPlanner {
 	return &compensationPlanner{
 		taskRepo: taskRepo, withdrawalRepo: withdrawalRepo, tasks: tasks,
@@ -120,7 +120,7 @@ func (p *compensationPlanner) Apply(ctx context.Context, processInstanceID int, 
 		}
 		nodeIDs = append(nodeIDs, target.NodeID)
 	}
-	if err := p.withdrawalRepo.ActivateCompensations(ctx, processInstanceID, nodeIDs); err != nil {
+	if err := p.withdrawalRepo.ActivateCompensations(ctx, domain.NewID(processInstanceID), nodeIDs); err != nil {
 		return fmt.Errorf("激活撤回补偿任务失败: %w", err)
 	}
 	return nil

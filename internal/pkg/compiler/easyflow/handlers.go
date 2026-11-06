@@ -10,15 +10,11 @@ import (
 // StartNodeHandler 处理开始节点
 type StartNodeHandler struct{}
 
-func (h *StartNodeHandler) Type() flowdsl.NodeType { return NodeTypeStart }
+func (h *StartNodeHandler) Type() flowdsl.NodeType { return flowdsl.NodeStart }
 func (h *StartNodeHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node, error) {
-	nodeName := node.Name
-	if nodeName == "" {
-		nodeName = DefaultNameStart
-	}
 	n := model.Node{
 		NodeID:        node.ID,
-		NodeName:      nodeName,
+		NodeName:      node.DisplayName(),
 		NodeType:      model.RootNode,
 		UserIDs:       []string{UserStarter},
 		NodeEndEvents: []string{EventStart},
@@ -29,15 +25,11 @@ func (h *StartNodeHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Nod
 // EndNodeHandler 处理结束节点
 type EndNodeHandler struct{}
 
-func (h *EndNodeHandler) Type() flowdsl.NodeType { return NodeTypeEnd }
+func (h *EndNodeHandler) Type() flowdsl.NodeType { return flowdsl.NodeEnd }
 func (h *EndNodeHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node, error) {
-	nodeName := node.Name
-	if nodeName == "" {
-		nodeName = DefaultNameEnd
-	}
 	n := model.Node{
 		NodeID:          node.ID,
-		NodeName:        nodeName,
+		NodeName:        node.DisplayName(),
 		NodeType:        model.EndNode,
 		PrevNodeIDs:     ctx.GetPrevNodeIDs(node.ID),
 		NodeStartEvents: []string{EventNotify},
@@ -48,12 +40,9 @@ func (h *EndNodeHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node,
 // UserNodeHandler 处理用户/审批节点
 type UserNodeHandler struct{}
 
-func (h *UserNodeHandler) Type() flowdsl.NodeType { return NodeTypeUser }
+func (h *UserNodeHandler) Type() flowdsl.NodeType { return flowdsl.NodeUserTask }
 func (h *UserNodeHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node, error) {
-	nodeName := node.Name
-	if nodeName == "" {
-		nodeName = DefaultNameUser
-	}
+	nodeName := node.DisplayName()
 
 	startEvents := []string{EventNotify}
 	var userIDs []string
@@ -111,7 +100,7 @@ func (h *UserNodeHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node
 
 type ParallelHandler struct{}
 
-func (h *ParallelHandler) Type() flowdsl.NodeType { return NodeTypeParallel }
+func (h *ParallelHandler) Type() flowdsl.NodeType { return flowdsl.NodeGatewayParallel }
 func (h *ParallelHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node, error) {
 	edgesDst := ctx.GetTargetEdges(node.ID)
 	inevitableNodes := make([]string, 0, len(edgesDst))
@@ -125,7 +114,7 @@ func (h *ParallelHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node
 	}
 	n := model.Node{
 		NodeID:      node.ID,
-		NodeName:    DefaultNameParallel,
+		NodeName:    node.DisplayName(),
 		NodeType:    model.GateWayNode,
 		GWConfig:    gw,
 		PrevNodeIDs: findAndProxySrcNodesForGateway(ctx, node),
@@ -135,7 +124,7 @@ func (h *ParallelHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node
 
 type InclusionHandler struct{}
 
-func (h *InclusionHandler) Type() flowdsl.NodeType { return NodeTypeInclusion }
+func (h *InclusionHandler) Type() flowdsl.NodeType { return flowdsl.NodeGatewayInclusive }
 func (h *InclusionHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node, error) {
 	edgesDst := ctx.GetTargetEdges(node.ID)
 	inevitableNodes := make([]string, 0, len(edgesDst))
@@ -149,7 +138,7 @@ func (h *InclusionHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Nod
 	}
 	n := model.Node{
 		NodeID:      node.ID,
-		NodeName:    DefaultNameInclusion,
+		NodeName:    node.DisplayName(),
 		NodeType:    model.GateWayNode,
 		GWConfig:    gw,
 		PrevNodeIDs: findAndProxySrcNodesForGateway(ctx, node),
@@ -159,7 +148,7 @@ func (h *InclusionHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Nod
 
 type SelectiveHandler struct{}
 
-func (h *SelectiveHandler) Type() flowdsl.NodeType { return NodeTypeSelective }
+func (h *SelectiveHandler) Type() flowdsl.NodeType { return flowdsl.NodeGatewayExclusive }
 func (h *SelectiveHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node, error) {
 	edgesDst := ctx.GetTargetEdges(node.ID)
 	inevitableNodes := make([]string, 0, len(edgesDst))
@@ -173,7 +162,7 @@ func (h *SelectiveHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Nod
 	}
 	n := model.Node{
 		NodeID:          node.ID,
-		NodeName:        DefaultNameSelective,
+		NodeName:        node.DisplayName(),
 		NodeType:        model.GateWayNode,
 		GWConfig:        gw,
 		PrevNodeIDs:     findAndProxySrcNodesForGateway(ctx, node),
@@ -184,7 +173,7 @@ func (h *SelectiveHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Nod
 
 type ConditionHandler struct{}
 
-func (h *ConditionHandler) Type() flowdsl.NodeType { return NodeTypeCondition }
+func (h *ConditionHandler) Type() flowdsl.NodeType { return flowdsl.NodeGatewayCondition }
 func (h *ConditionHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node, error) {
 	edgesDst := ctx.GetTargetEdges(node.ID)
 	conditions := make([]model.Condition, 0, len(edgesDst))
@@ -216,7 +205,7 @@ func (h *ConditionHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Nod
 
 type AutomationNodeHandler struct{}
 
-func (h *AutomationNodeHandler) Type() flowdsl.NodeType { return NodeTypeAuto }
+func (h *AutomationNodeHandler) Type() flowdsl.NodeType { return flowdsl.NodeAutoTask }
 func (h *AutomationNodeHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node, error) {
 	cfg := node.AutoTask
 	if cfg == nil || cfg.CodebookID <= 0 {
@@ -227,7 +216,7 @@ func (h *AutomationNodeHandler) Handle(ctx *Context, node *flowdsl.Node) ([]mode
 			return nil, fmt.Errorf("自动化节点 %s 不能将自身配置为补偿节点", node.ID)
 		}
 		compensationNode := ctx.GetNodeInfo(cfg.CompensationNodeID)
-		if compensationNode == nil || compensationNode.Type != NodeTypeAuto {
+		if compensationNode == nil || compensationNode.Type != flowdsl.NodeAutoTask {
 			return nil, fmt.Errorf("自动化节点 %s 配置的补偿节点 %s 不存在或不是自动化节点",
 				node.ID, cfg.CompensationNodeID)
 		}
@@ -246,7 +235,7 @@ func (h *AutomationNodeHandler) Handle(ctx *Context, node *flowdsl.Node) ([]mode
 
 type ChatGroupNodeHandler struct{}
 
-func (h *ChatGroupNodeHandler) Type() flowdsl.NodeType { return NodeTypeChat }
+func (h *ChatGroupNodeHandler) Type() flowdsl.NodeType { return flowdsl.NodeChatGroup }
 func (h *ChatGroupNodeHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model.Node, error) {
 	n := model.Node{
 		NodeID:          node.ID,
@@ -262,7 +251,7 @@ func (h *ChatGroupNodeHandler) Handle(ctx *Context, node *flowdsl.Node) ([]model
 // 辅助函数
 
 func isGateway(t flowdsl.NodeType) bool {
-	return t == NodeTypeParallel || t == NodeTypeInclusion || t == NodeTypeSelective
+	return t == flowdsl.NodeGatewayParallel || t == flowdsl.NodeGatewayInclusive || t == flowdsl.NodeGatewayExclusive
 }
 
 func findAndProxySrcNodes(ctx *Context, node *flowdsl.Node) []string {
@@ -280,7 +269,7 @@ func findAndProxySrcNodesForGateway(ctx *Context, node *flowdsl.Node) []string {
 	nodes := make([]string, 0, len(prevIDs))
 	for _, pid := range prevIDs {
 		n := ctx.GetNodeInfo(pid)
-		if n != nil && n.Type == NodeTypeCondition {
+		if n != nil && n.Type == flowdsl.NodeGatewayCondition {
 			nodes = append(nodes, ctx.GetOrGenerateProxyForGateway(pid, node.ID))
 		} else {
 			nodes = append(nodes, pid)
@@ -300,9 +289,9 @@ func getPassEvents(ctx *Context, nodeID string) []string {
 			continue
 		}
 		switch info.Type {
-		case NodeTypeParallel:
+		case flowdsl.NodeGatewayParallel:
 			addEvent(&events, existEvent, EventTaskParallelNodePass)
-		case NodeTypeInclusion:
+		case flowdsl.NodeGatewayInclusive:
 			addEvent(&events, existEvent, EventTaskInclusionNodePass)
 		}
 	}
@@ -316,13 +305,13 @@ func getRejectEvents(ctx *Context, nodeID string) []string {
 
 	for _, p := range parents {
 		grandParents := getParents(ctx, p.ID)
-		if p.Type == NodeTypeCondition && hasType(grandParents, NodeTypeParallel, NodeTypeInclusion, NodeTypeSelective) {
+		if p.Type == flowdsl.NodeGatewayCondition && hasType(grandParents, flowdsl.NodeGatewayParallel, flowdsl.NodeGatewayInclusive, flowdsl.NodeGatewayExclusive) {
 			addEvent(&events, existEvent, EventConcurrentRejectCleanup)
 		}
-		if p.Type == NodeTypeCondition && hasType(grandParents, NodeTypeInclusion) {
+		if p.Type == flowdsl.NodeGatewayCondition && hasType(grandParents, flowdsl.NodeGatewayInclusive) {
 			addEvent(&events, existEvent, EventInclusionPassCleanup)
 		}
-		if isGateway(p.Type) && hasType(grandParents, NodeTypeCondition) {
+		if isGateway(p.Type) && hasType(grandParents, flowdsl.NodeGatewayCondition) {
 			addEvent(&events, existEvent, EventGatewayConditionReject)
 		}
 		if isGateway(p.Type) && hasProxyInGateway(ctx, p.ID) {
@@ -385,7 +374,7 @@ func checkBranchHasProxy(ctx *Context, nodeID string, visited map[string]bool) b
 	}
 	visited[nodeID] = true
 	node := ctx.GetNodeInfo(nodeID)
-	if node != nil && node.Type == NodeTypeCondition {
+	if node != nil && node.Type == flowdsl.NodeGatewayCondition {
 		return true
 	}
 	edges := ctx.GetTargetEdges(nodeID)

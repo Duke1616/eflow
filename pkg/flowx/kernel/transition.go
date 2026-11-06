@@ -22,13 +22,13 @@ type StepDecision struct {
 }
 
 // ResolveNextStep 综合求解下一步流转决策：网关分流 + 自动Skip识别 + 汇聚屏障过滤 + 跨汇聚网关下游递归穿透 (支持多层级联网关)
-func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables map[string]any, allTasks []*model.Task, batchCode int) (*StepDecision, error) {
+func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables map[string]any, allTasks []*model.Task, batchCode int) (StepDecision, error) {
 	transRes, err := p.CalculateTransition(currentNodeID, variables)
 	if err != nil {
-		return nil, err
+		return StepDecision{}, err
 	}
 
-	decision := &StepDecision{
+	decision := StepDecision{
 		ReadyNodes:   make([]model.NodeSpec, 0, len(transRes.Targets)),
 		SkippedNodes: transRes.SkippedTargets,
 	}
@@ -69,7 +69,7 @@ func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables map[stri
 		// 4. 网关满足流转条件，递归穿透获取下游目标
 		subRes, err := p.CalculateTransition(nextNode.ID, variables)
 		if err != nil {
-			return nil, err
+			return StepDecision{}, err
 		}
 		decision.SkippedNodes = append(decision.SkippedNodes, subRes.SkippedTargets...)
 		queue = append(queue, subRes.Targets...)
@@ -78,19 +78,19 @@ func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables map[stri
 	return decision, nil
 }
 
-// CalculateTransition 结合网关分类（或/并/包容）计算下一阶段的目标节点与自动跳过节点
-func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables map[string]any) (*TransitionResult, error) {
+// CalculateTransition 结合网关分类（或/并/包容）计算下一阶段的目标节点与自动跳过节点 (Value Semantics 优先)
+func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables map[string]any) (TransitionResult, error) {
 	edges := p.OutEdges[currentNodeID]
 	if len(edges) == 0 {
-		return &TransitionResult{}, nil
+		return TransitionResult{}, nil
 	}
 
 	currNode, exists := p.NodesMap[currentNodeID]
 	if !exists {
-		return nil, fmt.Errorf("当前节点未定义: %s", currentNodeID)
+		return TransitionResult{}, fmt.Errorf("当前节点未定义: %s", currentNodeID)
 	}
 
-	result := &TransitionResult{
+	result := TransitionResult{
 		Targets:        make([]model.NodeSpec, 0),
 		SkippedTargets: make([]model.NodeSpec, 0),
 	}
@@ -98,7 +98,7 @@ func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables map[
 	for _, edge := range edges {
 		targetNode, ok := p.NodesMap[edge.Target]
 		if !ok {
-			return nil, fmt.Errorf("目标节点未定义: %s", edge.Target)
+			return TransitionResult{}, fmt.Errorf("目标节点未定义: %s", edge.Target)
 		}
 
 		// 并行网关无条件并发放行；其余网关或普通节点按规则条件求值

@@ -10,15 +10,17 @@ import (
 	"gorm.io/gorm"
 )
 
-// InitFlowxEngine 初始化现代工作流引擎 flowx 实例
-func InitFlowxEngine(db *gorm.DB) flowx.Engine {
+// InitFlowxEngine 初始化现代工作流引擎 flowx 实例并挂载业务生命周期监听器
+func InitFlowxEngine(db *gorm.DB, ticketRepo repository.TicketRepository) flowx.Engine {
 	store := flowxMysql.NewStorage(db)
-	return flowx.NewEngine(store)
+	eng := flowx.NewEngine(store)
+	eng.AddListener(flowxDrv.NewEventListener(ticketRepo))
+	return eng
 }
 
-// InitEngineDispatcher 基于微内核驱动架构组装各底层引擎适配器
-func InitEngineDispatcher(repo repository.IEngineRepository, flowxEngine flowx.Engine) engineSvc.IEngineDispatcher {
-	easyflowAdapter := easyflowDrv.NewAdapter(repo)
-	flowxAdapter := flowxDrv.NewAdapter(flowxEngine)
-	return engineSvc.NewEngineDispatcher(easyflowAdapter, flowxAdapter)
+// InitEngine 基于微内核驱动架构组装底层引擎，对外暴露统一 IEngine
+func InitEngine(repo repository.IEngineRepository, flowxEngine flowx.Engine) engineSvc.IEngine {
+	easyflowEngine := easyflowDrv.NewEngine(repo)
+	flowxDriver := flowxDrv.NewEngine(flowxEngine)
+	return engineSvc.NewEngineDispatcher(easyflowEngine, flowxDriver)
 }

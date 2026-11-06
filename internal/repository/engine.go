@@ -214,7 +214,13 @@ func (repo *engineRepository) CountAccessibleTaskRecord(ctx context.Context, pro
 }
 
 func (repo *engineRepository) ListAccessibleTaskTimelineGroups(ctx context.Context, processInstId, offset, limit int) ([]domain.TaskTimelineGroup, error) {
-	return repo.engineDao.ListAccessibleTaskTimelineGroups(ctx, processInstId, offset, limit)
+	pos, err := repo.engineDao.ListAccessibleTaskTimelineGroups(ctx, processInstId, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	return lo.Map(pos, func(po dao.TaskTimelineGroupPO, _ int) domain.TaskTimelineGroup {
+		return repo.toDomainByTimelineGroup(po)
+	}), nil
 }
 
 func (repo *engineRepository) CountAccessibleTaskTimelineGroups(ctx context.Context, processInstId int) (int64, error) {
@@ -222,7 +228,31 @@ func (repo *engineRepository) CountAccessibleTaskTimelineGroups(ctx context.Cont
 }
 
 func (repo *engineRepository) ListAccessibleTaskTimelineMembers(ctx context.Context, processInstId int, groups []domain.TaskTimelineGroup) ([]model.Task, error) {
-	return repo.engineDao.ListAccessibleTaskTimelineMembers(ctx, processInstId, groups)
+	batches := lo.Map(groups, func(g domain.TaskTimelineGroup, _ int) dao.TimelineBatchFilter {
+		return dao.TimelineBatchFilter{
+			NodeID:    g.NodeID,
+			BatchCode: g.BatchCode,
+		}
+	})
+	return repo.engineDao.ListAccessibleTaskTimelineMembers(ctx, processInstId, batches)
+}
+
+func (repo *engineRepository) toDomainByTimelineGroup(po dao.TaskTimelineGroupPO) domain.TaskTimelineGroup {
+	return domain.TaskTimelineGroup{
+		NodeID:              po.NodeID,
+		NodeName:            po.NodeName,
+		BatchCode:           po.BatchCode,
+		IsCosigned:          po.IsCosigned,
+		TaskCount:           po.TaskCount,
+		PassedCount:         po.PassedCount,
+		RejectedCount:       po.RejectedCount,
+		SystemPassedCount:   po.SystemPassedCount,
+		SystemRejectedCount: po.SystemRejectedCount,
+		SkippedCount:        po.SkippedCount,
+		LinkedCount:         po.LinkedCount,
+		PendingCount:        po.PendingCount,
+		OccurredAt:          po.OccurredAt,
+	}
 }
 
 func (repo *engineRepository) toDomainByInstance(req dao.Instance) domain.Instance {

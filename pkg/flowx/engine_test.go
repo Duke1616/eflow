@@ -237,7 +237,7 @@ func (s *EngineTestSuite) TestStart() {
 					Build()
 				startedInstID, err = e.Start(ctx, StartReq{
 					Starter: "zhangsan",
-					Def:     &instantDef,
+					Def:     instantDef,
 				})
 				return err
 			},

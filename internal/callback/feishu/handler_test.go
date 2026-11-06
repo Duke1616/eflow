@@ -30,7 +30,7 @@ func TestLarkCallbackHandler_Handle_StateGuard(t *testing.T) {
 				Action:        domain.ChannelActionPass,
 				ChannelUserID: "bcegag66",
 				MessageID:     "om_12345",
-				TaskID:        5242,
+				TaskID:        domain.NewID(5242),
 				TicketID:      2735,
 				TenantID:      2,
 			},
@@ -63,7 +63,7 @@ func TestLarkCallbackHandler_Handle_StateGuard(t *testing.T) {
 				Action:        domain.ChannelActionPass,
 				ChannelUserID: "bcegag66",
 				MessageID:     "om_12345",
-				TaskID:        5242,
+				TaskID:        domain.NewID(5242),
 				TicketID:      2735,
 			},
 			mockSetup: func(mockActionSvc *channelmocks.MockIChannelActionService, mockSender *sendermocks.MockNotificationSender) {
@@ -128,7 +128,7 @@ func TestExtractChannelActionEvent_ActionFallback(t *testing.T) {
 	evt := extractChannelActionEvent(cte)
 	require.Equal(t, domain.ChannelActionProgress, evt.Action)
 	require.Equal(t, int64(2735), evt.TicketID)
-	require.Equal(t, 5246, evt.TaskID)
+	require.Equal(t, domain.NewID("5246"), evt.TaskID)
 	require.Equal(t, int64(2), evt.TenantID)
 	require.Equal(t, "bcegag66", evt.ChannelUserID)
 }

@@ -3,11 +3,10 @@ package ticket
 import (
 	"context"
 
-	easyModel "github.com/Bunny3th/easy-workflow/workflow/model"
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
-	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
+	"github.com/Duke1616/eflow/internal/service/engine"
 	ratingSvc "github.com/Duke1616/eflow/internal/service/rating"
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/samber/lo"
@@ -27,27 +26,25 @@ type QueryService interface {
 	// ListHistory 分页查询历史已办结/已撤销工单（聚合评价与提单人信息）
 	ListHistory(ctx context.Context, currentUsername, targetUserID string, offset, limit int64) ([]domain.TicketTaskView, int64, error)
 	// TaskRecord 分页查询经过工单权限约束的任务流转执行记录，并聚合处理人真名与步骤表单
-	TaskRecord(ctx context.Context, processInstID, offset, limit int) ([]domain.TaskRecord, int64, error)
+	TaskRecord(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error)
 	// TaskTimeline 以节点执行批次为单位聚合可见任务时间线事件，聚合审批汇总与参与人真名
-	TaskTimeline(ctx context.Context, processInstID, offset, limit int) ([]domain.TaskTimelineEvent, int64, error)
-	// Upstream 查询指定任务节点的上游处理节点集合
-	Upstream(ctx context.Context, taskID int) ([]easyModel.Node, error)
+	TaskTimeline(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskTimelineEvent, int64, error)
 }
 
 type queryService struct {
 	repo      repository.TicketRepository
-	engineSvc engineSvc.Service
+	engine    engine.IEngine
 	userSvc   userv1.UserServiceClient
 	ratingSvc ratingSvc.Service
 	logger    *elog.Component
 }
 
 // NewQueryService 实例化工单读场景聚合门面服务
-func NewQueryService(repo repository.TicketRepository, engineSvc engineSvc.Service,
+func NewQueryService(repo repository.TicketRepository, engine engine.IEngine,
 	userSvc userv1.UserServiceClient, ratingSvc ratingSvc.Service) QueryService {
 	return &queryService{
 		repo:      repo,
-		engineSvc: engineSvc,
+		engine:    engine,
 		userSvc:   userSvc,
 		ratingSvc: ratingSvc,
 		logger:    elog.DefaultLogger,
@@ -80,17 +77,18 @@ func (q *queryService) ListUserInitiated(ctx context.Context, username string, o
 	}
 
 	// 2. 提取有效流程实例 ID，反查流程引擎挂起的待办步骤
-	procInstIds := lo.FilterMap(tickets, func(src domain.Ticket, _ int) (int, bool) {
-		return src.Process.InstanceId, src.Process.InstanceId > 0
+	procInstIds := lo.FilterMap(tickets, func(src domain.Ticket, _ int) (domain.ID, bool) {
+		id := src.Process.InstanceID
+		return id, !id.IsZero()
 	})
 
-	processTasks, err := q.engineSvc.ListPendingStepsOfMyTask(ctx, procInstIds, username)
+	processTasks, err := q.engine.ListPendingSteps(ctx, procInstIds)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	tasksByProcInst := lo.GroupBy(processTasks, func(inst domain.Instance) int {
-		return inst.ProcInstID
+	tasksByProcInst := lo.GroupBy(processTasks, func(t domain.TodoTask) string {
+		return t.InstanceID.String()
 	})
 
 	// 3. 批量解析待办处理人真实姓名字典
@@ -98,19 +96,26 @@ func (q *queryService) ListUserInitiated(ctx context.Context, username string, o
 
 	// 4. 以工单实体为基准展开待办视图，当存在并行多分支时展开为多条独立的视图记录供前端进行 Rowspan 合并
 	views := lo.FlatMap(tickets, func(ticket domain.Ticket, _ int) []domain.TicketTaskView {
-		return ticket.ResolveViews(tasksByProcInst[ticket.Process.InstanceId], displayNames)
+		return ticket.ResolveViews(tasksByProcInst[ticket.Process.InstanceID.String()], displayNames)
 	})
 
 	return views, total, nil
 }
 
-// ListUserTodo 分页检索指派给当前用户的待办任务，反查关联工单信息
+// ListUserTodo 分页检索指派给当前用户的待办任务，委托统一流程引擎门面进行多态并发聚合
 func (q *queryService) ListUserTodo(ctx context.Context, username, processName string, sortByAsc bool, offset, limit int64) ([]domain.TicketTaskView, int64, error) {
-	instances, total, err := q.engineSvc.ListTodoTasks(ctx, username, processName, sortByAsc, int(offset), int(limit))
+	todos, total, err := q.engine.ListTodoTasks(ctx, domain.TodoQueryReq{
+		Username:    username,
+		ProcessName: processName,
+		SortByAsc:   sortByAsc,
+		Offset:      int(offset),
+		Limit:       int(limit),
+	})
 	if err != nil {
 		return nil, 0, err
 	}
-	views, err := q.assembleEngineInstances(ctx, instances)
+
+	views, err := q.assemblePendingTasks(ctx, todos)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -119,12 +124,19 @@ func (q *queryService) ListUserTodo(ctx context.Context, username, processName s
 
 // ListAllTodo 分页检索全量待办任务，首屏自动置顶流程启动失败的异常单据并做溢出截断保护
 func (q *queryService) ListAllTodo(ctx context.Context, userID, processName string, sortByAsc bool, offset, limit int64) ([]domain.TicketTaskView, int64, error) {
-	instances, total, err := q.engineSvc.ListAllTodoTasks(ctx, userID, processName, sortByAsc, int(offset), int(limit))
+	todos, total, err := q.engine.ListTodoTasks(ctx, domain.TodoQueryReq{
+		Username:    userID,
+		ProcessName: processName,
+		SortByAsc:   sortByAsc,
+		Offset:      int(offset),
+		Limit:       int(limit),
+		IsAdmin:     true,
+	})
 	if err != nil {
 		return nil, 0, err
 	}
 
-	views, err := q.assembleEngineInstances(ctx, instances)
+	views, err := q.assemblePendingTasks(ctx, todos)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -212,49 +224,86 @@ func (q *queryService) ListHistory(ctx context.Context, currentUsername, targetU
 // 内部数据装配与用户昵称解析辅助函数
 // =============================================================================
 
-// assembleEngineInstances 负责将引擎实例列表与工单主表实体进行关联对齐
-func (q *queryService) assembleEngineInstances(ctx context.Context, instances []domain.Instance) ([]domain.TicketTaskView, error) {
-	if len(instances) == 0 {
+// pendingTaskItem 跨引擎待办任务统一轻量中间件模型
+// assemblePendingTasks 负责将跨引擎待办领域模型列表与工单主表实体进行关联对齐与真名组装
+func (q *queryService) assemblePendingTasks(ctx context.Context, todos []domain.TodoTask) ([]domain.TicketTaskView, error) {
+	if len(todos) == 0 {
 		return []domain.TicketTaskView{}, nil
 	}
 
-	procInstIds := lo.Uniq(lo.Map(instances, func(inst domain.Instance, _ int) int {
-		return inst.ProcInstID
-	}))
-
-	displayNames := q.resolveDisplayNames(ctx, instances)
-
-	tickets, err := q.repo.ListTicketByProcessInstanceIds(ctx, procInstIds)
-	if err != nil {
-		return nil, err
-	}
-	ticketsByProcInst := lo.KeyBy(tickets, func(t domain.Ticket) int {
-		return t.Process.InstanceId
+	easyflowInstIDs := lo.FilterMap(todos, func(t domain.TodoTask, _ int) (int, bool) {
+		return t.InstanceID.Int(), t.EngineType == domain.EngineTypeEasyFlow && t.InstanceID.Int() > 0
+	})
+	flowxInstKeys := lo.FilterMap(todos, func(t domain.TodoTask, _ int) (string, bool) {
+		return t.InstanceID.String(), t.EngineType == domain.EngineTypeFlowx && t.InstanceID.String() != ""
 	})
 
-	return lo.Map(instances, func(inst domain.Instance, _ int) domain.TicketTaskView {
+	var (
+		eg              errgroup.Group
+		easyflowTickets []domain.Ticket
+		flowxTickets    []domain.Ticket
+	)
+	if len(easyflowInstIDs) > 0 {
+		eg.Go(func() error {
+			var err error
+			easyflowTickets, err = q.repo.ListTicketByProcessInstanceIds(ctx, lo.Uniq(easyflowInstIDs))
+			return err
+		})
+	}
+	if len(flowxInstKeys) > 0 {
+		eg.Go(func() error {
+			var err error
+			flowxTickets, err = q.repo.ListTicketByProcessInstanceKeys(ctx, lo.Uniq(flowxInstKeys))
+			return err
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+
+	ticketsByProcInst := lo.KeyBy(easyflowTickets, func(t domain.Ticket) int {
+		return t.Process.InstanceID.Int()
+	})
+	ticketsByInstKey := lo.KeyBy(flowxTickets, func(t domain.Ticket) string {
+		return t.Process.InstanceID.String()
+	})
+
+	usernames := lo.Uniq(lo.FilterMap(todos, func(t domain.TodoTask, _ int) (string, bool) {
+		return t.ApprovedBy, t.ApprovedBy != ""
+	}))
+	displayNames := q.getUserMap(ctx, usernames)
+
+	return lo.Map(todos, func(t domain.TodoTask, _ int) domain.TicketTaskView {
 		view := domain.TicketTaskView{
-			TaskID:             inst.TaskID,
-			ProcInstCreateTime: inst.CreateTime,
-			CurrentStep:        inst.CurrentNodeName,
+			TaskID:      t.TaskID.String(),
+			CurrentStep: t.NodeName,
 		}
-		if name, ok := displayNames[inst.ApprovedBy]; ok && name != "" {
+		if !t.CreateTime.IsZero() {
+			view.ProcInstCreateTime = &t.CreateTime
+		}
+		if name, ok := displayNames[t.ApprovedBy]; ok && name != "" {
 			view.ApprovedBy = name
 		} else {
-			view.ApprovedBy = inst.ApprovedBy
+			view.ApprovedBy = t.ApprovedBy
 		}
 
-		if matchedTicket, ok := ticketsByProcInst[inst.ProcInstID]; ok {
-			view.Ticket = matchedTicket
+		if t.EngineType == domain.EngineTypeFlowx {
+			if matchedTicket, ok := ticketsByInstKey[t.InstanceID.String()]; ok {
+				view.Ticket = matchedTicket
+			}
+		} else {
+			if matchedTicket, ok := ticketsByProcInst[t.InstanceID.Int()]; ok {
+				view.Ticket = matchedTicket
+			}
 		}
 		return view
 	}), nil
 }
 
 // resolveDisplayNames 批量反查步骤集合中涉及的处理人展示姓名
-func (q *queryService) resolveDisplayNames(ctx context.Context, instances []domain.Instance) map[string]string {
-	nonEmptyUsers := lo.FilterMap(instances, func(inst domain.Instance, _ int) (string, bool) {
-		return inst.ApprovedBy, inst.ApprovedBy != ""
+func (q *queryService) resolveDisplayNames(ctx context.Context, tasks []domain.TodoTask) map[string]string {
+	nonEmptyUsers := lo.FilterMap(tasks, func(t domain.TodoTask, _ int) (string, bool) {
+		return t.ApprovedBy, t.ApprovedBy != ""
 	})
 	return q.getUserMap(ctx, lo.Uniq(nonEmptyUsers))
 }
@@ -274,8 +323,8 @@ func (q *queryService) getUserMap(ctx context.Context, usernames []string) map[s
 }
 
 // TaskRecord 查询指定流程实例的流转执行记录，并聚合处理人真名与步骤表单
-func (q *queryService) TaskRecord(ctx context.Context, processInstID, offset, limit int) ([]domain.TaskRecord, int64, error) {
-	ts, total, err := q.engineSvc.AccessibleTaskRecord(ctx, processInstID, offset, limit)
+func (q *queryService) TaskRecord(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error) {
+	ts, total, err := q.engine.GetTaskRecords(ctx, "", processInstID, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -284,8 +333,8 @@ func (q *queryService) TaskRecord(ctx context.Context, processInstID, offset, li
 }
 
 // TaskTimeline 以节点执行批次为单位返回流转历史时间线，聚合审批汇总与参与人真名
-func (q *queryService) TaskTimeline(ctx context.Context, processInstID, offset, limit int) ([]domain.TaskTimelineEvent, int64, error) {
-	groups, total, err := q.engineSvc.AccessibleTaskTimeline(ctx, processInstID, offset, limit)
+func (q *queryService) TaskTimeline(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskTimelineEvent, int64, error) {
+	groups, total, err := q.engine.GetTaskTimeline(ctx, "", processInstID, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -293,13 +342,8 @@ func (q *queryService) TaskTimeline(ctx context.Context, processInstID, offset, 
 	return events, total, nil
 }
 
-// Upstream 查询指定任务节点的上游处理节点集合
-func (q *queryService) Upstream(ctx context.Context, taskID int) ([]easyModel.Node, error) {
-	return q.engineSvc.Upstream(ctx, taskID)
-}
-
-func (q *queryService) assembleTimelineEvents(ctx context.Context, groups []engineSvc.TaskTimelineGroup) []domain.TaskTimelineEvent {
-	allMembers := lo.FlatMap(groups, func(g engineSvc.TaskTimelineGroup, _ int) []easyModel.Task {
+func (q *queryService) assembleTimelineEvents(ctx context.Context, groups []domain.TaskTimelineGroup) []domain.TaskTimelineEvent {
+	allMembers := lo.FlatMap(groups, func(g domain.TaskTimelineGroup, _ int) []domain.TaskRecord {
 		return g.Members
 	})
 	allRecords := q.toTaskRecords(ctx, allMembers)
@@ -308,8 +352,8 @@ func (q *queryService) assembleTimelineEvents(ctx context.Context, groups []engi
 		recordsMap[allMembers[idx].TaskID] = record
 	}
 
-	return lo.Map(groups, func(group engineSvc.TaskTimelineGroup, _ int) domain.TaskTimelineEvent {
-		members := lo.Map(group.Members, func(m easyModel.Task, _ int) domain.TaskRecord {
+	return lo.Map(groups, func(group domain.TaskTimelineGroup, _ int) domain.TaskTimelineEvent {
+		members := lo.Map(group.Members, func(m domain.TaskRecord, _ int) domain.TaskRecord {
 			return recordsMap[m.TaskID]
 		})
 		return domain.NewTaskTimelineEvent(
@@ -317,7 +361,7 @@ func (q *queryService) assembleTimelineEvents(ctx context.Context, groups []engi
 			group.NodeName,
 			group.BatchCode,
 			group.IsCosigned,
-			group.OccurredAt.String(),
+			group.OccurredAt,
 			domain.TaskTimelineSummary{
 				Total:          group.TaskCount,
 				Passed:         group.PassedCount,
@@ -333,14 +377,14 @@ func (q *queryService) assembleTimelineEvents(ctx context.Context, groups []engi
 	})
 }
 
-func (q *queryService) toTaskRecords(ctx context.Context, ts []easyModel.Task) []domain.TaskRecord {
-	uniqueUserIDs := lo.Uniq(lo.Map(ts, func(src easyModel.Task, _ int) string {
-		return src.UserID
+func (q *queryService) toTaskRecords(ctx context.Context, ts []domain.TaskRecord) []domain.TaskRecord {
+	uniqueUserIDs := lo.Uniq(lo.FilterMap(ts, func(src domain.TaskRecord, _ int) (string, bool) {
+		return src.ApprovedBy, src.ApprovedBy != ""
 	}))
 
 	uMap := q.getUserMap(ctx, uniqueUserIDs)
 
-	taskIDs := lo.Map(ts, func(src easyModel.Task, _ int) int {
+	taskIDs := lo.Map(ts, func(src domain.TaskRecord, _ int) int {
 		return src.TaskID
 	})
 	taskDataMap, err := q.repo.FindTaskFormsBatch(ctx, taskIDs)
@@ -348,14 +392,18 @@ func (q *queryService) toTaskRecords(ctx context.Context, ts []easyModel.Task) [
 		taskDataMap = make(map[int][]domain.FormValue)
 	}
 
-	return lo.Map(ts, func(src easyModel.Task, _ int) domain.TaskRecord {
-		userName := uMap[src.UserID]
+	return lo.Map(ts, func(src domain.TaskRecord, _ int) domain.TaskRecord {
+		userName := uMap[src.ApprovedBy]
 		if userName == "" {
-			userName = src.UserID
+			userName = src.ApprovedBy
 		}
 
 		return domain.TaskRecord{
-			Nodename:     src.NodeName,
+			TaskID:       src.TaskID,
+			NodeID:       src.NodeID,
+			PrevNodeID:   src.PrevNodeID,
+			BatchCode:    src.BatchCode,
+			NodeName:     src.NodeName,
 			ApprovedBy:   userName,
 			IsCosigned:   src.IsCosigned,
 			Status:       src.Status,

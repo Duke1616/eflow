@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
+	domain "github.com/Duke1616/eflow/internal/domain"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -41,7 +42,7 @@ func (m *MockService) EXPECT() *MockServiceMockRecorder {
 }
 
 // Revoke mocks base method.
-func (m *MockService) Revoke(ctx context.Context, processInstanceID int, force bool, username, reason string) error {
+func (m *MockService) Revoke(ctx context.Context, processInstanceID domain.ID, force bool, username, reason string) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Revoke", ctx, processInstanceID, force, username, reason)
 	ret0, _ := ret[0].(error)
@@ -79,15 +80,15 @@ func (m *MockprocessRevoker) EXPECT() *MockprocessRevokerMockRecorder {
 }
 
 // Revoke mocks base method.
-func (m *MockprocessRevoker) Revoke(processInstanceID int, force bool, username string) error {
+func (m *MockprocessRevoker) Revoke(ctx context.Context, processInstanceID domain.ID, force bool, username string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Revoke", processInstanceID, force, username)
+	ret := m.ctrl.Call(m, "Revoke", ctx, processInstanceID, force, username)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Revoke indicates an expected call of Revoke.
-func (mr *MockprocessRevokerMockRecorder) Revoke(processInstanceID, force, username any) *gomock.Call {
+func (mr *MockprocessRevokerMockRecorder) Revoke(ctx, processInstanceID, force, username any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Revoke", reflect.TypeOf((*MockprocessRevoker)(nil).Revoke), processInstanceID, force, username)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Revoke", reflect.TypeOf((*MockprocessRevoker)(nil).Revoke), ctx, processInstanceID, force, username)
 }

@@ -5,16 +5,6 @@ import (
 	"github.com/Duke1616/eflow/pkg/flowx/model"
 )
 
-// 节点默认名称
-const (
-	DefaultNameStart     = "开始"
-	DefaultNameEnd       = "结束"
-	DefaultNameUser      = "人工审批"
-	DefaultNameParallel  = "并行网关"
-	DefaultNameInclusion = "包容网关"
-	DefaultNameSelective = "排他网关"
-)
-
 // IConverter 流程画布编译器通用契约
 type IConverter interface {
 	// Convert 将标准领域拓扑图编译为 flowx 强类型流程定义（版本默认置零，交由部署期分配）

@@ -16,7 +16,7 @@ type Storage struct {
 	definitions map[string]model.ProcessDefinition // key:version -> Def
 	instances   map[string]*model.Instance
 	tasks       map[string]*model.Task
-	instTasks   map[string][]*model.Task           // instID -> tasks
+	instTasks   map[string][]*model.Task // instID -> tasks
 }
 
 // 编译期严格校验是否完整实现了 IStorage 接口
@@ -140,6 +140,32 @@ func (m *Storage) ListTasksByInstance(ctx context.Context, instID string) ([]*mo
 	return res, nil
 }
 
+func (m *Storage) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var matched []*model.Task
+	for _, t := range m.tasks {
+		if t.Assignee == assignee && t.Status == model.TaskPending {
+			cp := *t
+			matched = append(matched, &cp)
+		}
+	}
+
+	total := int64(len(matched))
+	if offset >= len(matched) {
+		return nil, total, nil
+	}
+	end := offset + limit
+	if end > len(matched) || limit <= 0 {
+		end = len(matched)
+	}
+
+	res := make([]*model.Task, end-offset)
+	copy(res, matched[offset:end])
+	return res, total, nil
+}
+
 func (m *Storage) UpdateTask(ctx context.Context, task *model.Task) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -166,7 +192,15 @@ func (m *Storage) UpdateTasksStatus(ctx context.Context, taskIDs []string, statu
 		if t, ok := m.tasks[tid]; ok {
 			t.Status = status
 			if status != model.TaskPending {
-				t.FinishTime = &now
+				t.FinishTime = now
+			}
+			// 同步更新 instTasks
+			for i, it := range m.instTasks[t.InstanceID] {
+				if it.ID == tid {
+					m.instTasks[t.InstanceID][i].Status = status
+					m.instTasks[t.InstanceID][i].FinishTime = now
+					break
+				}
 			}
 		}
 	}

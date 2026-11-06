@@ -31,21 +31,21 @@
 
 | 操作名称 | 完整权限码 | 作用域 | 归属类型 | 暴露状态 | 联动包含权限 | 宿主源码位置 |
 |:---|:---|:---|:---|:---|:---|:---|
-| 任务节点表单配置 | `ticket:manager:form_config` | 租户级 | 本级 | 正常 | 工单模板详情 · `ticket:template:get`<br>工单详情 · `ticket:manager:get` | `internal/web/ticket/handler.go` 行 129 |
-| 工单详情 | `ticket:manager:get` | 租户级 | 本级 | 正常 | 流程轨迹图 · `ticket:manager:graph`<br>流转时间线 · `ticket:manager:timeline`<br>`cmdb:tools:download` | `internal/web/ticket/handler.go` 行 72 |
-| 流程轨迹图 | `ticket:manager:graph` | 租户级 | 跨域 (workflow) | 正常 | - | `internal/web/workflow/handler.go` 行 77 |
-| 历史工单 | `ticket:manager:history` | 租户级 | 本级 | 正常 | 批量获取模板详情 · `ticket:template:view_by_ids`<br>工单详情 · `ticket:manager:get`<br>评价工单 · `ticket:manager:rate` | `internal/web/ticket/handler.go` 行 94 |
-| 我发起的工单 | `ticket:manager:my_start` | 租户级 | 本级 | 正常 | 批量获取模板详情 · `ticket:template:view_by_ids`<br>工单详情 · `ticket:manager:get` | `internal/web/ticket/handler.go` 行 100 |
-| 我的待办工单 | `ticket:manager:my_todo` | 租户级 | 本级 | 正常 | 批量获取模板详情 · `ticket:template:view_by_ids`<br>工单详情 · `ticket:manager:get` | `internal/web/ticket/handler.go` 行 89 |
-| 同意审批 | `ticket:manager:pass` | 租户级 | 本级 | 正常 | 任务节点表单配置 · `ticket:manager:form_config` | `internal/web/ticket/handler.go` 行 105 |
-| 重新启动流程 | `ticket:manager:process_restart` | 租户级 | 本级 | 正常 | - | `internal/web/ticket/handler.go` 行 68 |
-| 评价工单 | `ticket:manager:rate` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/ticket/handler.go` 行 124 |
-| 驳回审批 | `ticket:manager:reject` | 租户级 | 本级 | 正常 | 任务节点表单配置 · `ticket:manager:form_config` | `internal/web/ticket/handler.go` 行 110 |
-| 撤销工单 | `ticket:manager:revoke` | 租户级 | 本级 | 正常 | - | `internal/web/ticket/handler.go` 行 120 |
-| 提交工单 | `ticket:manager:submit` | 租户级 | 本级 | 正常 | 工单模板详情 · `ticket:template:get`<br>收藏状态变更 · `ticket:template:toggle_favorite`<br>模板收藏夹 · `ticket:template:view_favorite`<br>工单模板列表 · `ticket:template:view`<br>查询模板分组摘要 · `ticket:template:view_group_summary`<br>`cmdb:tools:upload` | `internal/web/ticket/handler.go` 行 62 |
-| 流转时间线 | `ticket:manager:timeline` | 租户级 | 本级 | 正常 | - | `internal/web/ticket/handler.go` 行 78 |
-| 所有待办工单 | `ticket:manager:todo` | 租户级 | 本级 | 正常 | 批量获取模板详情 · `ticket:template:view_by_ids`<br>工单详情 · `ticket:manager:get` | `internal/web/ticket/handler.go` 行 83 |
-| 转交审批人 | `ticket:manager:transfer` | 租户级 | 本级 | 正常 | `iam:user:view` | `internal/web/ticket/handler.go` 行 115 |
+| 任务节点表单配置 | `ticket:manager:form_config` | 租户级 | 本级 | 正常 | 工单模板详情 · `ticket:template:get`<br>工单详情 · `ticket:manager:get` | `internal/web/ticket/handler.go` 行 123 |
+| 工单详情 | `ticket:manager:get` | 租户级 | 本级 | 正常 | 流程轨迹图 · `ticket:manager:graph`<br>流转时间线 · `ticket:manager:timeline`<br>`cmdb:tools:download` | `internal/web/ticket/handler.go` 行 66 |
+| 流程轨迹图 | `ticket:manager:graph` | 租户级 | 跨域 (workflow) | 正常 | - | `internal/web/workflow/handler.go` 行 73 |
+| 历史工单 | `ticket:manager:history` | 租户级 | 本级 | 正常 | 批量获取模板详情 · `ticket:template:view_by_ids`<br>工单详情 · `ticket:manager:get`<br>评价工单 · `ticket:manager:rate` | `internal/web/ticket/handler.go` 行 88 |
+| 我发起的工单 | `ticket:manager:my_start` | 租户级 | 本级 | 正常 | 批量获取模板详情 · `ticket:template:view_by_ids`<br>工单详情 · `ticket:manager:get` | `internal/web/ticket/handler.go` 行 94 |
+| 我的待办工单 | `ticket:manager:my_todo` | 租户级 | 本级 | 正常 | 批量获取模板详情 · `ticket:template:view_by_ids`<br>工单详情 · `ticket:manager:get` | `internal/web/ticket/handler.go` 行 83 |
+| 同意审批 | `ticket:manager:pass` | 租户级 | 本级 | 正常 | 任务节点表单配置 · `ticket:manager:form_config` | `internal/web/ticket/handler.go` 行 99 |
+| 重新启动流程 | `ticket:manager:process_restart` | 租户级 | 本级 | 正常 | - | `internal/web/ticket/handler.go` 行 62 |
+| 评价工单 | `ticket:manager:rate` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/ticket/handler.go` 行 118 |
+| 驳回审批 | `ticket:manager:reject` | 租户级 | 本级 | 正常 | 任务节点表单配置 · `ticket:manager:form_config` | `internal/web/ticket/handler.go` 行 104 |
+| 撤销工单 | `ticket:manager:revoke` | 租户级 | 本级 | 正常 | - | `internal/web/ticket/handler.go` 行 114 |
+| 提交工单 | `ticket:manager:submit` | 租户级 | 本级 | 正常 | 工单模板详情 · `ticket:template:get`<br>收藏状态变更 · `ticket:template:toggle_favorite`<br>模板收藏夹 · `ticket:template:view_favorite`<br>工单模板列表 · `ticket:template:view`<br>查询模板分组摘要 · `ticket:template:view_group_summary`<br>`cmdb:tools:upload` | `internal/web/ticket/handler.go` 行 56 |
+| 流转时间线 | `ticket:manager:timeline` | 租户级 | 本级 | 正常 | - | `internal/web/ticket/handler.go` 行 72 |
+| 所有待办工单 | `ticket:manager:todo` | 租户级 | 本级 | 正常 | 批量获取模板详情 · `ticket:template:view_by_ids`<br>工单详情 · `ticket:manager:get` | `internal/web/ticket/handler.go` 行 77 |
+| 转交审批人 | `ticket:manager:transfer` | 租户级 | 本级 | 正常 | `iam:user:view` | `internal/web/ticket/handler.go` 行 109 |
 | 关联自动化任务 | `ticket:manager:view_tasks` | 租户级 | 跨域 (task) | 正常 | - | `internal/web/task/handler.go` 行 43 |
 
 ---
@@ -100,15 +100,15 @@
 
 | 操作名称 | 完整权限码 | 作用域 | 归属类型 | 暴露状态 | 联动包含权限 | 宿主源码位置 |
 |:---|:---|:---|:---|:---|:---|:---|
-| 创建流程 | `ticket:workflow:add` | 租户级 | 本级 | 正常 | 流程详情 · `ticket:workflow:get`<br>`iam:user:view` | `internal/web/workflow/handler.go` 行 39 |
-| 删除流程 | `ticket:workflow:delete` | 租户级 | 本级 | 正常 | - | `internal/web/workflow/handler.go` 行 47 |
-| 流程发布 | `ticket:workflow:deploy` | 租户级 | 本级 | 正常 | 流程详情 · `ticket:workflow:get` | `internal/web/workflow/handler.go` 行 50 |
-| 修改流程 | `ticket:workflow:edit` | 租户级 | 本级 | 正常 | 流程详情 · `ticket:workflow:get`<br>`iam:user:view` | `internal/web/workflow/handler.go` 行 43 |
-| 流程详情 | `ticket:workflow:get` | 租户级 | 本级 | 正常 | - | `internal/web/workflow/handler.go` 行 72 |
-| 流程列表 | `ticket:workflow:view` | 租户级 | 本级 | 正常 | `iam:user:view` | `internal/web/workflow/handler.go` 行 56 |
-| 查询流程自动化节点 | `ticket:workflow:view_automation_nodes` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/workflow/handler.go` 行 68 |
-| 批量获取流程详情 | `ticket:workflow:view_by_ids` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/workflow/handler.go` 行 64 |
-| 模糊检索流程模板 | `ticket:workflow:view_by_keyword` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/workflow/handler.go` 行 60 |
+| 创建流程 | `ticket:workflow:add` | 租户级 | 本级 | 正常 | 流程详情 · `ticket:workflow:get`<br>`iam:user:view` | `internal/web/workflow/handler.go` 行 35 |
+| 删除流程 | `ticket:workflow:delete` | 租户级 | 本级 | 正常 | - | `internal/web/workflow/handler.go` 行 43 |
+| 流程发布 | `ticket:workflow:deploy` | 租户级 | 本级 | 正常 | 流程详情 · `ticket:workflow:get` | `internal/web/workflow/handler.go` 行 46 |
+| 修改流程 | `ticket:workflow:edit` | 租户级 | 本级 | 正常 | 流程详情 · `ticket:workflow:get`<br>`iam:user:view` | `internal/web/workflow/handler.go` 行 39 |
+| 流程详情 | `ticket:workflow:get` | 租户级 | 本级 | 正常 | - | `internal/web/workflow/handler.go` 行 68 |
+| 流程列表 | `ticket:workflow:view` | 租户级 | 本级 | 正常 | `iam:user:view` | `internal/web/workflow/handler.go` 行 52 |
+| 查询流程自动化节点 | `ticket:workflow:view_automation_nodes` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/workflow/handler.go` 行 64 |
+| 批量获取流程详情 | `ticket:workflow:view_by_ids` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/workflow/handler.go` 行 60 |
+| 模糊检索流程模板 | `ticket:workflow:view_by_keyword` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/workflow/handler.go` 行 56 |
 
 ---
 

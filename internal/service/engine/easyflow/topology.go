@@ -15,10 +15,10 @@ func calculateTraversedEdges(
 	ctx context.Context,
 	repo repository.IEngineRepository,
 	record []model.Task,
-	processInstId, processId int,
+	processInstId, processId, version int,
 	status uint8,
 ) (map[string][]string, error) {
-	define, err := repo.GetProcessDefineByVersion(ctx, processId, 0)
+	define, err := repo.GetProcessDefineByVersion(ctx, processId, version)
 	if err != nil {
 		return nil, err
 	}

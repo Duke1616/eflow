@@ -16,13 +16,13 @@ var (
 // WithdrawalRepository 管理工单撤回与自动化任务状态迁移。
 type WithdrawalRepository interface {
 	// Prepare 原子进入撤回中状态、记录撤单原因，并阻止新的普通自动化执行。
-	Prepare(ctx context.Context, processInstanceID int, reason string) error
+	Prepare(ctx context.Context, instanceID domain.ID, reason string) error
 	// ActivateCompensations 激活指定补偿节点并取消其余尚未执行的自动化任务。
-	ActivateCompensations(ctx context.Context, processInstanceID int, nodeIDs []string) error
+	ActivateCompensations(ctx context.Context, instanceID domain.ID, nodeIDs []string) error
 	// TryFinalize 在补偿全部成功后将工单从撤回中推进为已撤回。
-	TryFinalize(ctx context.Context, processInstanceID int) (bool, error)
+	TryFinalize(ctx context.Context, instanceID domain.ID) (bool, error)
 	// Rollback 在流程引擎尚未撤回时恢复工单状态并清除撤单原因。
-	Rollback(ctx context.Context, processInstanceID int) error
+	Rollback(ctx context.Context, instanceID domain.ID) error
 	// ListStale 分页查询长时间停留在撤回中、需要后台恢复的工单。
 	ListStale(ctx context.Context, before int64, afterID, limit int64) ([]domain.WithdrawalCandidate, error)
 }
@@ -33,22 +33,22 @@ func NewWithdrawalRepository(withdrawalDAO dao.WithdrawalDAO) WithdrawalReposito
 	return &withdrawalRepository{dao: withdrawalDAO}
 }
 
-func (r *withdrawalRepository) Prepare(ctx context.Context, processInstanceID int, reason string) error {
-	return mapWithdrawalError(r.dao.Prepare(ctx, processInstanceID, reason))
+func (r *withdrawalRepository) Prepare(ctx context.Context, instanceID domain.ID, reason string) error {
+	return mapWithdrawalError(r.dao.Prepare(ctx, instanceID, reason))
 }
 
 func (r *withdrawalRepository) ActivateCompensations(ctx context.Context,
-	processInstanceID int, nodeIDs []string) error {
-	return mapWithdrawalError(r.dao.ActivateCompensations(ctx, processInstanceID, nodeIDs))
+	instanceID domain.ID, nodeIDs []string) error {
+	return mapWithdrawalError(r.dao.ActivateCompensations(ctx, instanceID, nodeIDs))
 }
 
-func (r *withdrawalRepository) TryFinalize(ctx context.Context, processInstanceID int) (bool, error) {
-	completed, err := r.dao.TryFinalize(ctx, processInstanceID)
+func (r *withdrawalRepository) TryFinalize(ctx context.Context, instanceID domain.ID) (bool, error) {
+	completed, err := r.dao.TryFinalize(ctx, instanceID)
 	return completed, mapWithdrawalError(err)
 }
 
-func (r *withdrawalRepository) Rollback(ctx context.Context, processInstanceID int) error {
-	return r.dao.Rollback(ctx, processInstanceID)
+func (r *withdrawalRepository) Rollback(ctx context.Context, instanceID domain.ID) error {
+	return r.dao.Rollback(ctx, instanceID)
 }
 
 func (r *withdrawalRepository) ListStale(ctx context.Context, before int64,

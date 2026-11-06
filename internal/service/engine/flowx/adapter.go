@@ -13,45 +13,45 @@ import (
 	"github.com/samber/lo"
 )
 
-// adapter flowx 现代工作流引擎适配器实现
-type adapter struct {
+// flowxEngine flowx 现代工作流引擎实现
+type flowxEngine struct {
 	engine flowx.Engine
 }
 
-// NewAdapter 实例化 flowx 驱动适配器
-func NewAdapter(engine flowx.Engine) engine.IEngineAdapter {
-	return &adapter{
+// NewEngine 实例化 flowx 引擎实现
+func NewEngine(engine flowx.Engine) engine.IEngine {
+	return &flowxEngine{
 		engine: engine,
 	}
 }
 
-func (a *adapter) EngineType() domain.EngineType {
+func (a *flowxEngine) EngineType() domain.EngineType {
 	return domain.EngineTypeFlowx
 }
 
-func (a *adapter) Deploy(ctx context.Context, rawDef any) (engine.DeployInfo, error) {
+func (a *flowxEngine) Deploy(ctx context.Context, _ domain.EngineType, rawDef any) (domain.DeployInfo, error) {
 	def, ok := rawDef.(flowxModel.ProcessDefinition)
 	if !ok {
-		return engine.DeployInfo{}, errors.New("flowx 流程定义编译产物类型错误")
+		return domain.DeployInfo{}, errors.New("flowx 流程定义编译产物类型错误")
 	}
 
 	if a.engine == nil {
-		return engine.DeployInfo{}, errors.New("flowx 流程引擎未初始化")
+		return domain.DeployInfo{}, errors.New("flowx 流程引擎未初始化")
 	}
 
 	deployedDef, err := a.engine.Deploy(ctx, def)
 	if err != nil {
-		return engine.DeployInfo{}, fmt.Errorf("部署流程至 flowx 失败: %w", err)
+		return domain.DeployInfo{}, fmt.Errorf("部署流程至 flowx 失败: %w", err)
 	}
 
-	return engine.DeployInfo{
+	return domain.DeployInfo{
 		Version: deployedDef.Version,
 	}, nil
 }
 
-func (a *adapter) Start(ctx context.Context, req engine.ProcessLaunchReq) (engine.ProcessLaunchResult, error) {
+func (a *flowxEngine) Start(ctx context.Context, req domain.ProcessLaunchReq) (domain.ProcessLaunchResult, error) {
 	if a.engine == nil {
-		return engine.ProcessLaunchResult{}, errors.New("flowx 流程引擎未初始化")
+		return domain.ProcessLaunchResult{}, errors.New("flowx 流程引擎未初始化")
 	}
 
 	procKey := fmt.Sprintf("wf_%d", req.WorkflowId)
@@ -61,16 +61,16 @@ func (a *adapter) Start(ctx context.Context, req engine.ProcessLaunchReq) (engin
 		Variables: req.Variables,
 	})
 	if err != nil {
-		return engine.ProcessLaunchResult{}, fmt.Errorf("flowx 启动流程实例失败: %w", err)
+		return domain.ProcessLaunchResult{}, fmt.Errorf("flowx 启动流程实例失败: %w", err)
 	}
 
-	return engine.ProcessLaunchResult{
-		InstanceId:  int(req.TicketId),
-		InstanceKey: instID,
+	return domain.ProcessLaunchResult{
+		EngineType: domain.EngineTypeFlowx,
+		InstanceID: domain.NewID(instID),
 	}, nil
 }
 
-func (a *adapter) Pass(ctx context.Context, req engine.TaskPassReq) error {
+func (a *flowxEngine) Pass(ctx context.Context, req domain.TaskPassReq) error {
 	if a.engine == nil {
 		return errors.New("flowx 流程引擎未初始化")
 	}
@@ -83,7 +83,7 @@ func (a *adapter) Pass(ctx context.Context, req engine.TaskPassReq) error {
 	})
 }
 
-func (a *adapter) Reject(ctx context.Context, req engine.TaskRejectReq) error {
+func (a *flowxEngine) Reject(ctx context.Context, req domain.TaskRejectReq) error {
 	if a.engine == nil {
 		return errors.New("flowx 流程引擎未初始化")
 	}
@@ -96,20 +96,31 @@ func (a *adapter) Reject(ctx context.Context, req engine.TaskRejectReq) error {
 	})
 }
 
-func (a *adapter) GetTaskContext(ctx context.Context, taskID engine.ID) (engine.TaskContext, error) {
+func (a *flowxEngine) GetTaskContext(ctx context.Context, taskID domain.ID) (domain.TaskContext, error) {
 	if a.engine == nil {
-		return engine.TaskContext{}, errors.New("flowx 流程引擎未初始化")
+		return domain.TaskContext{}, errors.New("flowx 流程引擎未初始化")
 	}
 
 	task, err := a.engine.GetTask(ctx, taskID.String())
 	if err != nil {
-		return engine.TaskContext{}, fmt.Errorf("flowx 查询任务详情失败: %w", err)
+		return domain.TaskContext{}, fmt.Errorf("flowx 查询任务详情失败: %w", err)
 	}
 
-	return engine.TaskContext{
+	inst, err := a.engine.GetInstance(ctx, task.InstanceID)
+	if err != nil {
+		return domain.TaskContext{}, fmt.Errorf("flowx 查询流程实例详情失败 [instanceID=%s]: %w", task.InstanceID, err)
+	}
+
+	// 解析 ProcessID：从 inst.ProcKey ("wf_%d") 提取 workflow/process 标识
+	var procID int
+	_, _ = fmt.Sscanf(inst.ProcKey, "wf_%d", &procID)
+
+	return domain.TaskContext{
 		EngineType:        domain.EngineTypeFlowx,
 		TaskID:            taskID,
-		ProcessInstanceID: engine.NewID(task.InstanceID),
+		ProcessID:         procID,
+		ProcessInstanceID: domain.NewID(task.InstanceID),
+		ProcessVersion:    inst.Version,
 		NodeID:            task.NodeID,
 		NodeName:          task.NodeName,
 		Assignee:          task.Assignee,
@@ -118,7 +129,7 @@ func (a *adapter) GetTaskContext(ctx context.Context, taskID engine.ID) (engine.
 	}, nil
 }
 
-func (a *adapter) GetTimeline(ctx context.Context, instanceID engine.ID) ([]engine.TimelineNode, error) {
+func (a *flowxEngine) GetTimeline(ctx context.Context, _ domain.EngineType, instanceID domain.ID) ([]domain.TimelineNode, error) {
 	if a.engine == nil {
 		return nil, errors.New("flowx 流程引擎未初始化")
 	}
@@ -128,10 +139,10 @@ func (a *adapter) GetTimeline(ctx context.Context, instanceID engine.ID) ([]engi
 		return nil, fmt.Errorf("flowx 查询流转时间线失败: %w", err)
 	}
 
-	// 转换为统一领域模型 engine.TimelineNode
-	nodes := lo.FlatMap(events, func(evt flowxModel.TimelineEvent, _ int) []engine.TimelineNode {
+	// 转换为统一领域模型 domain.TimelineNode
+	nodes := lo.FlatMap(events, func(evt flowxModel.TimelineEvent, _ int) []domain.TimelineNode {
 		if len(evt.Tasks) == 0 {
-			return []engine.TimelineNode{{
+			return []domain.TimelineNode{{
 				NodeID:    evt.NodeID,
 				NodeName:  evt.NodeName,
 				Batch:     evt.BatchCode,
@@ -140,12 +151,12 @@ func (a *adapter) GetTimeline(ctx context.Context, instanceID engine.ID) ([]engi
 			}}
 		}
 
-		return lo.Map(evt.Tasks, func(t flowxModel.Task, _ int) engine.TimelineNode {
+		return lo.Map(evt.Tasks, func(t *flowxModel.Task, _ int) domain.TimelineNode {
 			endTimeStr := ""
-			if t.FinishTime != nil {
+			if !t.FinishTime.IsZero() {
 				endTimeStr = t.FinishTime.Format(time.RFC3339)
 			}
-			return engine.TimelineNode{
+			return domain.TimelineNode{
 				NodeID:    evt.NodeID,
 				NodeName:  evt.NodeName,
 				Batch:     evt.BatchCode,
@@ -161,20 +172,188 @@ func (a *adapter) GetTimeline(ctx context.Context, instanceID engine.ID) ([]engi
 	return nodes, nil
 }
 
-func (a *adapter) GetInstanceExecutionView(ctx context.Context, instanceID engine.ID, status uint8) (engine.InstanceExecutionView, error) {
-	return engine.InstanceExecutionView{
+func (a *flowxEngine) GetInstanceExecutionView(ctx context.Context, _ domain.EngineType, instanceID domain.ID, status uint8) (domain.InstanceExecutionView, error) {
+	return domain.InstanceExecutionView{
 		NodeStatusMap:  make(map[string]int),
 		TraversedEdges: make(map[string][]string),
 	}, nil
 }
 
-func (a *adapter) Revoke(ctx context.Context, instanceID engine.ID, force bool, operator string) error {
+func (a *flowxEngine) Revoke(ctx context.Context, req domain.RevokeReq) error {
 	if a.engine == nil {
 		return errors.New("flowx 流程引擎未初始化")
 	}
 	return a.engine.Revoke(ctx, flowx.RevokeReq{
-		InstanceID:    instanceID.String(),
-		Operator:      operator,
+		InstanceID:    req.InstanceID.String(),
+		Operator:      req.Operator,
 		BackToStarter: false,
 	})
+}
+
+func (a *flowxEngine) Transfer(ctx context.Context, req domain.TaskTransferReq) error {
+	if a.engine == nil {
+		return errors.New("flowx 流程引擎未初始化")
+	}
+	return a.engine.Transfer(ctx, req.TaskId.String(), req.TargetUsers)
+}
+
+func (a *flowxEngine) GetAutomationTask(ctx context.Context, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
+	return domain.TaskRecord{}, fmt.Errorf("flowx 暂未直接支持根据 nodeID 获取自动化任务")
+}
+
+func (a *flowxEngine) ListTodoTasks(ctx context.Context, req domain.TodoQueryReq) ([]domain.TodoTask, int64, error) {
+	if a.engine == nil {
+		return nil, 0, errors.New("flowx 流程引擎未初始化")
+	}
+
+	assignee := req.Username
+	if req.IsAdmin {
+		assignee = ""
+	}
+
+	tasks, total, err := a.engine.ListPendingTasks(ctx, assignee, req.Offset, req.Limit)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	todoTasks := lo.Map(tasks, func(t *flowxModel.Task, _ int) domain.TodoTask {
+		return domain.TodoTask{
+			EngineType: domain.EngineTypeFlowx,
+			TaskID:     domain.NewID(t.ID),
+			InstanceID: domain.NewID(t.InstanceID),
+			NodeID:     t.NodeID,
+			NodeName:   t.NodeName,
+			ApprovedBy: t.Assignee,
+			CreateTime: t.CreateTime,
+		}
+	})
+
+	return todoTasks, total, nil
+}
+
+func (a *flowxEngine) ListPendingSteps(ctx context.Context, instanceIDs []domain.ID) ([]domain.TodoTask, error) {
+	if a.engine == nil {
+		return nil, errors.New("flowx 流程引擎未初始化")
+	}
+
+	var allPendingTasks []domain.TodoTask
+	for _, instID := range instanceIDs {
+		events, err := a.engine.GetTimeline(ctx, instID.String())
+		if err != nil {
+			continue
+		}
+		for _, evt := range events {
+			for _, t := range evt.Tasks {
+				if t.IsPending() {
+					allPendingTasks = append(allPendingTasks, domain.TodoTask{
+						EngineType: domain.EngineTypeFlowx,
+						TaskID:     domain.NewID(t.ID),
+						InstanceID: domain.NewID(t.InstanceID),
+						NodeID:     t.NodeID,
+						NodeName:   t.NodeName,
+						ApprovedBy: t.Assignee,
+						CreateTime: t.CreateTime,
+					})
+				}
+			}
+		}
+	}
+	return allPendingTasks, nil
+}
+
+func (a *flowxEngine) GetTaskRecords(ctx context.Context, _ domain.EngineType, instanceID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error) {
+	if a.engine == nil {
+		return nil, 0, errors.New("flowx 流程引擎未初始化")
+	}
+
+	events, err := a.engine.GetTimeline(ctx, instanceID.String())
+	if err != nil {
+		return nil, 0, fmt.Errorf("flowx 查询执行记录失败: %w", err)
+	}
+
+	allTasks := lo.FlatMap(events, func(evt flowxModel.TimelineEvent, _ int) []*flowxModel.Task {
+		return evt.Tasks
+	})
+	total := int64(len(allTasks))
+
+	pagedTasks := paginateSlice(allTasks, offset, limit)
+	records := lo.Map(pagedTasks, func(t *flowxModel.Task, _ int) domain.TaskRecord {
+		endTimeStr := ""
+		if !t.FinishTime.IsZero() {
+			endTimeStr = t.FinishTime.Format(time.RFC3339)
+		}
+		return domain.TaskRecord{
+			NodeID:       t.NodeID,
+			BatchCode:    fmt.Sprintf("%d", t.BatchCode),
+			NodeName:     t.NodeName,
+			ApprovedBy:   t.Assignee,
+			Status:       int(t.Status),
+			Comment:      t.Comment,
+			IsFinished:   lo.Ternary(t.IsTerminal(), 1, 0),
+			FinishedTime: endTimeStr,
+		}
+	})
+
+	return records, total, nil
+}
+
+func (a *flowxEngine) GetTaskTimeline(ctx context.Context, _ domain.EngineType, instanceID domain.ID, offset, limit int) ([]domain.TaskTimelineGroup, int64, error) {
+	if a.engine == nil {
+		return nil, 0, errors.New("flowx 流程引擎未初始化")
+	}
+
+	events, err := a.engine.GetTimeline(ctx, instanceID.String())
+	if err != nil {
+		return nil, 0, fmt.Errorf("flowx 查询时间线失败: %w", err)
+	}
+	total := int64(len(events))
+
+	pagedEvents := paginateSlice(events, offset, limit)
+	groups := lo.Map(pagedEvents, func(evt flowxModel.TimelineEvent, _ int) domain.TaskTimelineGroup {
+		passedCount := lo.CountBy(evt.Tasks, func(t *flowxModel.Task) bool { return t.IsPassed() })
+		rejectedCount := lo.CountBy(evt.Tasks, func(t *flowxModel.Task) bool { return t.IsRejected() })
+		pendingCount := lo.CountBy(evt.Tasks, func(t *flowxModel.Task) bool { return t.IsPending() })
+		skippedCount := lo.CountBy(evt.Tasks, func(t *flowxModel.Task) bool { return t.Status == flowxModel.TaskSkipped })
+
+		members := lo.Map(evt.Tasks, func(t *flowxModel.Task, _ int) domain.TaskRecord {
+			return domain.TaskRecord{
+				NodeID:     t.NodeID,
+				BatchCode:  fmt.Sprintf("%d", t.BatchCode),
+				NodeName:   t.NodeName,
+				ApprovedBy: t.Assignee,
+				Status:     int(t.Status),
+				Comment:    t.Comment,
+				IsFinished: lo.Ternary(t.IsTerminal(), 1, 0),
+			}
+		})
+
+		return domain.TaskTimelineGroup{
+			NodeID:        evt.NodeID,
+			NodeName:      evt.NodeName,
+			BatchCode:     fmt.Sprintf("%d", evt.BatchCode),
+			TaskCount:     len(evt.Tasks),
+			PassedCount:   passedCount,
+			RejectedCount: rejectedCount,
+			PendingCount:  pendingCount,
+			SkippedCount:  skippedCount,
+			OccurredAt:    evt.OccurredAt.Format(time.RFC3339),
+			Members:       members,
+		}
+	})
+
+	return groups, total, nil
+}
+
+func paginateSlice[T any](items []T, offset, limit int) []T {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(items) {
+		return nil
+	}
+	end := offset + limit
+	if limit <= 0 || end > len(items) {
+		end = len(items)
+	}
+	return items[offset:end]
 }

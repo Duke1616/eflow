@@ -25,16 +25,16 @@ func TestRecoveryJobReconcilesEngineState(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int{101}, planner.built)
 	require.Equal(t, []int{101}, planner.applied)
-	require.Equal(t, []int{101}, repo.finalized)
-	require.Equal(t, []int{102}, repo.rolledBack)
+	require.Equal(t, []domain.ID{domain.NewID(101)}, repo.finalized)
+	require.Equal(t, []domain.ID{domain.NewID(102)}, repo.rolledBack)
 	require.Equal(t, []int64{11, 12}, repo.tenantIDs)
 }
 
 type recoveryRepositoryStub struct {
 	repository.WithdrawalRepository
 	candidates []domain.WithdrawalCandidate
-	finalized  []int
-	rolledBack []int
+	finalized  []domain.ID
+	rolledBack []domain.ID
 	tenantIDs  []int64
 }
 
@@ -46,13 +46,13 @@ func (s *recoveryRepositoryStub) ListStale(_ context.Context, _ int64,
 	return s.candidates, nil
 }
 
-func (s *recoveryRepositoryStub) TryFinalize(ctx context.Context, instanceID int) (bool, error) {
+func (s *recoveryRepositoryStub) TryFinalize(ctx context.Context, instanceID domain.ID) (bool, error) {
 	s.finalized = append(s.finalized, instanceID)
 	s.tenantIDs = append(s.tenantIDs, ctxutil.GetTenantID(ctx).Int64())
 	return true, nil
 }
 
-func (s *recoveryRepositoryStub) Rollback(ctx context.Context, instanceID int) error {
+func (s *recoveryRepositoryStub) Rollback(ctx context.Context, instanceID domain.ID) error {
 	s.rolledBack = append(s.rolledBack, instanceID)
 	s.tenantIDs = append(s.tenantIDs, ctxutil.GetTenantID(ctx).Int64())
 	return nil

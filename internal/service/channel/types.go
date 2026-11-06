@@ -18,7 +18,7 @@ var (
 // IChannelIdentityResolver 统一多渠道第三方身份与内部系统用户映射解析接口
 type IChannelIdentityResolver interface {
 	// ResolveUser 基于渠道类型、第三方平台用户标识及任务上下文精准定位可信的内部用户
-	ResolveUser(ctx context.Context, channel domain.ChannelType, channelUserID string, taskID int) (*userv1.User, error)
+	ResolveUser(ctx context.Context, channel domain.ChannelType, channelUserID string, taskID domain.ID) (*userv1.User, error)
 }
 
 // IChannelActionService 跨渠道工单审批流转统一业务编排接口

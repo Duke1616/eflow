@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/gotomicro/ego/core/elog"
 	"gorm.io/gorm"
@@ -13,22 +14,22 @@ import (
 
 // PassProcessTaskJob 审批通过自动归档/流转推进后台任务
 type PassProcessTaskJob struct {
-	svc       Service
-	engineSvc engine.Service
-	limit     int64
-	interval  time.Duration
-	logger    *elog.Component
+	svc      Service
+	engine   engine.IEngine
+	limit    int64
+	interval time.Duration
+	logger   *elog.Component
 }
 
 // NewPassProcessTaskJob 实例化通过任务自动向前流转后台任务
-func NewPassProcessTaskJob(svc Service, engineSvc engine.Service,
+func NewPassProcessTaskJob(svc Service, engine engine.IEngine,
 	limit int64, interval time.Duration) *PassProcessTaskJob {
 	return &PassProcessTaskJob{
-		svc:       svc,
-		engineSvc: engineSvc,
-		limit:     limit,
-		interval:  interval,
-		logger:    elog.DefaultLogger.With(elog.FieldComponentName("PassProcessTaskJob")),
+		svc:      svc,
+		engine:   engine,
+		limit:    limit,
+		interval: interval,
+		logger:   elog.DefaultLogger.With(elog.FieldComponentName("PassProcessTaskJob")),
 	}
 }
 
@@ -77,7 +78,7 @@ func (j *PassProcessTaskJob) run(ctx context.Context) error {
 				}
 				continue
 			}
-			mt, err1 := j.engineSvc.GetAutomationTask(taskCtx, task.NodeID, task.ProcessInstanceID)
+			mt, err1 := j.engine.GetAutomationTask(taskCtx, domain.NewID(task.ProcessInstanceID), task.NodeID)
 			if err1 != nil {
 				// 节点在流程引擎中已不存在未完成记录（可能已被网关自动跳过、兄弟分支竞争通过或提前完结），直接标记推进避免死循环
 				if errors.Is(err1, gorm.ErrRecordNotFound) {
@@ -97,7 +98,11 @@ func (j *PassProcessTaskJob) run(ctx context.Context) error {
 			}
 
 			if mt.TaskID != 0 {
-				err = j.engineSvc.Pass(taskCtx, mt.TaskID, "任务执行完成")
+				err = j.engine.Pass(taskCtx, domain.TaskPassReq{
+					TaskId:   domain.NewID(mt.TaskID),
+					Operator: "SYSTEM",
+					Comment:  "任务执行完成",
+				})
 				if err != nil {
 					runErr = errors.Join(runErr,
 						fmt.Errorf("通过自动化节点失败: task_id=%d: %w", task.ID, err))

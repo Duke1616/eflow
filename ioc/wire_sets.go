@@ -16,14 +16,14 @@ import (
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	channelSvc "github.com/Duke1616/eflow/internal/service/channel"
-	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
-	"github.com/Duke1616/eflow/internal/service/event/easyflow"
-	"github.com/Duke1616/eflow/internal/service/event/strategy"
-	"github.com/Duke1616/eflow/internal/service/event/strategy/automation"
-	"github.com/Duke1616/eflow/internal/service/event/strategy/carbon_copy"
-	"github.com/Duke1616/eflow/internal/service/event/strategy/chat"
-	"github.com/Duke1616/eflow/internal/service/event/strategy/start"
-	userstrategy "github.com/Duke1616/eflow/internal/service/event/strategy/user"
+	easyflowDrv "github.com/Duke1616/eflow/internal/service/engine/easyflow"
+	"github.com/Duke1616/eflow/internal/service/engine/easyflow/hook"
+	"github.com/Duke1616/eflow/internal/service/notification/strategy"
+	"github.com/Duke1616/eflow/internal/service/notification/strategy/automation"
+	"github.com/Duke1616/eflow/internal/service/notification/strategy/carbon_copy"
+	"github.com/Duke1616/eflow/internal/service/notification/strategy/chat"
+	"github.com/Duke1616/eflow/internal/service/notification/strategy/start"
+	userstrategy "github.com/Duke1616/eflow/internal/service/notification/strategy/user"
 	ratingSvc "github.com/Duke1616/eflow/internal/service/rating"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
@@ -70,9 +70,9 @@ var (
 	EngineSet = wire.NewSet(
 		dao.NewProcessEngineDAO,
 		repository.NewProcessEngineRepository,
-		engineSvc.NewEngineService,
+		easyflowDrv.NewService,
 		InitFlowxEngine,
-		InitEngineDispatcher,
+		InitEngine,
 	)
 
 	// TaskSet 自动化任务模块 Provider 集合
@@ -198,10 +198,10 @@ var (
 
 var engineOnce = sync.Once{}
 
-func InitWorkflowEngineOnce(db *gorm.DB, engineSvc engineSvc.Service, producer mqx.Producer[event.TicketStatusModifyEvent],
+func InitWorkflowEngineOnce(db *gorm.DB, engineSvc easyflowDrv.Service, repo repository.IEngineRepository, producer mqx.Producer[event.TicketStatusModifyEvent],
 	taskSvc taskSvc.Service, ticketSvc ticketSvc.Service, workflowSvc workflowSvc.Service,
-	strategy strategy.SendStrategy) *easyflow.ProcessEvent {
-	event := easyflow.NewProcessEvent(producer, engineSvc, taskSvc, ticketSvc, workflowSvc, strategy)
+	strategy strategy.SendStrategy) *hook.ProcessEvent {
+	event := hook.NewProcessEvent(producer, engineSvc, taskSvc, ticketSvc, workflowSvc, strategy, repo)
 
 	engineOnce.Do(func() {
 		easyEngine.DB = db

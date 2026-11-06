@@ -12,7 +12,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
-	"github.com/Duke1616/eflow/internal/service/engine"
+	"github.com/Duke1616/eflow/internal/service/engine/easyflow"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	"github.com/Duke1616/eflow/internal/service/ticket"
 	"github.com/Duke1616/eflow/internal/service/workflow"
@@ -72,7 +72,7 @@ type taskService struct {
 	tasks      repository.TaskRepository
 	attempts   repository.TaskAttemptRepository
 	withdrawal repository.WithdrawalRepository
-	engine     engine.Service
+	engine     easyflow.Service
 	workflows  workflow.Service
 	runners    etaskclient.RunnerCatalog
 	tickets    ticket.Service
@@ -87,7 +87,7 @@ type taskService struct {
 // NewTaskService 创建自动化任务编排服务。
 func NewTaskService(tasks repository.TaskRepository, attempts repository.TaskAttemptRepository,
 	withdrawal repository.WithdrawalRepository,
-	workflows workflow.Service, runners etaskclient.RunnerCatalog, engineService engine.Service,
+	workflows workflow.Service, runners etaskclient.RunnerCatalog, engineService easyflow.Service,
 	tickets ticket.Service, dispatches dispatchSvc.Service, executions etaskclient.TaskDispatcher,
 	reader etaskclient.ExecutionReader, users userv1.UserServiceClient, templates templateSvc.Service) Service {
 	return &taskService{
@@ -325,7 +325,7 @@ func (s *taskService) CompleteAttempt(ctx context.Context, requestID string,
 	if task.ExecutionKind != domain.TaskExecutionCompensation {
 		return attempt, nil
 	}
-	_, err = s.withdrawal.TryFinalize(tenantContext(ctx, task.TenantID), task.ProcessInstanceID)
+	_, err = s.withdrawal.TryFinalize(tenantContext(ctx, task.TenantID), domain.NewID(task.ProcessInstanceID))
 	return attempt, err
 }
 

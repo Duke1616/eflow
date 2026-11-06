@@ -6,7 +6,7 @@ import (
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
-	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
+	"github.com/Duke1616/eflow/internal/service/engine/easyflow"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
@@ -76,7 +76,7 @@ type plannerWithdrawalRepositoryStub struct {
 }
 
 func (s *plannerWithdrawalRepositoryStub) ActivateCompensations(_ context.Context,
-	_ int, nodeIDs []string) error {
+	_ domain.ID, nodeIDs []string) error {
 	s.activateCalls++
 	s.nodeIDs = nodeIDs
 	return nil
@@ -107,7 +107,7 @@ func (s *plannerTicketServiceStub) GetByID(context.Context, int64) (domain.Ticke
 }
 
 type plannerEngineServiceStub struct {
-	engineSvc.Service
+	easyflow.Service
 	instance domain.Instance
 }
 
