@@ -66,7 +66,7 @@ func (s AttemptStatus) IsTerminal() bool {
 }
 
 // TaskArgs 是一次执行尝试保存的业务输入快照。
-type TaskArgs map[string]any
+type TaskArgs = Variables
 
 // Task 表示一个流程实例中的自动化节点，不保存 etask 执行实现细节。
 type Task struct {

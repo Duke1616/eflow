@@ -10,7 +10,7 @@ import (
 )
 
 // EvaluateRuleGroup 对复合条件组进行规则求值，判断给定的表单变量是否满足触发要求
-func EvaluateRuleGroup(group *model.ConditionGroup, vars map[string]any) bool {
+func EvaluateRuleGroup(group *model.ConditionGroup, vars model.Variables) bool {
 	if group == nil || (len(group.Conditions) == 0 && len(group.SubGroups) == 0) {
 		return true // 无规则限制，默认放行
 	}

@@ -1,12 +1,17 @@
 package easyflow
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
+	"github.com/Duke1616/eflow/internal/domain"
+	repoMocks "github.com/Duke1616/eflow/internal/repository/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"gorm.io/gorm"
 )
 
 func TestToEasyVariables(t *testing.T) {
@@ -78,6 +83,70 @@ func TestToEasyVariables(t *testing.T) {
 			vars := ensureEssentialVariables(tc.variables, tc.starter, tc.ticketId)
 			raw := toEasyVariables(vars)
 			tc.assertFunc(t, raw)
+		})
+	}
+}
+
+func TestAdapter_Revoke(t *testing.T) {
+	testCases := []struct {
+		name       string
+		req        domain.RevokeReq
+		setupMock  func(m *repoMocks.MockIEngineRepository)
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name: "非法流程实例ID报错",
+			req: domain.RevokeReq{
+				InstanceID: domain.NewID(0),
+			},
+			setupMock:  func(m *repoMocks.MockIEngineRepository) {},
+			wantErr:    true,
+			errContain: "easyflow 流程实例 ID 非法",
+		},
+		{
+			name: "实例不存在时幂等返回成功",
+			req: domain.RevokeReq{
+				InstanceID: domain.NewID(9999),
+				Operator:   "test_user",
+			},
+			setupMock: func(m *repoMocks.MockIEngineRepository) {
+				m.EXPECT().GetInstanceByID(gomock.Any(), 9999).Return(domain.Instance{}, gorm.ErrRecordNotFound)
+			},
+			wantErr: false,
+		},
+		{
+			name: "实例ID为0的空对象时幂等返回成功",
+			req: domain.RevokeReq{
+				InstanceID: domain.NewID(8888),
+				Operator:   "test_user",
+			},
+			setupMock: func(m *repoMocks.MockIEngineRepository) {
+				m.EXPECT().GetInstanceByID(gomock.Any(), 8888).Return(domain.Instance{ProcInstID: 0, ProcID: 0}, nil)
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockRepo := repoMocks.NewMockIEngineRepository(ctrl)
+			tc.setupMock(mockRepo)
+
+			engineAdapter := NewEngine(mockRepo)
+			err := engineAdapter.Revoke(context.Background(), tc.req)
+
+			if tc.wantErr {
+				require.Error(t, err)
+				if tc.errContain != "" {
+					assert.Contains(t, err.Error(), tc.errContain)
+				}
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }

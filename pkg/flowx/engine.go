@@ -25,7 +25,7 @@ type StartReq struct {
 	// 发起人账号（必填）
 	Starter string
 	// 初始业务变量（可选）
-	Variables map[string]any
+	Variables model.Variables
 }
 
 // PassReq 审批通过请求
@@ -37,7 +37,7 @@ type PassReq struct {
 	// 审批意见（可选）
 	Comment string
 	// 增量表单变量合并（可选）
-	Variables map[string]any
+	Variables model.Variables
 }
 
 // RejectReq 审批驳回请求
@@ -73,7 +73,7 @@ type CompleteTaskReq struct {
 	// 执行结果说明（可选，默认 "系统异步作业执行完成"）
 	Comment string
 	// 自动化任务产出的增量业务变量表（可选）
-	Variables map[string]any
+	Variables model.Variables
 }
 
 // IProcessOperator 流程运行时操作视角接口，供业务层（如工单审批 Controller/Service）使用，最小化暴露权限
@@ -398,7 +398,7 @@ func (e *flowEngine) doCompleteTask(ctx context.Context, req CompleteTaskReq, co
 
 // advanceTaskPipeline 推进已办结任务的核心状态机管线（模板方法模式）
 // 统一封装：任务通过 -> 节点仲裁 -> 下一步推导 -> 决策应用
-func (e *flowEngine) advanceTaskPipeline(ctx context.Context, session *flowSession, task *model.Task, comment string, variables map[string]any, operator string) error {
+func (e *flowEngine) advanceTaskPipeline(ctx context.Context, session *flowSession, task *model.Task, comment string, variables model.Variables, operator string) error {
 	inst := session.Instance()
 
 	// 1. 办结当前任务并增量合并表单变量

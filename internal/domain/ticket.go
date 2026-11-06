@@ -129,8 +129,8 @@ func (s Provide) IsAlert() bool {
 	return s == ALERT
 }
 
-// TicketData 工单实时填写的动态表单数值集
-type TicketData map[string]interface{}
+// TicketData 是工单实时填写的动态表单数值集。
+type TicketData = Variables
 
 // Ticket 具体的工单流转实例领域模型（核心业务对象，对应原 ecmdb 中的 Order 概念）
 type Ticket struct {
@@ -190,16 +190,8 @@ func (t *Ticket) Validate() error {
 }
 
 // MergeData 将审批节点提交的增量数据合并至工单实体动态数据集中，保证表单状态更新的高内聚
-func (t *Ticket) MergeData(patch map[string]any) {
-	if len(patch) == 0 {
-		return
-	}
-	if t.Data == nil {
-		t.Data = make(TicketData)
-	}
-	for k, v := range patch {
-		t.Data[k] = v
-	}
+func (t *Ticket) MergeData(patch Variables) {
+	t.Data.Merge(patch)
 }
 
 // CanRestartProcess 判断工单是否具备重新启动底层流程引擎的资格。
@@ -225,8 +217,8 @@ func (p Process) DisplayID() string {
 	return p.InstanceID.String()
 }
 
-// NotificationParams 发送消息通知携带的特定业务参数字典
-type NotificationParams map[string]interface{}
+// NotificationParams 发送消息通知携带的特定业务参数字典。
+type NotificationParams = Variables
 
 // NotificationConf 承载外部触发所携带的通知选项配置
 type NotificationConf struct {

@@ -103,7 +103,7 @@ func (e *flowEngine) resolveAssignees(ctx context.Context, session *flowSession,
 	}
 
 	inst := session.Instance()
-	hookCtx := NewHookContext(inst, node, operator, inst.Variables, assignees)
+	hookCtx := NewHookContext(inst, node, operator, assignees)
 	if err := e.hooks.Execute(ctx, node.Hooks, hookCtx); err != nil {
 		return nil, err
 	}

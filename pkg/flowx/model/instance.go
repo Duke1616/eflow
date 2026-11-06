@@ -22,7 +22,7 @@ type Instance struct {
 	Starter     string         `json:"starter"`
 	Status      InstanceStatus `json:"status"`
 	CurrentNode string         `json:"current_node"` // 当前停留的节点
-	Variables   map[string]any `json:"variables"`    // 全局表单变量快照
+	Variables   Variables      `json:"variables"`    // 全局表单变量快照
 	CreateTime  time.Time      `json:"create_time"`
 	FinishTime  time.Time      `json:"finish_time,omitempty"`
 }
@@ -72,14 +72,6 @@ func (i *Instance) IsTerminal() bool {
 }
 
 // MergeVariables 增量合并业务表单变量，保证变量字典初始化安全
-func (i *Instance) MergeVariables(patch map[string]any) {
-	if len(patch) == 0 {
-		return
-	}
-	if i.Variables == nil {
-		i.Variables = make(map[string]any, len(patch))
-	}
-	for k, v := range patch {
-		i.Variables[k] = v
-	}
+func (i *Instance) MergeVariables(patch Variables) {
+	i.Variables.Merge(patch)
 }

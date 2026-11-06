@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/event"
@@ -88,10 +87,10 @@ func (c *ProcessEventConsumer) handleTask(ctx context.Context, evt event.TicketE
 	// 2. 解码事件变量并显式装配关键工单上下文
 	variables := evt.DecodeVariables()
 	if ticket.CreateBy != "" {
-		variables["starter"] = ticket.CreateBy
+		domain.VarStarter.Set(&variables, ticket.CreateBy)
 	}
 	if evt.Id > 0 {
-		variables["ticket_id"] = strconv.FormatInt(evt.Id, 10)
+		domain.VarTicketID.Set(&variables, evt.Id)
 	}
 
 	// 3. 调用流程启动角色契约（多态调度，隔离底层引擎差异）

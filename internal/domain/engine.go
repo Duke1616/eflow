@@ -1,10 +1,11 @@
 package domain
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -18,41 +19,58 @@ func NewID[T ~int | ~int64 | ~int32 | ~string](val T) ID {
 }
 
 // Int 安全解析为整型，失败返回 0
-func (id ID) Int() int {
-	v, _ := strconv.Atoi(string(id))
+func (id *ID) Int() int {
+	if id == nil {
+		return 0
+	}
+	v, _ := strconv.Atoi(string(*id))
 	return v
 }
 
 // Int64 安全解析为 64 位整型，失败返回 0
-func (id ID) Int64() int64 {
-	v, _ := strconv.ParseInt(string(id), 10, 64)
+func (id *ID) Int64() int64 {
+	if id == nil {
+		return 0
+	}
+	v, _ := strconv.ParseInt(string(*id), 10, 64)
 	return v
 }
 
 // String 返回字符串形态
-func (id ID) String() string {
-	return string(id)
+func (id *ID) String() string {
+	if id == nil {
+		return ""
+	}
+	return string(*id)
 }
 
 // IsZero 判断是否为零值
-func (id ID) IsZero() bool {
-	return id == "" || id == "0"
+func (id *ID) IsZero() bool {
+	if id == nil {
+		return true
+	}
+	return *id == "" || *id == "0"
 }
 
-// UnmarshalJSON 统一解析 JSON 格式的自适应 ID，兼顾数字与字符串形态
+// UnmarshalJSON 兼容 JSON 中以数字或字符串表示的 ID。
 func (id *ID) UnmarshalJSON(b []byte) error {
-	raw := strings.Trim(string(b), "\"")
-	if raw == "null" {
+	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
 		*id = ""
 		return nil
 	}
-	*id = ID(raw)
-	return nil
-}
 
-// MarshalJSON 序列化为 JSON 字符串
-func (id ID) MarshalJSON() ([]byte, error) {
-	return []byte(strconv.Quote(string(id))), nil
+	var text string
+	if err := json.Unmarshal(b, &text); err == nil {
+		*id = ID(text)
+		return nil
+	}
+
+	var number json.Number
+	if err := json.Unmarshal(b, &number); err != nil {
+		return fmt.Errorf("ID 必须是 JSON 字符串或数字: %w", err)
+	}
+	*id = ID(number.String())
+	return nil
 }
 
 // DeployInfo 流程引擎部署完成返回的元信息
@@ -63,13 +81,13 @@ type DeployInfo struct {
 
 // ProcessLaunchReq 工单发起流程实例的强类型入参结构（单一事实来源 SSOT）
 type ProcessLaunchReq struct {
-	EngineType   EngineType     // 流程底层引擎类型（可选，未指定时由调度器自动判定或默认兜底）
-	TicketId     int64          // 业务工单唯一主键 ID（作为流程实例对齐的基石）
-	WorkflowId   int64          // 工作流定义主键 ID
-	ProcessId    int            // 兼容底层引擎的定义 ID（easy-workflow 为自增ID，flowx 为 wf.Id）
-	WorkflowName string         // 流程名称
-	Starter      string         // 流程发起人用户名/工号
-	Variables    map[string]any // 表单初始变量快照字典（权威唯一结构）
+	EngineType   EngineType // 流程底层引擎类型（可选，未指定时由调度器自动判定或默认兜底）
+	TicketId     int64      // 业务工单唯一主键 ID（作为流程实例对齐的基石）
+	WorkflowId   int64      // 工作流定义主键 ID
+	ProcessId    int        // 兼容底层引擎的定义 ID（easy-workflow 为自增ID，flowx 为 wf.Id）
+	WorkflowName string     // 流程名称
+	Starter      string     // 流程发起人用户名/工号
+	Variables    Variables  // 表单初始变量快照字典（权威唯一结构）
 }
 
 // Validate 编译期与运行时防呆自卫校验（Fail-Fast）
@@ -95,11 +113,11 @@ type ProcessLaunchResult struct {
 
 // TaskPassReq 审批通过请求结构
 type TaskPassReq struct {
-	EngineType EngineType     // 所属引擎类型
-	TaskId     ID             // 强类型任务唯一标识
-	Operator   string         // 审批操作人
-	Comment    string         // 审批意见
-	Variables  map[string]any // 增量变量合并
+	EngineType EngineType // 所属引擎类型
+	TaskId     ID         // 强类型任务唯一标识
+	Operator   string     // 审批操作人
+	Comment    string     // 审批意见
+	Variables  Variables  // 增量变量合并
 }
 
 // Validate 审批通过入参自卫校验

@@ -22,7 +22,7 @@ type StepDecision struct {
 }
 
 // ResolveNextStep 综合求解下一步流转决策：网关分流 + 自动Skip识别 + 汇聚屏障过滤 + 跨汇聚网关下游递归穿透 (支持多层级联网关)
-func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables map[string]any, allTasks []*model.Task, batchCode int) (StepDecision, error) {
+func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables model.Variables, allTasks []*model.Task, batchCode int) (StepDecision, error) {
 	transRes, err := p.CalculateTransition(currentNodeID, variables)
 	if err != nil {
 		return StepDecision{}, err
@@ -79,7 +79,7 @@ func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables map[stri
 }
 
 // CalculateTransition 结合网关分类（或/并/包容）计算下一阶段的目标节点与自动跳过节点 (Value Semantics 优先)
-func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables map[string]any) (TransitionResult, error) {
+func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables model.Variables) (TransitionResult, error) {
 	edges := p.OutEdges[currentNodeID]
 	if len(edges) == 0 {
 		return TransitionResult{}, nil
@@ -121,7 +121,7 @@ func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables map[
 }
 
 // evaluateEdge 纯粹面向标准 RuleGroup 规则组进行求值，消除运行时文本动态解析与双轨兼容
-func (p *ExecutionPlan) evaluateEdge(edge model.EdgeSpec, variables map[string]any) bool {
+func (p *ExecutionPlan) evaluateEdge(edge model.EdgeSpec, variables model.Variables) bool {
 	if edge.RuleGroup == nil {
 		return true // 无规则约束，默认放行
 	}

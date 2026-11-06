@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Bunny3th/easy-workflow/workflow/database"
@@ -17,6 +17,7 @@ import (
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
+	"gorm.io/gorm"
 )
 
 // adapter easyflow (easy-workflow) 历史遗留工作流引擎适配器实现
@@ -115,7 +116,7 @@ func (a *adapter) Reject(ctx context.Context, req domain.TaskRejectReq) error {
 }
 
 // toEasyVariables 纯函数：将变量字典单向序列化为 easy-workflow 所需的 []model.Variable 格式
-func toEasyVariables(variables map[string]any) string {
+func toEasyVariables(variables domain.Variables) string {
 	if len(variables) == 0 {
 		return "[]"
 	}
@@ -130,16 +131,16 @@ func toEasyVariables(variables map[string]any) string {
 }
 
 // ensureEssentialVariables 保证 easyflow 所需的核心元变量（$starter 与 ticket_id）始终注入
-func ensureEssentialVariables(vars map[string]any, starter string, ticketID int64) map[string]any {
-	result := maps.Clone(vars)
+func ensureEssentialVariables(vars domain.Variables, starter string, ticketID int64) domain.Variables {
+	result := vars.Clone()
 	if result == nil {
-		result = make(map[string]any, 2)
+		result = domain.NewVariables()
 	}
-	if starter != "" && result["starter"] == nil {
-		result["starter"] = starter
+	if starter != "" && !domain.VarStarter.Has(result) {
+		domain.VarStarter.Set(&result, starter)
 	}
-	if ticketID > 0 && result["ticket_id"] == nil {
-		result["ticket_id"] = strconv.FormatInt(ticketID, 10)
+	if ticketID > 0 && !domain.VarTicketID.Has(result) {
+		domain.VarTicketID.Set(&result, ticketID)
 	}
 	return result
 }
@@ -281,7 +282,28 @@ func (a *adapter) Revoke(ctx context.Context, req domain.RevokeReq) error {
 	if procInstID <= 0 {
 		return fmt.Errorf("%w: easyflow 流程实例 ID 非法: %s", engine.ErrInvalidParameter, req.InstanceID)
 	}
-	return easyEngine.InstanceRevoke(procInstID, req.Force, req.Operator)
+
+	// NOTE: 容错防卫。当工单此前在启动阶段失败时，easyflow 底层事务已回滚，proc_inst 表并无此实例记录。
+	// 若底层流程实例不存在或未就绪，无需也不可能在底层引擎执行归档流转，直接幂等返回成功，
+	// 允许上层撤回服务继续闭环将工单终结为已撤回状态，避免用户卡死在 500 无法撤回。
+	inst, err := a.repo.GetInstanceByID(ctx, procInstID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+	} else if inst.ProcInstID == 0 && inst.ProcID == 0 {
+		return nil
+	}
+
+	err = easyEngine.InstanceRevoke(procInstID, req.Force, req.Operator)
+	if err != nil {
+		// 历史/异常数据兜底：若底层引擎返回“未找到对应流程定义”，说明实例不存在或流程定义丢失
+		if strings.Contains(err.Error(), "未找到对应流程定义") {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (a *adapter) Transfer(ctx context.Context, req domain.TaskTransferReq) error {

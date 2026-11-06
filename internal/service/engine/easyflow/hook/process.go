@@ -95,6 +95,7 @@ func (e *ProcessEvent) EventStart(instID int, node *model.Node, prevNode model.N
 	if err = e.dispatchNotify(ctx, fCtx, strategy.Start); err != nil {
 		e.logger.Error("【EventStart】消息通知分发失败", elog.FieldErr(err), elog.Int("instID", instID))
 	}
+	syncBackUserIDs(node, fCtx)
 
 	return nil
 }
@@ -149,6 +150,7 @@ func (e *ProcessEvent) EventCarbonCopy(instID int, node *model.Node, prevNode mo
 	if err = e.dispatchNotify(ctx, fCtx, strategy.CarbonCopy); err != nil {
 		e.logger.Error("【EventCarbonCopy】消息发送失败", elog.FieldErr(err), elog.Int("instID", instID))
 	}
+	syncBackUserIDs(node, fCtx)
 
 	return nil
 }
@@ -196,6 +198,7 @@ func (e *ProcessEvent) EventNotify(instID int, node *model.Node, prevNode model.
 	}
 
 	_ = e.dispatchNotify(ctx, fCtx, nodeName)
+	syncBackUserIDs(node, fCtx)
 	return nil
 }
 
@@ -679,4 +682,12 @@ func (e *ProcessEvent) EventInclusionPassCleanup(taskID int, node *model.Node, p
 	// 使用 UpdateIsFinishedByPreNodeId 将同级任务置为 SystemPass (系统通过)
 	// 注意：这里使用的是 prevNode.NodeID，即分支汇聚点（或分叉点）的ID
 	return e.patcher.updateIsFinishedByPreNodeId(ctx, taskInfo.ProcInstID, prevNode.NodeID, SystemPass, SystemPassComment)
+}
+
+// syncBackUserIDs 将策略层动态解析计算出的审批人/处理人回写至 easyflow 原生节点中，
+// 确保底层引擎在接下来的 TaskNodeHandle 阶段能够顺利为这些真实用户生成任务。
+func syncBackUserIDs(node *model.Node, fCtx *strategy.FlowContext) {
+	if node != nil && fCtx != nil && fCtx.CurrentNode != nil && len(fCtx.CurrentNode.UserIDs) > 0 {
+		node.UserIDs = fCtx.CurrentNode.UserIDs
+	}
 }

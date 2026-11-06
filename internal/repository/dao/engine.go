@@ -273,11 +273,18 @@ func (g *gormEngineDAO) GetAutomationTask(ctx context.Context, currentNodeId str
 }
 
 func (g *gormEngineDAO) ListTasksByProcInstId(ctx context.Context, processInstIds []int, starter string) ([]model.Task, error) {
-	var res []model.Task
-	err := g.db.WithContext(ctx).Model(&model.Task{}).Table("proc_task").
-		Where("starter = ? AND is_finished = 0 AND proc_inst_id IN ?", starter, processInstIds).
-		Find(&res).Error
+	if len(processInstIds) == 0 {
+		return []model.Task{}, nil
+	}
 
+	var res []model.Task
+	query := g.db.WithContext(ctx).Model(&model.Task{}).Table("proc_task").
+		Where("is_finished = 0 AND proc_inst_id IN ?", processInstIds)
+	if starter != "" {
+		query = query.Where("starter = ?", starter)
+	}
+
+	err := query.Find(&res).Error
 	return res, err
 }
 

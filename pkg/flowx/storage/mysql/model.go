@@ -111,12 +111,12 @@ func toInstancePO(inst *model.Instance) (FlowInstancePO, error) {
 }
 
 func toInstanceDO(po FlowInstancePO) (*model.Instance, error) {
-	var vars map[string]any
+	var vars model.Variables
 	if po.Variables != "" {
 		_ = json.Unmarshal([]byte(po.Variables), &vars)
 	}
 	if vars == nil {
-		vars = make(map[string]any)
+		vars = make(model.Variables)
 	}
 
 	inst := &model.Instance{

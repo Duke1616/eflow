@@ -24,7 +24,7 @@ type HookContext struct {
 	Node      *model.NodeSpec // 当前节点规格
 	Task      *model.Task     // 当前待办任务实体指针 (仅在任务级钩子激活时提供)
 	Operator  string          // 当前操作人
-	Variables map[string]any  // 全局运行时变量表引用
+	Variables model.Variables // 全局运行时变量表引用
 
 	assignees []string // 候选审批人切片 (内聚封装)
 	aborted   bool
@@ -32,29 +32,35 @@ type HookContext struct {
 }
 
 // NewHookContext 构建同步节点钩子上下文
-func NewHookContext(inst *model.Instance, node *model.NodeSpec, operator string, vars map[string]any, assignees []string) *HookContext {
+func NewHookContext(inst *model.Instance, node *model.NodeSpec, operator string, assignees []string) *HookContext {
 	return &HookContext{
 		Instance:  inst,
 		Node:      node,
 		Operator:  operator,
-		Variables: vars,
+		Variables: hookVariables(inst),
 		assignees: assignees,
 	}
 }
 
 // NewTaskHookContext 构建任务级同步钩子上下文
 func NewTaskHookContext(inst *model.Instance, node *model.NodeSpec, task *model.Task, operator string) *HookContext {
-	var vars map[string]any
-	if inst != nil {
-		vars = inst.Variables
-	}
 	return &HookContext{
 		Instance:  inst,
 		Node:      node,
 		Task:      task,
 		Operator:  operator,
-		Variables: vars,
+		Variables: hookVariables(inst),
 	}
+}
+
+func hookVariables(inst *model.Instance) model.Variables {
+	if inst != nil {
+		inst.Variables.Ensure()
+		return inst.Variables
+	}
+	var variables model.Variables
+	variables.Ensure()
+	return variables
 }
 
 // Assignees 获取当前解析出的候选审批人列表
@@ -69,29 +75,12 @@ func (c *HookContext) SetAssignees(users ...string) {
 
 // SetVariable 原地设置或更新业务变量，并同步写回流程实例上下文
 func (c *HookContext) SetVariable(key string, val any) {
-	if c.Variables == nil {
-		c.Variables = make(map[string]any)
-	}
-	c.Variables[key] = val
-	if c.Instance != nil {
-		c.Instance.MergeVariables(map[string]any{key: val})
-	}
+	c.Variables.Set(key, val)
 }
 
 // MergeVariables 批量原地合并增量业务变量
-func (c *HookContext) MergeVariables(patch map[string]any) {
-	if len(patch) == 0 {
-		return
-	}
-	if c.Variables == nil {
-		c.Variables = make(map[string]any, len(patch))
-	}
-	for k, v := range patch {
-		c.Variables[k] = v
-	}
-	if c.Instance != nil {
-		c.Instance.MergeVariables(patch)
-	}
+func (c *HookContext) MergeVariables(patch model.Variables) {
+	c.Variables.Merge(patch)
 }
 
 // Abort 主动阻断后续流转，回滚当前流转事务
@@ -196,7 +185,7 @@ type Event struct {
 	Task      *model.Task     `json:"task,omitempty"`      // 触发事件的任务（可选）
 	Operator  string          `json:"operator,omitempty"`  // 操作人
 	Comment   string          `json:"comment,omitempty"`   // 操作意见或说明
-	Variables map[string]any  `json:"variables,omitempty"` // 瞬时运行时变量
+	Variables model.Variables `json:"variables,omitempty"` // 瞬时运行时变量
 }
 
 // NewProcessEvent 构建流程级生命周期事件 (启动/办结/驳回/撤回等无具体任务关联的事件)
