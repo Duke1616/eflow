@@ -40,11 +40,23 @@ type stubWorkflowService struct {
 	workflowSvc.Service
 	workflow   domain.Workflow
 	findCalled bool
+	version    int
+	versionErr error
 }
 
 func (s *stubWorkflowService) Find(_ context.Context, _ int64) (domain.Workflow, error) {
 	s.findCalled = true
 	return s.workflow, nil
+}
+
+func (s *stubWorkflowService) GetMaxSnapshotVersion(_ context.Context, _ int64) (int, error) {
+	if s.versionErr != nil {
+		return 0, s.versionErr
+	}
+	if s.version > 0 {
+		return s.version, nil
+	}
+	return 1, nil
 }
 
 type stubLauncher struct {

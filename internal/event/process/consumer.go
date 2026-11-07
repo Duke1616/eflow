@@ -93,12 +93,23 @@ func (c *ProcessEventConsumer) handleTask(ctx context.Context, evt event.TicketE
 		domain.VarTicketID.Set(&variables, evt.Id)
 	}
 
-	// 3. 调用流程启动角色契约（多态调度，隔离底层引擎差异）
+	// 3. 显式获取目标流程定义当前已发布的最新生效版本
+	latestVersion, err := c.workFlowSvc.GetMaxSnapshotVersion(ctx, flow.Id)
+	if err != nil {
+		c.logger.Error("获取工作流最新发布版本失败，将尝试默认最新版本发起",
+			elog.Int64("ticketId", evt.Id),
+			elog.Int64("workflowId", flow.Id),
+			elog.FieldErr(err),
+		)
+	}
+
+	// 4. 调用流程启动角色契约（多态调度，隔离底层引擎差异）
 	launchRes, err := c.launcher.Start(ctx, domain.ProcessLaunchReq{
 		EngineType:   flow.ResolveEngineType(),
 		TicketId:     evt.Id,
 		WorkflowId:   flow.Id,
 		ProcessId:    flow.ProcessId,
+		Version:      latestVersion,
 		WorkflowName: flow.Name,
 		Starter:      ticket.CreateBy,
 		Variables:    variables,

@@ -304,3 +304,16 @@ func TestService_GetHighlightedGraph(t *testing.T) {
 	props := edgeMap["properties"].(map[string]any)
 	assert.Equal(t, true, props["is_pass"])
 }
+
+func TestService_GetMaxSnapshotVersion(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	repo := repomocks.NewMockIWorkflowRepository(ctrl)
+	repo.EXPECT().GetMaxSnapshotVersion(gomock.Any(), int64(44)).Return(3, nil)
+
+	svc := NewWorkflowService(repo, nil, nil)
+	ver, err := svc.GetMaxSnapshotVersion(context.Background(), 44)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, ver)
+}

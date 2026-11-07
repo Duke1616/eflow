@@ -73,6 +73,7 @@ func (a *flowxEngine) Start(ctx context.Context, req domain.ProcessLaunchReq) (d
 	_, err := a.engine.Start(ctx, flowx.StartReq{
 		InstanceID:  instID,
 		Key:         procKey,
+		Version:     req.Version,
 		Starter:     req.Starter,
 		Variables:   req.Variables,
 		BusinessKey: strconv.FormatInt(req.TicketId, 10),

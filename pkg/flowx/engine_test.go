@@ -202,6 +202,7 @@ func (s *EngineTestSuite) TestStart() {
 			name: "流程定义不存在",
 			before: func() storage.IStorage {
 				m := storagemocks.NewMockIStorage(s.ctrl)
+				m.EXPECT().GetLatestVersion(gomock.Any(), "unknown_proc").Return(0, nil).AnyTimes()
 				m.EXPECT().GetDefinition(gomock.Any(), "unknown_proc", 1).
 					Return(model.ProcessDefinition{}, storage.ErrDefinitionNotFound)
 				return m
@@ -214,6 +215,34 @@ func (s *EngineTestSuite) TestStart() {
 				return err
 			},
 			errSubStr: "获取流程定义失败",
+		},
+		{
+			name: "未传版本号_自动查询并加载已发布的最新版本",
+			before: func() storage.IStorage {
+				m := storagemocks.NewMockIStorage(s.ctrl)
+				defV3 := buildValidDefinition()
+				defV3.Version = 3
+				m.EXPECT().GetLatestVersion(gomock.Any(), "proc_test").Return(3, nil)
+				m.EXPECT().GetDefinition(gomock.Any(), "proc_test", 3).Return(defV3, nil)
+				m.EXPECT().SaveTasks(gomock.Any(), gomock.Len(1)).Return(nil)
+				m.EXPECT().SaveInstance(gomock.Any(), gomock.Any()).
+					DoAndReturn(func(_ context.Context, inst *model.Instance) error {
+						assert.Equal(s.T(), 3, inst.Version)
+						return nil
+					})
+				return m
+			},
+			run: func(ctx context.Context, e Engine) (err error) {
+				startedInstID, err = e.Start(ctx, StartReq{
+					Key:       "proc_test",
+					Starter:   "zhangsan",
+					Variables: map[string]any{"dept": "IT"},
+				})
+				return err
+			},
+			after: func(t *testing.T, err error) {
+				assert.NotEmpty(t, startedInstID)
+			},
 		},
 		{
 			name: "首批目标直接为END节点_流程自动办结",
@@ -249,6 +278,7 @@ func (s *EngineTestSuite) TestStart() {
 			name: "待办任务保存失败_事务阻断",
 			before: func() storage.IStorage {
 				m := storagemocks.NewMockIStorage(s.ctrl)
+				m.EXPECT().GetLatestVersion(gomock.Any(), "proc_test").Return(1, nil)
 				m.EXPECT().GetDefinition(gomock.Any(), "proc_test", 1).Return(buildValidDefinition(), nil)
 				m.EXPECT().SaveTasks(gomock.Any(), gomock.Any()).Return(errors.New("insert tasks error"))
 				return m

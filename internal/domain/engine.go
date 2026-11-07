@@ -43,6 +43,7 @@ type ProcessLaunchReq struct {
 	TicketId     int64      // 业务工单唯一主键 ID（作为流程实例对齐的基石）
 	WorkflowId   int64      // 工作流定义主键 ID
 	ProcessId    int        // 兼容底层引擎的定义 ID（easy-workflow 为自增ID，flowx 为 wf.Id）
+	Version      int        // 流程定义版本号（未指定或 <=0 时由底层引擎自动对齐最新已发布版本）
 	WorkflowName string     // 流程名称
 	Starter      string     // 流程发起人用户名/工号
 	Variables    Variables  // 表单初始变量快照字典（权威唯一结构）

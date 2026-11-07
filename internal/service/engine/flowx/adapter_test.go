@@ -49,6 +49,7 @@ func TestFlowxAdapter_EndToEndLifecycle(t *testing.T) {
 		EngineType:   domain.EngineTypeFlowx,
 		TicketId:     1001,
 		WorkflowId:   888,
+		Version:      1,
 		WorkflowName: "请假审批工作流",
 		Starter:      "employee_wang",
 		Variables: map[string]any{

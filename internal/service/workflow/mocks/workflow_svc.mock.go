@@ -426,3 +426,33 @@ func (mr *MockServiceMockRecorder) Update(ctx, req any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockService)(nil).Update), ctx, req)
 }
+
+// GetMaxSnapshotVersion mocks base method.
+func (m *MockIWorkflowCoreService) GetMaxSnapshotVersion(ctx context.Context, workflowID int64) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetMaxSnapshotVersion", ctx, workflowID)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetMaxSnapshotVersion indicates an expected call of GetMaxSnapshotVersion.
+func (mr *MockIWorkflowCoreServiceMockRecorder) GetMaxSnapshotVersion(ctx, workflowID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMaxSnapshotVersion", reflect.TypeOf((*MockIWorkflowCoreService)(nil).GetMaxSnapshotVersion), ctx, workflowID)
+}
+
+// GetMaxSnapshotVersion mocks base method.
+func (m *MockService) GetMaxSnapshotVersion(ctx context.Context, workflowID int64) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetMaxSnapshotVersion", ctx, workflowID)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetMaxSnapshotVersion indicates an expected call of GetMaxSnapshotVersion.
+func (mr *MockServiceMockRecorder) GetMaxSnapshotVersion(ctx, workflowID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMaxSnapshotVersion", reflect.TypeOf((*MockService)(nil).GetMaxSnapshotVersion), ctx, workflowID)
+}

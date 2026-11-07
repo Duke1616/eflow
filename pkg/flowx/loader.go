@@ -20,7 +20,15 @@ func (e *flowEngine) loadOrDeployDefinition(ctx context.Context, req StartReq) (
 
 	version := req.Version
 	if version <= 0 {
-		version = 1
+		latest, err := e.storage.GetLatestVersion(ctx, req.Key)
+		if err != nil {
+			return model.ProcessDefinition{}, fmt.Errorf("获取流程最新版本失败: %w", err)
+		}
+		if latest > 0 {
+			version = latest
+		} else {
+			version = 1
+		}
 	}
 	plan, err := e.planCache.GetOrLoad(ctx, req.Key, version, func(c context.Context) (model.ProcessDefinition, error) {
 		return e.storage.GetDefinition(c, req.Key, version)

@@ -38,6 +38,8 @@ type IWorkflowCoreService interface {
 	FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error)
 	// GetHighlightedGraph 根据审批轨迹流转情况计算并点亮画布图
 	GetHighlightedGraph(ctx context.Context, workflowId int64, instanceID domain.ID, status domain.Status) (domain.Workflow, error)
+	// GetMaxSnapshotVersion 获取指定工作流当前已发布的最大快照版本号（未发布过时返回 0）
+	GetMaxSnapshotVersion(ctx context.Context, workflowID int64) (int, error)
 }
 
 // Service 工作流大业务服务接口
@@ -263,4 +265,8 @@ func (s *workflowService) GetHighlightedGraph(ctx context.Context, workflowId in
 
 	flow.FlowData = highlightedCanvas
 	return flow, nil
+}
+
+func (s *workflowService) GetMaxSnapshotVersion(ctx context.Context, workflowID int64) (int, error) {
+	return s.repo.GetMaxSnapshotVersion(ctx, workflowID)
 }
