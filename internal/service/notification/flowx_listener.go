@@ -56,8 +56,8 @@ func (l *FlowxNotificationListener) OnEvent(ctx context.Context, evt flowx.Event
 
 	instanceKey := evt.Instance.ID
 
-	// 1. 根据流程实例全局唯一标识检索工单实体
-	ticket, err := l.ticketRepo.DetailByProcessInstance(safeCtx, domain.NewID(instanceKey))
+	// 1. 根据 FlowX 引擎类型与实例唯一标识精准检索工单实体
+	ticket, err := l.ticketRepo.DetailByEngineInstance(safeCtx, domain.EngineTypeFlowx, domain.NewID(instanceKey))
 	if err != nil {
 		l.logger.Warn("flowx 通知处理: 未检索到流程实例关联的工单",
 			elog.String("instanceKey", instanceKey),
@@ -104,11 +104,47 @@ func (l *FlowxNotificationListener) handleProcessStarted(ctx context.Context, in
 		nodeID = evt.Node.ID
 	}
 
-	instIDVal := domain.NewID(instanceKey)
-	instID := instIDVal.Int()
+	info := l.buildNotificationInfo(strategy.Start, instanceKey, ticket, wf, nodeID, "Start", []string{ticket.CreateBy})
+	l.sendSafe(ctx, info, "流程启动提单通知")
+}
 
-	info := strategy.Info{
-		NodeName: strategy.Start,
+func (l *FlowxNotificationListener) handleTaskCreated(ctx context.Context, instanceKey string, ticket domain.Ticket, wf domain.Workflow, evt flowx.Event) {
+	if evt.Task == nil {
+		return
+	}
+
+	info := l.buildNotificationInfo(strategy.User, instanceKey, ticket, wf, evt.Task.NodeID, evt.Task.NodeName, []string{evt.Task.Assignee})
+	l.sendSafe(ctx, info, "人工审批待办通知")
+}
+
+func (l *FlowxNotificationListener) handleNodeEntered(ctx context.Context, instanceKey string, ticket domain.Ticket, wf domain.Workflow, evt flowx.Event) {
+	if evt.Node == nil {
+		return
+	}
+
+	strategyName, ok := map[flowxModel.NodeType]strategy.NodeName{
+		flowxModel.NodeCarbonCopy: strategy.CarbonCopy,
+		flowxModel.NodeChatGroup:  strategy.ChatGroup,
+	}[evt.Node.Type]
+	if !ok {
+		return // 忽略无需消息推送的中间网关或状态节点
+	}
+
+	info := l.buildNotificationInfo(strategyName, instanceKey, ticket, wf, evt.Node.ID, evt.Node.Name, evt.Node.Assignees)
+	l.sendSafe(ctx, info, string(strategyName)+"节点通知")
+}
+
+func (l *FlowxNotificationListener) buildNotificationInfo(
+	strategyName strategy.NodeName,
+	instanceKey string,
+	ticket domain.Ticket,
+	wf domain.Workflow,
+	nodeID, nodeName string,
+	userIDs []string,
+) strategy.Info {
+	instID := domain.NewID(instanceKey).Int()
+	return strategy.Info{
+		NodeName: strategyName,
 		FlowContext: strategy.FlowContext{
 			InstID:   instID,
 			Ticket:   ticket,
@@ -119,81 +155,11 @@ func (l *FlowxNotificationListener) handleProcessStarted(ctx context.Context, in
 			},
 			CurrentNode: &strategy.CurrentNode{
 				NodeID:   nodeID,
-				NodeName: "Start",
-				UserIDs:  []string{ticket.CreateBy},
+				NodeName: nodeName,
+				UserIDs:  userIDs,
 			},
 		},
 	}
-
-	l.sendSafe(ctx, info, "流程启动提单通知")
-}
-
-func (l *FlowxNotificationListener) handleTaskCreated(ctx context.Context, instanceKey string, ticket domain.Ticket, wf domain.Workflow, evt flowx.Event) {
-	if evt.Task == nil {
-		return
-	}
-
-	instIDVal := domain.NewID(instanceKey)
-	instID := instIDVal.Int()
-
-	info := strategy.Info{
-		NodeName: strategy.User,
-		FlowContext: strategy.FlowContext{
-			InstID:   instID,
-			Ticket:   ticket,
-			Workflow: wf,
-			Instance: domain.Instance{
-				ProcInstID: instID,
-				Starter:    ticket.CreateBy,
-			},
-			CurrentNode: &strategy.CurrentNode{
-				NodeID:   evt.Task.NodeID,
-				NodeName: evt.Task.NodeName,
-				UserIDs:  []string{evt.Task.Assignee},
-			},
-		},
-	}
-
-	l.sendSafe(ctx, info, "人工审批待办通知")
-}
-
-func (l *FlowxNotificationListener) handleNodeEntered(ctx context.Context, instanceKey string, ticket domain.Ticket, wf domain.Workflow, evt flowx.Event) {
-	if evt.Node == nil {
-		return
-	}
-
-	var nodeStrategy strategy.NodeName
-	switch evt.Node.Type {
-	case flowxModel.NodeCarbonCopy:
-		nodeStrategy = strategy.CarbonCopy
-	case "chat_group":
-		nodeStrategy = strategy.ChatGroup
-	default:
-		return // 忽略无需消息推送的中间网关或状态节点
-	}
-
-	instIDVal := domain.NewID(instanceKey)
-	instID := instIDVal.Int()
-
-	info := strategy.Info{
-		NodeName: nodeStrategy,
-		FlowContext: strategy.FlowContext{
-			InstID:   instID,
-			Ticket:   ticket,
-			Workflow: wf,
-			Instance: domain.Instance{
-				ProcInstID: instID,
-				Starter:    ticket.CreateBy,
-			},
-			CurrentNode: &strategy.CurrentNode{
-				NodeID:   evt.Node.ID,
-				NodeName: evt.Node.Name,
-				UserIDs:  evt.Node.Assignees,
-			},
-		},
-	}
-
-	l.sendSafe(ctx, info, string(nodeStrategy)+"节点通知")
 }
 
 func (l *FlowxNotificationListener) sendSafe(ctx context.Context, info strategy.Info, desc string) {

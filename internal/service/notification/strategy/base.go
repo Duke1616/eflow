@@ -46,7 +46,7 @@ type Service interface {
 	// SafeGo 安全执行带 Panic 恢复机制的异步延时任务
 	SafeGo(ctx context.Context, timeout time.Duration, fn func(ctx context.Context))
 	// PassTask 调用工作流引擎接口物理流转推进指定任务
-	PassTask(ctx context.Context, taskId domain.ID, remark string) error
+	PassTask(ctx context.Context, engineType domain.EngineType, taskId domain.ID, remark string) error
 	// FindTaskForms 获取指定工单下所有审批节点填写的表单快照历史
 	FindTaskForms(ctx context.Context, ticketId int64) ([]domain.FormValue, error)
 	// Logger 获取系统日志输出句柄
@@ -87,11 +87,12 @@ func NewService(userSvc userv1.UserServiceClient, templateSvc templateSvc.Servic
 	}
 }
 
-func (s *service) PassTask(ctx context.Context, taskId domain.ID, remark string) error {
+func (s *service) PassTask(ctx context.Context, engineType domain.EngineType, taskId domain.ID, remark string) error {
 	return s.engine.Pass(ctx, domain.TaskPassReq{
-		TaskId:   taskId,
-		Operator: "SYSTEM",
-		Comment:  remark,
+		EngineType: engineType,
+		TaskId:     taskId,
+		Operator:   "SYSTEM",
+		Comment:    remark,
 	})
 }
 
@@ -304,13 +305,13 @@ func (s *service) FetchTasksWithRetry(ctx context.Context, info Info) ([]Task, e
 		}
 
 		// 优先通过统一多态 IEngine 检索（自适应 easyflow 与 flowx），缺失时回退到 engineSvc
+		engineType := info.Ticket.Process.EngineType
+		if engineType == "" {
+			engineType = info.Workflow.ResolveEngineType()
+		}
 		var tasks []domain.TaskRecord
 		var taskErr error
 		if s.engine != nil {
-			engineType := info.Ticket.Process.EngineType
-			if engineType == "" {
-				engineType = info.Workflow.ResolveEngineType()
-			}
 			instanceID := info.ResolveInstanceID()
 			tasks, taskErr = s.engine.GetTasksByCurrentNode(ctx, engineType, instanceID, info.CurrentNode.NodeID)
 		} else if s.engineSvc != nil {
@@ -323,6 +324,7 @@ func (s *service) FetchTasksWithRetry(ctx context.Context, info Info) ([]Task, e
 				elog.Int("taskCount", len(tasks)))
 			return lo.Map(tasks, func(t domain.TaskRecord, _ int) Task {
 				return Task{
+					EngineType: engineType,
 					TaskID:     t.TaskID,
 					UserID:     t.ApprovedBy,
 					IsCosigned: t.IsCosigned,

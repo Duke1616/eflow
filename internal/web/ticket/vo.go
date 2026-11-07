@@ -59,22 +59,26 @@ type StartUserReq struct {
 }
 
 type PassOrderReq struct {
-	TaskId    TaskID                 `json:"task_id"`
-	Comment   string                 `json:"comment"`
-	ExtraData map[string]interface{} `json:"extra_data"`
+	EngineType string                 `json:"engine_type"`
+	TaskId     TaskID                 `json:"task_id"`
+	Comment    string                 `json:"comment"`
+	ExtraData  map[string]interface{} `json:"extra_data"`
 }
 
 type RejectOrderReq struct {
-	TaskId  TaskID `json:"task_id"`
-	Comment string `json:"comment"`
+	EngineType string `json:"engine_type"`
+	TaskId     TaskID `json:"task_id"`
+	Comment    string `json:"comment"`
 }
 
 type TransferReq struct {
-	TaskId    TaskID   `json:"task_id"`
-	Usernames []string `json:"usernames"`
+	EngineType string   `json:"engine_type"`
+	TaskId     TaskID   `json:"task_id"`
+	Usernames  []string `json:"usernames"`
 }
 
 type RevokeOrderReq struct {
+	EngineType string `json:"engine_type"`
 	InstanceId idx.ID `json:"instance_id"`
 	Force      bool   `json:"force"`
 	Reason     string `json:"reason"`
@@ -145,12 +149,13 @@ type TaskRecord struct {
 
 type Ticket struct {
 	Id                   int64                  `json:"id"`
-	TaskId               any                    `json:"task_id"`
+	EngineType           string                 `json:"engine_type"`
+	TaskId               TaskID                 `json:"task_id"`
 	TemplateId           int64                  `json:"template_id"`
 	Starter              string                 `json:"starter"`
 	Status               uint8                  `json:"status"`
 	Provide              uint8                  `json:"provide"`
-	ProcessInstanceId    any                    `json:"process_instance_id"`
+	ProcessInstanceId    InstanceID             `json:"process_instance_id"`
 	WorkflowId           int64                  `json:"workflow_id"`
 	Ctime                string                 `json:"ctime"`
 	Wtime                string                 `json:"wtime"`

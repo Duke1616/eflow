@@ -188,3 +188,32 @@ func (c *AutomationNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node)
 		Props:      props,
 	}, nil
 }
+
+// ChatGroupNodeConverter IM 群聊广播通知节点转换器
+type ChatGroupNodeConverter struct{}
+
+func (c *ChatGroupNodeConverter) Type() flowdsl.NodeType { return flowdsl.NodeChatGroup }
+
+func (c *ChatGroupNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
+	name := lo.Ternary(strings.TrimSpace(node.Name) != "", node.Name, "群通知")
+
+	props := make(map[string]any)
+	if chatCfg, ok := node.AsChatGroup(); ok {
+		if chatCfg.Mode != "" {
+			props["mode"] = chatCfg.Mode
+		}
+		if len(chatCfg.ChatGroupIDs) > 0 {
+			props["chat_group_ids"] = chatCfg.ChatGroupIDs
+		}
+		if len(chatCfg.OutputMode) > 0 {
+			props["output_mode"] = chatCfg.OutputMode
+		}
+	}
+
+	return model.NodeSpec{
+		ID:    node.ID,
+		Name:  name,
+		Type:  model.NodeChatGroup,
+		Props: props,
+	}, nil
+}

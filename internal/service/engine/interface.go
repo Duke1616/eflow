@@ -37,8 +37,8 @@ type IEngine interface {
 	// Revoke 撤销/终止特定流程实例
 	Revoke(ctx context.Context, req domain.RevokeReq) error
 
-	// GetTaskContext 获取指定任务的轻量上下文快照（含所属引擎 EngineType、状态、处理人等）
-	GetTaskContext(ctx context.Context, taskID domain.ID) (domain.TaskContext, error)
+	// GetTaskContext 依据显式工作流引擎类型精准获取指定任务的轻量上下文快照（固定路由，杜绝盲目重试）
+	GetTaskContext(ctx context.Context, engineType domain.EngineType, taskID domain.ID) (domain.TaskContext, error)
 
 	// GetTimeline 获取指定流程实例的时间线流转历史节点列表
 	GetTimeline(ctx context.Context, engineType domain.EngineType, instanceID domain.ID) ([]domain.TimelineNode, error)

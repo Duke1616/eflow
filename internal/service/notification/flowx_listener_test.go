@@ -42,7 +42,7 @@ func TestFlowxNotificationListener_OnEvent(t *testing.T) {
 		name      string
 		event     flowx.Event
 		setupMock func(repo *repomocks.MockTicketRepository, wf *wfmocks.MockService)
-		assertFn  func(t *testing.T, startMock, userMock, ccMock *mockSendStrategy)
+		assertFn  func(t *testing.T, startMock, userMock, ccMock, chatMock *mockSendStrategy)
 	}{
 		{
 			name: "空实例或无实例ID直接跳过",
@@ -51,10 +51,11 @@ func TestFlowxNotificationListener_OnEvent(t *testing.T) {
 				Instance: nil,
 			},
 			setupMock: func(_ *repomocks.MockTicketRepository, _ *wfmocks.MockService) {},
-			assertFn: func(t *testing.T, s, u, c *mockSendStrategy) {
+			assertFn: func(t *testing.T, s, u, c, ch *mockSendStrategy) {
 				assert.Equal(t, 0, s.calls)
 				assert.Equal(t, 0, u.calls)
 				assert.Equal(t, 0, c.calls)
+				assert.Equal(t, 0, ch.calls)
 			},
 		},
 		{
@@ -66,10 +67,10 @@ func TestFlowxNotificationListener_OnEvent(t *testing.T) {
 				},
 			},
 			setupMock: func(repo *repomocks.MockTicketRepository, _ *wfmocks.MockService) {
-				repo.EXPECT().DetailByProcessInstance(gomock.Any(), domain.NewID("inst_non_exist")).
+				repo.EXPECT().DetailByEngineInstance(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("inst_non_exist")).
 					Return(domain.Ticket{}, errors.New("ticket not found"))
 			},
-			assertFn: func(t *testing.T, s, u, c *mockSendStrategy) {
+			assertFn: func(t *testing.T, s, u, c, ch *mockSendStrategy) {
 				assert.Equal(t, 0, s.calls)
 			},
 		},
@@ -83,12 +84,12 @@ func TestFlowxNotificationListener_OnEvent(t *testing.T) {
 				Node: &flowxModel.NodeSpec{ID: "start_node", Name: "Start"},
 			},
 			setupMock: func(repo *repomocks.MockTicketRepository, wf *wfmocks.MockService) {
-				repo.EXPECT().DetailByProcessInstance(gomock.Any(), domain.NewID("inst_1001")).
+				repo.EXPECT().DetailByEngineInstance(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("inst_1001")).
 					Return(domain.Ticket{Id: 88, WorkflowId: 10, CreateBy: "alice", TenantID: 1}, nil)
 				wf.EXPECT().Find(gomock.Any(), int64(10)).
 					Return(domain.Workflow{Id: 10, Name: "发布流程"}, nil)
 			},
-			assertFn: func(t *testing.T, s, u, c *mockSendStrategy) {
+			assertFn: func(t *testing.T, s, u, c, ch *mockSendStrategy) {
 				assert.Equal(t, 1, s.calls)
 				assert.Equal(t, strategy.Start, s.lastInfo.NodeName)
 				assert.Equal(t, int64(88), s.lastInfo.Ticket.Id)
@@ -110,12 +111,12 @@ func TestFlowxNotificationListener_OnEvent(t *testing.T) {
 				},
 			},
 			setupMock: func(repo *repomocks.MockTicketRepository, wf *wfmocks.MockService) {
-				repo.EXPECT().DetailByProcessInstance(gomock.Any(), domain.NewID("inst_1001")).
+				repo.EXPECT().DetailByEngineInstance(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("inst_1001")).
 					Return(domain.Ticket{Id: 88, WorkflowId: 10, CreateBy: "alice", TenantID: 1}, nil)
 				wf.EXPECT().Find(gomock.Any(), int64(10)).
 					Return(domain.Workflow{Id: 10, Name: "发布流程"}, nil)
 			},
-			assertFn: func(t *testing.T, s, u, c *mockSendStrategy) {
+			assertFn: func(t *testing.T, s, u, c, ch *mockSendStrategy) {
 				assert.Equal(t, 1, u.calls)
 				assert.Equal(t, strategy.User, u.lastInfo.NodeName)
 				assert.Equal(t, "leader_audit", u.lastInfo.CurrentNode.NodeID)
@@ -137,16 +138,42 @@ func TestFlowxNotificationListener_OnEvent(t *testing.T) {
 				},
 			},
 			setupMock: func(repo *repomocks.MockTicketRepository, wf *wfmocks.MockService) {
-				repo.EXPECT().DetailByProcessInstance(gomock.Any(), domain.NewID("inst_1001")).
+				repo.EXPECT().DetailByEngineInstance(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("inst_1001")).
 					Return(domain.Ticket{Id: 88, WorkflowId: 10, CreateBy: "alice", TenantID: 1}, nil)
 				wf.EXPECT().Find(gomock.Any(), int64(10)).
 					Return(domain.Workflow{Id: 10, Name: "发布流程"}, nil)
 			},
-			assertFn: func(t *testing.T, s, u, c *mockSendStrategy) {
+			assertFn: func(t *testing.T, s, u, c, ch *mockSendStrategy) {
 				assert.Equal(t, 1, c.calls)
 				assert.Equal(t, strategy.CarbonCopy, c.lastInfo.NodeName)
 				assert.Equal(t, "cc_node", c.lastInfo.CurrentNode.NodeID)
 				assert.Equal(t, []string{"pm_zhang"}, c.lastInfo.CurrentNode.UserIDs)
+			},
+		},
+		{
+			name: "群聊通知节点触发群通知",
+			event: flowx.Event{
+				Type: flowx.EventNodeEntered,
+				Instance: &flowxModel.Instance{
+					ID: "inst_1001",
+				},
+				Node: &flowxModel.NodeSpec{
+					ID:        "chat_node",
+					Name:      "研发告警群通知",
+					Type:      flowxModel.NodeChatGroup,
+					Assignees: []string{},
+				},
+			},
+			setupMock: func(repo *repomocks.MockTicketRepository, wf *wfmocks.MockService) {
+				repo.EXPECT().DetailByEngineInstance(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("inst_1001")).
+					Return(domain.Ticket{Id: 88, WorkflowId: 10, CreateBy: "alice", TenantID: 1}, nil)
+				wf.EXPECT().Find(gomock.Any(), int64(10)).
+					Return(domain.Workflow{Id: 10, Name: "发布流程"}, nil)
+			},
+			assertFn: func(t *testing.T, s, u, c, ch *mockSendStrategy) {
+				assert.Equal(t, 1, ch.calls)
+				assert.Equal(t, strategy.ChatGroup, ch.lastInfo.NodeName)
+				assert.Equal(t, "chat_node", ch.lastInfo.CurrentNode.NodeID)
 			},
 		},
 	}
@@ -163,13 +190,14 @@ func TestFlowxNotificationListener_OnEvent(t *testing.T) {
 			startMock := &mockSendStrategy{}
 			userMock := &mockSendStrategy{}
 			ccMock := &mockSendStrategy{}
-			dispatcher := strategy.NewDispatcher(userMock, nil, startMock, nil, ccMock, nil)
+			chatMock := &mockSendStrategy{}
+			dispatcher := strategy.NewDispatcher(userMock, nil, startMock, chatMock, ccMock, nil)
 
 			listener := NewFlowxNotificationListener(repo, wf, dispatcher)
 			err := listener.OnEvent(context.Background(), tc.event)
 			require.NoError(t, err)
 
-			tc.assertFn(t, startMock, userMock, ccMock)
+			tc.assertFn(t, startMock, userMock, ccMock, chatMock)
 		})
 	}
 }

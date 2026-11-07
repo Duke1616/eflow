@@ -10,6 +10,14 @@ import (
 	"github.com/samber/lo"
 )
 
+const (
+	taskStatusPending    = 0 // 待审批
+	taskStatusPassed     = 1 // 审批通过
+	taskStatusRejected   = 2 // 审批驳回
+	taskStatusSystemPass = 3 // 系统自动通过/取消
+	taskStatusSkipped    = 5 // 分支条件不满足跳过
+)
+
 // calculateTraversedEdges 计算 easy-workflow 流程图中已经点亮流转的拓扑边映射
 func calculateTraversedEdges(
 	ctx context.Context,
@@ -42,22 +50,18 @@ func calculateTraversedEdges(
 	for _, task := range record {
 		recursiveReset(task.NodeID, litEdges, nodesMap)
 
-		if task.Status != 2 && task.Status != 3 && task.PrevNodeID != "" {
-			if analyzer.isBatchTainted(task.NodeID, task.BatchCode) {
-				continue
-			}
-
-			logicalPrevID := topology.resolveLogicalPrev(task.PrevNodeID)
-			path := topology.findPath(logicalPrevID, task.NodeID)
-
-			if len(path) > 1 {
-				for i := 0; i < len(path)-1; i++ {
-					uniqueAppend(litEdges, path[i], path[i+1])
-				}
+		// 1. 若当前任务不是终结/废弃状态，根据其前置节点寻路回溯，点亮到达当前节点的边
+		if task.Status != taskStatusRejected && task.Status != taskStatusSystemPass && task.PrevNodeID != "" {
+			if !analyzer.isBatchTainted(task.NodeID, task.BatchCode) {
+				logicalPrevID := topology.resolveLogicalPrev(task.PrevNodeID)
+				path := topology.findPath(logicalPrevID, task.NodeID)
+				appendPathEdges(litEdges, path)
 			}
 		}
 
-		shouldLightUp := task.Status == 5 || (analyzer.isBatchEffectivelyPassed(task) && !analyzer.hasNewerBatchPending(task.NodeID, task.BatchCode))
+		// 2. 若当前任务已跳过或有效通过，向前尝试点亮后续节点（受网关汇聚阻断约束）
+		shouldLightUp := task.Status == taskStatusSkipped ||
+			(analyzer.isBatchEffectivelyPassed(task) && !analyzer.hasNewerBatchPending(task.NodeID, task.BatchCode))
 		if shouldLightUp {
 			for _, nextID := range topology.resolveNextNodes(task.NodeID) {
 				lightUpForward(task.NodeID, nextID, litEdges, nodesMap, topology.effectiveGraph)
@@ -65,32 +69,48 @@ func calculateTraversedEdges(
 		}
 	}
 
-	finalEdges := make(map[string][]string)
-	if rootID != "" {
-		queue := []string{rootID}
-		visitedNode := make(map[string]bool)
-		visitedNode[rootID] = true
+	return filterReachableEdgesFromRoot(rootID, litEdges), nil
+}
 
-		for len(queue) > 0 {
-			curr := queue[0]
-			queue = queue[1:]
+// appendPathEdges 将路径上的相邻节点转换为有向边加入边集合
+func appendPathEdges(litEdges map[string][]string, path []string) {
+	if len(path) <= 1 {
+		return
+	}
+	for i := 0; i < len(path)-1; i++ {
+		uniqueAppend(litEdges, path[i], path[i+1])
+	}
+}
 
-			targets := litEdges[curr]
-			if len(targets) > 0 {
-				finalEdges[curr] = targets
-				for _, t := range targets {
-					if !visitedNode[t] {
-						visitedNode[t] = true
-						queue = append(queue, t)
-					}
-				}
-			}
-		}
-	} else {
-		finalEdges = litEdges
+// filterReachableEdgesFromRoot 从根节点进行广度优先搜索，只保留从 Root 真正可达的高亮边，过滤游离脏边
+func filterReachableEdgesFromRoot(rootID string, litEdges map[string][]string) map[string][]string {
+	if rootID == "" {
+		return litEdges
 	}
 
-	return finalEdges, nil
+	finalEdges := make(map[string][]string)
+	queue := []string{rootID}
+	visitedNode := map[string]bool{rootID: true}
+
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+
+		targets := litEdges[curr]
+		if len(targets) == 0 {
+			continue
+		}
+
+		finalEdges[curr] = targets
+		for _, t := range targets {
+			if !visitedNode[t] {
+				visitedNode[t] = true
+				queue = append(queue, t)
+			}
+		}
+	}
+
+	return finalEdges
 }
 
 func uniqueAppend(m map[string][]string, key, val string) {
@@ -255,12 +275,9 @@ func (a *nodeStatusAnalyzer) hasNewerBatchPending(nodeID, currentBatchCode strin
 		return false
 	}
 
-	for batchCode, stats := range batches {
-		if batchCode != currentBatchCode && stats.Pending > 0 {
-			return true
-		}
-	}
-	return false
+	return lo.SomeBy(lo.Entries(batches), func(entry lo.Entry[string, *batchStats]) bool {
+		return entry.Key != currentBatchCode && entry.Value != nil && entry.Value.Pending > 0
+	})
 }
 
 type graphTopologyService struct {

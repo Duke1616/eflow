@@ -3,8 +3,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -60,81 +58,6 @@ func (d *engineDispatcher) findEngineLocked(engineType domain.EngineType) (IEngi
 	return eng, nil
 }
 
-// resolveEngineByTask 根据指定的引擎类型或任务 ID 特征决议目标流程引擎
-func (d *engineDispatcher) resolveEngineByTask(engineType domain.EngineType, taskID domain.ID) (IEngine, error) {
-	if engineType != "" {
-		return d.getEngine(engineType)
-	}
-	return d.taskEngine(taskID)
-}
-
-// resolveEngineByInstance 根据指定的引擎类型或流程实例 ID 特征决议目标流程引擎
-func (d *engineDispatcher) resolveEngineByInstance(engineType domain.EngineType, instanceID domain.ID) (IEngine, error) {
-	if engineType != "" {
-		return d.getEngine(engineType)
-	}
-	return d.instanceEngine(instanceID)
-}
-
-// isFlowxTaskID 判定任务 ID 是否符合 FlowX 任务命名特征
-func isFlowxTaskID(idStr string) bool {
-	return strings.HasPrefix(idStr, "task_")
-}
-
-// isFlowxInstanceID 判定流程实例 ID 是否符合 FlowX 实例命名特征
-func isFlowxInstanceID(idStr string) bool {
-	return strings.HasPrefix(idStr, "inst_")
-}
-
-// isLegacyNumericID 判定 ID 是否为纯数字整型（兼容 EasyFlow 历史主键）
-func isLegacyNumericID(idStr string) bool {
-	_, err := strconv.Atoi(idStr)
-	return err == nil
-}
-
-// taskEngine 探测任务 ID 归属的底层引擎
-func (d *engineDispatcher) taskEngine(taskID domain.ID) (IEngine, error) {
-	if taskID.IsZero() {
-		return nil, fmt.Errorf("%w: 任务 ID 不能为空", ErrInvalidParameter)
-	}
-	idStr := taskID.String()
-
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	switch {
-	case isFlowxTaskID(idStr):
-		return d.findEngineLocked(domain.EngineTypeFlowx)
-	case isLegacyNumericID(idStr):
-		return d.findEngineLocked(domain.EngineTypeEasyFlow)
-	default:
-		return nil, fmt.Errorf("%w: 无法识别任务标识归属 [taskId=%s]", ErrTaskNotFound, idStr)
-	}
-}
-
-// instanceEngine 探测流程实例 ID 归属的底层引擎
-func (d *engineDispatcher) instanceEngine(instanceID domain.ID) (IEngine, error) {
-	if instanceID.IsZero() {
-		return nil, fmt.Errorf("%w: 流程实例 ID 不能为空", ErrInvalidParameter)
-	}
-	idStr := instanceID.String()
-
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	switch {
-	case isFlowxInstanceID(idStr):
-		return d.findEngineLocked(domain.EngineTypeFlowx)
-	case isLegacyNumericID(idStr):
-		return d.findEngineLocked(domain.EngineTypeEasyFlow)
-	default:
-		if eng, ok := d.engines[domain.EngineTypeEasyFlow]; ok {
-			return eng, nil
-		}
-		return nil, fmt.Errorf("%w: 无法识别流程实例标识归属 [instanceId=%s]", ErrEngineNotFound, idStr)
-	}
-}
-
 func (d *engineDispatcher) Deploy(ctx context.Context, engineType domain.EngineType, rawDef any) (domain.DeployInfo, error) {
 	eng, err := d.getEngine(engineType)
 	if err != nil {
@@ -148,12 +71,7 @@ func (d *engineDispatcher) Start(ctx context.Context, req domain.ProcessLaunchRe
 		return domain.ProcessLaunchResult{}, fmt.Errorf("%w: %v", ErrInvalidParameter, err)
 	}
 
-	engineType := req.EngineType
-	if engineType == "" {
-		engineType = domain.EngineTypeEasyFlow
-	}
-
-	eng, err := d.getEngine(engineType)
+	eng, err := d.getEngine(req.EngineType)
 	if err != nil {
 		return domain.ProcessLaunchResult{}, err
 	}
@@ -165,7 +83,7 @@ func (d *engineDispatcher) Start(ctx context.Context, req domain.ProcessLaunchRe
 	if err != nil {
 		d.logger.Error("流程实例启动失败",
 			elog.FieldErr(err),
-			elog.Any("engine_type", engineType),
+			elog.Any("engine_type", req.EngineType),
 			elog.Int64("ticket_id", req.TicketId),
 			elog.Duration("cost", cost),
 		)
@@ -180,12 +98,16 @@ func (d *engineDispatcher) Start(ctx context.Context, req domain.ProcessLaunchRe
 	return res, err
 }
 
-func (d *engineDispatcher) GetTaskContext(ctx context.Context, taskID domain.ID) (domain.TaskContext, error) {
-	eng, err := d.taskEngine(taskID)
+func (d *engineDispatcher) GetTaskContext(ctx context.Context, engineType domain.EngineType, taskID domain.ID) (domain.TaskContext, error) {
+	if taskID.IsZero() {
+		return domain.TaskContext{}, fmt.Errorf("%w: 任务 ID 不能为空", ErrInvalidParameter)
+	}
+
+	eng, err := d.getEngine(engineType)
 	if err != nil {
 		return domain.TaskContext{}, err
 	}
-	return eng.GetTaskContext(ctx, taskID)
+	return eng.GetTaskContext(ctx, engineType, taskID)
 }
 
 func (d *engineDispatcher) Pass(ctx context.Context, req domain.TaskPassReq) error {
@@ -193,7 +115,7 @@ func (d *engineDispatcher) Pass(ctx context.Context, req domain.TaskPassReq) err
 		return fmt.Errorf("%w: %v", ErrInvalidParameter, err)
 	}
 
-	eng, err := d.resolveEngineByTask(req.EngineType, req.TaskId)
+	eng, err := d.getEngine(req.EngineType)
 	if err != nil {
 		return err
 	}
@@ -205,7 +127,7 @@ func (d *engineDispatcher) Reject(ctx context.Context, req domain.TaskRejectReq)
 		return fmt.Errorf("%w: %v", ErrInvalidParameter, err)
 	}
 
-	eng, err := d.resolveEngineByTask(req.EngineType, req.TaskId)
+	eng, err := d.getEngine(req.EngineType)
 	if err != nil {
 		return err
 	}
@@ -217,7 +139,7 @@ func (d *engineDispatcher) Transfer(ctx context.Context, req domain.TaskTransfer
 		return fmt.Errorf("%w: %v", ErrInvalidParameter, err)
 	}
 
-	eng, err := d.resolveEngineByTask(req.EngineType, req.TaskId)
+	eng, err := d.getEngine(req.EngineType)
 	if err != nil {
 		return err
 	}
@@ -229,7 +151,7 @@ func (d *engineDispatcher) Revoke(ctx context.Context, req domain.RevokeReq) err
 		return fmt.Errorf("%w: %v", ErrInvalidParameter, err)
 	}
 
-	eng, err := d.resolveEngineByInstance(req.EngineType, req.InstanceID)
+	eng, err := d.getEngine(req.EngineType)
 	if err != nil {
 		return err
 	}
@@ -241,7 +163,7 @@ func (d *engineDispatcher) GetTimeline(ctx context.Context, engineType domain.En
 		return nil, fmt.Errorf("%w: 流程实例 ID 不能为空", ErrInvalidParameter)
 	}
 
-	eng, err := d.resolveEngineByInstance(engineType, instanceID)
+	eng, err := d.getEngine(engineType)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +175,7 @@ func (d *engineDispatcher) GetInstanceExecutionView(ctx context.Context, engineT
 		return domain.InstanceExecutionView{}, fmt.Errorf("%w: 流程实例 ID 不能为空", ErrInvalidParameter)
 	}
 
-	eng, err := d.resolveEngineByInstance(engineType, instanceID)
+	eng, err := d.getEngine(engineType)
 	if err != nil {
 		return domain.InstanceExecutionView{}, err
 	}
@@ -261,7 +183,7 @@ func (d *engineDispatcher) GetInstanceExecutionView(ctx context.Context, engineT
 }
 
 func (d *engineDispatcher) GetAutomationTask(ctx context.Context, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
-	eng, err := d.instanceEngine(instanceID)
+	eng, err := d.getEngine(domain.EngineTypeEasyFlow)
 	if err != nil {
 		return domain.TaskRecord{}, err
 	}
@@ -270,7 +192,7 @@ func (d *engineDispatcher) GetAutomationTask(ctx context.Context, instanceID dom
 
 // GetTasksByCurrentNode 获取指定流程实例在特定节点下当前挂起/未完成的任务记录集合
 func (d *engineDispatcher) GetTasksByCurrentNode(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, nodeID string) ([]domain.TaskRecord, error) {
-	eng, err := d.resolveEngine(engineType, instanceID)
+	eng, err := d.getEngine(engineType)
 	if err != nil {
 		return nil, err
 	}
@@ -351,27 +273,20 @@ func (d *engineDispatcher) ListPendingSteps(ctx context.Context, instanceIDs []d
 	return allSteps, nil
 }
 
-// GetTaskRecords 分页获取指定流程实例的流转执行记录，支持自动推导底层引擎
+// GetTaskRecords 分页获取指定流程实例的流转执行记录
 func (d *engineDispatcher) GetTaskRecords(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error) {
-	eng, err := d.resolveEngine(engineType, instanceID)
+	eng, err := d.getEngine(engineType)
 	if err != nil {
 		return nil, 0, err
 	}
 	return eng.GetTaskRecords(ctx, engineType, instanceID, offset, limit)
 }
 
-// GetTaskTimeline 分页获取指定流程实例的聚合时间线事件，支持自动推导底层引擎
+// GetTaskTimeline 分页获取指定流程实例的聚合时间线事件
 func (d *engineDispatcher) GetTaskTimeline(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, offset, limit int) ([]domain.TaskTimelineGroup, int64, error) {
-	eng, err := d.resolveEngine(engineType, instanceID)
+	eng, err := d.getEngine(engineType)
 	if err != nil {
 		return nil, 0, err
 	}
 	return eng.GetTaskTimeline(ctx, engineType, instanceID, offset, limit)
-}
-
-func (d *engineDispatcher) resolveEngine(engineType domain.EngineType, instanceID domain.ID) (IEngine, error) {
-	if engineType != "" {
-		return d.getEngine(engineType)
-	}
-	return d.instanceEngine(instanceID)
 }

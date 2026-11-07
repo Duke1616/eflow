@@ -25,6 +25,7 @@ func NewConverter() IConverter {
 	c.Register(&InclusionGatewayConverter{})
 	c.Register(&SelectiveGatewayConverter{})
 	c.Register(&AutomationNodeConverter{})
+	c.Register(&ChatGroupNodeConverter{})
 	return c
 }
 

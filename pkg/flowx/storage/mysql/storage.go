@@ -184,13 +184,20 @@ func (s *Storage) ListTasksByInstance(ctx context.Context, instID string) ([]*mo
 	}), nil
 }
 
+func (s *Storage) buildListPendingTasksQuery(tx *gorm.DB, assignee string) *gorm.DB {
+	query := tx.Model(&FlowTaskPO{}).Where("status = ?", uint8(model.TaskPending))
+	if assignee != "" {
+		query = query.Where("assignee = ?", assignee)
+	}
+	return query
+}
+
 func (s *Storage) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
 	var (
 		pos   []FlowTaskPO
 		total int64
 	)
-	query := s.db.WithContext(ctx).Model(&FlowTaskPO{}).
-		Where("assignee = ? AND status = ?", assignee, uint8(model.TaskPending))
+	query := s.buildListPendingTasksQuery(s.db.WithContext(ctx), assignee)
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err

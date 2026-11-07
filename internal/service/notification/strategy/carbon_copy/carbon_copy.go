@@ -93,7 +93,7 @@ func (n *Notification) asyncHandleCarbonCopy(ctx context.Context, info strategy.
 
 	// 3. 自动通过任务流转
 	for _, task := range tasks {
-		if err = n.PassTask(ctx, task.TaskID, "抄送系统自动通过"); err != nil {
+		if err = n.PassTask(ctx, task.EngineType, task.TaskID, "抄送系统自动通过"); err != nil {
 			n.Logger().Error("CarbonCopy 自动流转失败", elog.FieldErr(err), elog.String("taskId", task.TaskID.String()))
 		}
 	}

@@ -37,7 +37,7 @@ type IWorkflowCoreService interface {
 	// FindInstanceFlow 获取流程实例运行时所绑定版本的流程定义，提供特定历史快照回溯与降级解析
 	FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error)
 	// GetHighlightedGraph 根据审批轨迹流转情况计算并点亮画布图
-	GetHighlightedGraph(ctx context.Context, workflowId int64, processInstanceId int, status domain.Status) (domain.Workflow, error)
+	GetHighlightedGraph(ctx context.Context, workflowId int64, instanceID domain.ID, status domain.Status) (domain.Workflow, error)
 }
 
 // Service 工作流大业务服务接口
@@ -128,7 +128,17 @@ func (s *workflowService) Deploy(ctx context.Context, wf domain.Workflow) error 
 		return fmt.Errorf("流程引擎部署失败: %w", err)
 	}
 
-	// 3. 关联回写 process_id（若底层引擎生成了自增ID则更新，flowx 引擎下直接以 wf.Id 建立映射）
+	// 3. 计算平台全局统一自增版本号（继承历史最大快照版本，防止跨引擎切换导致版本重置为 1）
+	maxVersion, err := s.repo.GetMaxSnapshotVersion(ctx, wf.Id)
+	if err != nil {
+		return fmt.Errorf("计算工作流版本失败: %w", err)
+	}
+	newVersion := maxVersion + 1
+	if deployInfo.Version > newVersion {
+		newVersion = deployInfo.Version
+	}
+
+	// 4. 关联回写 process_id（若底层引擎生成了自增ID则更新，flowx 引擎下直接以 wf.Id 建立映射）
 	processId := deployInfo.ProcessID
 	if processId == 0 {
 		processId = int(wf.Id)
@@ -139,8 +149,8 @@ func (s *workflowService) Deploy(ctx context.Context, wf domain.Workflow) error 
 		}
 	}
 
-	// 4. 统一将当前发布的最新图数据在物理快照表中锁死存档
-	return s.repo.CreateSnapshot(ctx, wf, processId, deployInfo.Version)
+	// 5. 统一将当前发布的最新图数据在物理快照表中锁死存档
+	return s.repo.CreateSnapshot(ctx, wf, processId, newVersion)
 }
 
 func (s *workflowService) FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Workflow, int64, error) {
@@ -200,27 +210,18 @@ func (s *workflowService) GetWorkflowSnapshot(ctx context.Context, processID, ve
 	return s.repo.FindSnapshot(ctx, processID, version)
 }
 
-// resolveSnapshotProcessID 决议快照检索标识（兼容 FlowX 以 workflowID 为基准与 EasyFlow 的自增 ID）
-func resolveSnapshotProcessID(workflowID int64, processID int) int {
-	if processID > 0 {
-		return processID
-	}
-	return int(workflowID)
-}
-
 func (s *workflowService) FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error) {
-	procID := resolveSnapshotProcessID(workflowID, processID)
-
-	// 1. 读取历史审批时的画布拓扑快照（单一事实来源，确保重现当时的流转图）
-	snapshot, snapErr := s.repo.FindSnapshot(ctx, procID, version)
-
-	// 2. 获取工作流最新版元数据模型
+	// 1. 获取工作流最新版元数据模型，确立工作流主数据与所属引擎类型
 	latest, err := s.Find(ctx, workflowID)
 	if err != nil {
-		if snapErr == nil {
-			return snapshot, nil // 容灾降级：主数据缺失时由快照兜底恢复
-		}
 		return domain.Workflow{}, fmt.Errorf("查询工作流定义失败 [workflowID=%d]: %w", workflowID, err)
+	}
+
+	// 2. 优先根据 workflowID + version 精准定位快照（现代 FlowX 与已升级流程统一按此检索）
+	snapshot, snapErr := s.repo.FindSnapshotByWorkflowVersion(ctx, workflowID, latest.EngineType, version)
+	if snapErr != nil && latest.ResolveEngineType() == domain.EngineTypeEasyFlow && processID > 0 {
+		// 仅对历史未绑定 workflow_id 的极老 EasyFlow 存量数据进行安全兼容
+		snapshot, snapErr = s.repo.FindSnapshot(ctx, processID, version)
 	}
 
 	// 3. 读取快照覆盖主实体的 flow_data，以保障用户点击历史工单图渲染时看到的是当时审批时的画布拓扑
@@ -231,14 +232,16 @@ func (s *workflowService) FindInstanceFlow(ctx context.Context, workflowID int64
 	return latest, nil
 }
 
-func (s *workflowService) GetHighlightedGraph(ctx context.Context, workflowId int64, processInstanceId int, status domain.Status) (domain.Workflow, error) {
+func (s *workflowService) GetHighlightedGraph(ctx context.Context, workflowId int64, instanceID domain.ID, status domain.Status) (domain.Workflow, error) {
 	wf, err := s.Find(ctx, workflowId)
 	if err != nil {
 		return domain.Workflow{}, err
 	}
 
-	// 1. 通过统一流程引擎接口获取该实例的执行态点亮视图
-	execView, err := s.engine.GetInstanceExecutionView(ctx, wf.ResolveEngineType(), domain.NewID(processInstanceId), status.ToUint8())
+	targetEngine := wf.ResolveEngineType()
+
+	// 2. 通过统一流程引擎接口获取该实例的执行态点亮视图
+	execView, err := s.engine.GetInstanceExecutionView(ctx, targetEngine, instanceID, status.ToUint8())
 	if err != nil {
 		return domain.Workflow{}, fmt.Errorf("获取流程实例执行态轨迹失败: %w", err)
 	}

@@ -43,18 +43,18 @@ func (m *MockIChannelIdentityResolver) EXPECT() *MockIChannelIdentityResolverMoc
 }
 
 // ResolveUser mocks base method.
-func (m *MockIChannelIdentityResolver) ResolveUser(ctx context.Context, channel domain.ChannelType, channelUserID string, taskID domain.ID) (*userv1.User, error) {
+func (m *MockIChannelIdentityResolver) ResolveUser(ctx context.Context, channel domain.ChannelType, channelUserID string, engineType domain.EngineType, taskID domain.ID) (*userv1.User, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ResolveUser", ctx, channel, channelUserID, taskID)
+	ret := m.ctrl.Call(m, "ResolveUser", ctx, channel, channelUserID, engineType, taskID)
 	ret0, _ := ret[0].(*userv1.User)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ResolveUser indicates an expected call of ResolveUser.
-func (mr *MockIChannelIdentityResolverMockRecorder) ResolveUser(ctx, channel, channelUserID, taskID any) *gomock.Call {
+func (mr *MockIChannelIdentityResolverMockRecorder) ResolveUser(ctx, channel, channelUserID, engineType, taskID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveUser", reflect.TypeOf((*MockIChannelIdentityResolver)(nil).ResolveUser), ctx, channel, channelUserID, taskID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveUser", reflect.TypeOf((*MockIChannelIdentityResolver)(nil).ResolveUser), ctx, channel, channelUserID, engineType, taskID)
 }
 
 // MockIChannelActionService is a mock of IChannelActionService interface.

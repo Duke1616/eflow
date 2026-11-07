@@ -531,6 +531,84 @@ func (c *MockISnapshotRepositoryFindSnapshotCall) DoAndReturn(f func(context.Con
 	return c
 }
 
+// FindSnapshotByWorkflowVersion mocks base method.
+func (m *MockISnapshotRepository) FindSnapshotByWorkflowVersion(ctx context.Context, workflowID int64, engineType domain.EngineType, version int) (domain.Workflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FindSnapshotByWorkflowVersion", ctx, workflowID, engineType, version)
+	ret0, _ := ret[0].(domain.Workflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FindSnapshotByWorkflowVersion indicates an expected call of FindSnapshotByWorkflowVersion.
+func (mr *MockISnapshotRepositoryMockRecorder) FindSnapshotByWorkflowVersion(ctx, workflowID, engineType, version any) *MockISnapshotRepositoryFindSnapshotByWorkflowVersionCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindSnapshotByWorkflowVersion", reflect.TypeOf((*MockISnapshotRepository)(nil).FindSnapshotByWorkflowVersion), ctx, workflowID, engineType, version)
+	return &MockISnapshotRepositoryFindSnapshotByWorkflowVersionCall{Call: call}
+}
+
+// MockISnapshotRepositoryFindSnapshotByWorkflowVersionCall wrap *gomock.Call
+type MockISnapshotRepositoryFindSnapshotByWorkflowVersionCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockISnapshotRepositoryFindSnapshotByWorkflowVersionCall) Return(arg0 domain.Workflow, arg1 error) *MockISnapshotRepositoryFindSnapshotByWorkflowVersionCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockISnapshotRepositoryFindSnapshotByWorkflowVersionCall) Do(f func(context.Context, int64, domain.EngineType, int) (domain.Workflow, error)) *MockISnapshotRepositoryFindSnapshotByWorkflowVersionCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockISnapshotRepositoryFindSnapshotByWorkflowVersionCall) DoAndReturn(f func(context.Context, int64, domain.EngineType, int) (domain.Workflow, error)) *MockISnapshotRepositoryFindSnapshotByWorkflowVersionCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetMaxSnapshotVersion mocks base method.
+func (m *MockISnapshotRepository) GetMaxSnapshotVersion(ctx context.Context, workflowID int64) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetMaxSnapshotVersion", ctx, workflowID)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetMaxSnapshotVersion indicates an expected call of GetMaxSnapshotVersion.
+func (mr *MockISnapshotRepositoryMockRecorder) GetMaxSnapshotVersion(ctx, workflowID any) *MockISnapshotRepositoryGetMaxSnapshotVersionCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMaxSnapshotVersion", reflect.TypeOf((*MockISnapshotRepository)(nil).GetMaxSnapshotVersion), ctx, workflowID)
+	return &MockISnapshotRepositoryGetMaxSnapshotVersionCall{Call: call}
+}
+
+// MockISnapshotRepositoryGetMaxSnapshotVersionCall wrap *gomock.Call
+type MockISnapshotRepositoryGetMaxSnapshotVersionCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockISnapshotRepositoryGetMaxSnapshotVersionCall) Return(arg0 int, arg1 error) *MockISnapshotRepositoryGetMaxSnapshotVersionCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockISnapshotRepositoryGetMaxSnapshotVersionCall) Do(f func(context.Context, int64) (int, error)) *MockISnapshotRepositoryGetMaxSnapshotVersionCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockISnapshotRepositoryGetMaxSnapshotVersionCall) DoAndReturn(f func(context.Context, int64) (int, error)) *MockISnapshotRepositoryGetMaxSnapshotVersionCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // MockIWorkflowRepository is a mock of IWorkflowRepository interface.
 type MockIWorkflowRepository struct {
 	ctrl     *gomock.Controller
@@ -862,6 +940,84 @@ func (c *MockIWorkflowRepositoryFindSnapshotCall) Do(f func(context.Context, int
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockIWorkflowRepositoryFindSnapshotCall) DoAndReturn(f func(context.Context, int, int) (domain.Workflow, error)) *MockIWorkflowRepositoryFindSnapshotCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// FindSnapshotByWorkflowVersion mocks base method.
+func (m *MockIWorkflowRepository) FindSnapshotByWorkflowVersion(ctx context.Context, workflowID int64, engineType domain.EngineType, version int) (domain.Workflow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FindSnapshotByWorkflowVersion", ctx, workflowID, engineType, version)
+	ret0, _ := ret[0].(domain.Workflow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FindSnapshotByWorkflowVersion indicates an expected call of FindSnapshotByWorkflowVersion.
+func (mr *MockIWorkflowRepositoryMockRecorder) FindSnapshotByWorkflowVersion(ctx, workflowID, engineType, version any) *MockIWorkflowRepositoryFindSnapshotByWorkflowVersionCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindSnapshotByWorkflowVersion", reflect.TypeOf((*MockIWorkflowRepository)(nil).FindSnapshotByWorkflowVersion), ctx, workflowID, engineType, version)
+	return &MockIWorkflowRepositoryFindSnapshotByWorkflowVersionCall{Call: call}
+}
+
+// MockIWorkflowRepositoryFindSnapshotByWorkflowVersionCall wrap *gomock.Call
+type MockIWorkflowRepositoryFindSnapshotByWorkflowVersionCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockIWorkflowRepositoryFindSnapshotByWorkflowVersionCall) Return(arg0 domain.Workflow, arg1 error) *MockIWorkflowRepositoryFindSnapshotByWorkflowVersionCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockIWorkflowRepositoryFindSnapshotByWorkflowVersionCall) Do(f func(context.Context, int64, domain.EngineType, int) (domain.Workflow, error)) *MockIWorkflowRepositoryFindSnapshotByWorkflowVersionCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockIWorkflowRepositoryFindSnapshotByWorkflowVersionCall) DoAndReturn(f func(context.Context, int64, domain.EngineType, int) (domain.Workflow, error)) *MockIWorkflowRepositoryFindSnapshotByWorkflowVersionCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetMaxSnapshotVersion mocks base method.
+func (m *MockIWorkflowRepository) GetMaxSnapshotVersion(ctx context.Context, workflowID int64) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetMaxSnapshotVersion", ctx, workflowID)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetMaxSnapshotVersion indicates an expected call of GetMaxSnapshotVersion.
+func (mr *MockIWorkflowRepositoryMockRecorder) GetMaxSnapshotVersion(ctx, workflowID any) *MockIWorkflowRepositoryGetMaxSnapshotVersionCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMaxSnapshotVersion", reflect.TypeOf((*MockIWorkflowRepository)(nil).GetMaxSnapshotVersion), ctx, workflowID)
+	return &MockIWorkflowRepositoryGetMaxSnapshotVersionCall{Call: call}
+}
+
+// MockIWorkflowRepositoryGetMaxSnapshotVersionCall wrap *gomock.Call
+type MockIWorkflowRepositoryGetMaxSnapshotVersionCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockIWorkflowRepositoryGetMaxSnapshotVersionCall) Return(arg0 int, arg1 error) *MockIWorkflowRepositoryGetMaxSnapshotVersionCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockIWorkflowRepositoryGetMaxSnapshotVersionCall) Do(f func(context.Context, int64) (int, error)) *MockIWorkflowRepositoryGetMaxSnapshotVersionCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockIWorkflowRepositoryGetMaxSnapshotVersionCall) DoAndReturn(f func(context.Context, int64) (int, error)) *MockIWorkflowRepositoryGetMaxSnapshotVersionCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

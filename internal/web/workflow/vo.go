@@ -1,5 +1,7 @@
 package workflow
 
+import "github.com/Duke1616/eflow/pkg/idx"
+
 // CreateReq 创建工作流流程模板请求参数封装
 type CreateReq struct {
 	TemplateId   int64          `json:"template_id"`         // 挂载绑定的工单模板 ID
@@ -101,9 +103,9 @@ type RetrieveWorkflows struct {
 
 // OrderGraphReq 工单流转地图查看请求参数
 type OrderGraphReq struct {
-	Id                int64 `json:"id"`                  // 流程定义 ID
-	Status            uint8 `json:"status"`              // 实例当前的状态
-	ProcessInstanceId int   `json:"process_instance_id"` // 底层流程引擎执行实例的 ProcessInstanceId
+	Id                int64  `json:"id"`                  // 流程定义 ID
+	Status            uint8  `json:"status"`              // 实例当前的状态
+	ProcessInstanceId idx.ID `json:"process_instance_id"` // 底层流程引擎执行实例的 ProcessInstanceId (自适应兼容 int 与 string)
 }
 
 // RetrieveOrderGraph 渲染工单流程轨迹流转地图所需的前端出参模型

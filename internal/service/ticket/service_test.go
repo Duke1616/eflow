@@ -39,7 +39,7 @@ func TestTicketService_Pass(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("101")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("101")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("101"),
 					ProcessInstanceID: domain.NewID(1),
@@ -63,7 +63,7 @@ func TestTicketService_Pass(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("101")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("101")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("101"),
 					ProcessInstanceID: domain.NewID(1),
@@ -87,7 +87,7 @@ func TestTicketService_Pass(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("102")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("102")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("102"),
 					ProcessInstanceID: domain.NewID(1),
@@ -137,7 +137,7 @@ func TestTicketService_Pass(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("103")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("103")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("103"),
 					ProcessInstanceID: domain.NewID(1),
@@ -187,7 +187,7 @@ func TestTicketService_Pass(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("104")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("104")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("104"),
 					ProcessInstanceID: domain.NewID(2),
@@ -220,7 +220,7 @@ func TestTicketService_Pass(t *testing.T) {
 					},
 				}, nil)
 
-				repo.EXPECT().DetailByProcessInstance(gomock.Any(), domain.NewID(2)).Return(domain.Ticket{
+				repo.EXPECT().DetailByEngineInstance(gomock.Any(), gomock.Any(), domain.NewID(2)).Return(domain.Ticket{
 					Id: 888,
 				}, nil)
 
@@ -263,7 +263,7 @@ func TestTicketService_Pass(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("task_flowx_999")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("task_flowx_999")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeFlowx,
 					TaskID:            domain.NewID("task_flowx_999"),
 					ProcessInstanceID: domain.NewID("inst_flowx_123"),
@@ -296,7 +296,7 @@ func TestTicketService_Pass(t *testing.T) {
 					},
 				}, nil)
 
-				repo.EXPECT().DetailByProcessInstance(gomock.Any(), domain.NewID("inst_flowx_123")).Return(domain.Ticket{
+				repo.EXPECT().DetailByEngineInstance(gomock.Any(), gomock.Any(), domain.NewID("inst_flowx_123")).Return(domain.Ticket{
 					Id: 999,
 				}, nil)
 
@@ -335,7 +335,7 @@ func TestTicketService_Pass(t *testing.T) {
 			repo, dispatcherStub, wfStub := tc.mock(ctrl)
 			svc := NewService(repo, nil, dispatcherStub, wfStub, nil)
 
-			err := svc.Pass(context.Background(), tc.taskId, tc.operator, tc.isAdmin, tc.comment, tc.extraData)
+			err := svc.Pass(context.Background(), domain.EngineTypeEasyFlow, tc.taskId, tc.operator, tc.isAdmin, tc.comment, tc.extraData)
 			if tc.wantErr != nil {
 				require.Error(t, err)
 				assert.True(t, errors.Is(err, tc.wantErr))
@@ -364,7 +364,7 @@ func TestTicketService_Reject(t *testing.T) {
 			comment:  "驳回",
 			mock: func(ctrl *gomock.Controller) *enginemocks.MockIEngine {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("201")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("201")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("201"),
 					ProcessInstanceID: domain.NewID(1),
@@ -383,7 +383,7 @@ func TestTicketService_Reject(t *testing.T) {
 			comment:  "材料不齐，驳回修改",
 			mock: func(ctrl *gomock.Controller) *enginemocks.MockIEngine {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("202")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("202")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("202"),
 					ProcessInstanceID: domain.NewID(1),
@@ -408,7 +408,7 @@ func TestTicketService_Reject(t *testing.T) {
 			comment:  "恶意驳回",
 			mock: func(ctrl *gomock.Controller) *enginemocks.MockIEngine {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("203")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("203")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("203"),
 					ProcessInstanceID: domain.NewID(1),
@@ -429,7 +429,7 @@ func TestTicketService_Reject(t *testing.T) {
 			dispatcherStub := tc.mock(ctrl)
 			svc := NewService(nil, nil, dispatcherStub, nil, nil)
 
-			err := svc.Reject(context.Background(), tc.taskId, tc.operator, tc.isAdmin, tc.comment)
+			err := svc.Reject(context.Background(), domain.EngineTypeEasyFlow, tc.taskId, tc.operator, tc.isAdmin, tc.comment)
 			if tc.wantErr != nil {
 				require.Error(t, err)
 				assert.True(t, errors.Is(err, tc.wantErr))
@@ -469,7 +469,7 @@ func TestTicketService_Transfer(t *testing.T) {
 			targetUsers: []string{"bob"},
 			mock: func(ctrl *gomock.Controller) *enginemocks.MockIEngine {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("302")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("302")).Return(domain.TaskContext{
 					EngineType: domain.EngineTypeEasyFlow,
 					TaskID:     domain.NewID(302),
 					Assignee:   "auditor1",
@@ -487,7 +487,7 @@ func TestTicketService_Transfer(t *testing.T) {
 			targetUsers: []string{"bob"},
 			mock: func(ctrl *gomock.Controller) *enginemocks.MockIEngine {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("303")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("303")).Return(domain.TaskContext{
 					EngineType: domain.EngineTypeEasyFlow,
 					TaskID:     domain.NewID(303),
 					Assignee:   "auditor1",
@@ -512,7 +512,7 @@ func TestTicketService_Transfer(t *testing.T) {
 			dispatcherStub := tc.mock(ctrl)
 			svc := NewService(nil, nil, dispatcherStub, nil, nil)
 
-			err := svc.Transfer(context.Background(), tc.taskId, tc.operator, tc.isAdmin, tc.targetUsers)
+			err := svc.Transfer(context.Background(), domain.EngineTypeEasyFlow, tc.taskId, tc.operator, tc.isAdmin, tc.targetUsers)
 			if tc.wantErr != nil {
 				require.Error(t, err)
 				assert.True(t, errors.Is(err, tc.wantErr))
@@ -540,7 +540,8 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("301")).Return(domain.TaskContext{}, errors.New("task not found"))
+				wfSvc.EXPECT().Find(gomock.Any(), int64(10)).Return(domain.Workflow{Id: 10, EngineType: domain.EngineTypeEasyFlow}, nil)
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("301")).Return(domain.TaskContext{}, errors.New("task not found"))
 				return dispatcher, wfSvc
 			},
 			wantErr: true,
@@ -553,7 +554,8 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("302")).Return(domain.TaskContext{
+				wfSvc.EXPECT().Find(gomock.Any(), int64(10)).Return(domain.Workflow{Id: 10, EngineType: domain.EngineTypeEasyFlow}, nil)
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("302")).Return(domain.TaskContext{
 					TaskID:            domain.NewID("302"),
 					ProcessInstanceID: domain.NewID(3),
 					ProcessID:         10,
@@ -585,7 +587,8 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("303")).Return(domain.TaskContext{
+				wfSvc.EXPECT().Find(gomock.Any(), int64(10)).Return(domain.Workflow{Id: 10, EngineType: domain.EngineTypeEasyFlow}, nil)
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("303")).Return(domain.TaskContext{
 					TaskID:            domain.NewID("303"),
 					ProcessInstanceID: domain.NewID(4),
 					ProcessID:         10,

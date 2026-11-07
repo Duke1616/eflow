@@ -1,6 +1,7 @@
 package ticket
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	usermocks "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1/mocks"
 	"github.com/Duke1616/eflow/internal/domain"
+	ratingmocks "github.com/Duke1616/eflow/internal/service/rating/mocks"
 	ticketmocks "github.com/Duke1616/eflow/internal/service/ticket/mocks"
 	withdrawalmocks "github.com/Duke1616/eflow/internal/service/withdrawal/mocks"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
@@ -66,7 +68,7 @@ func TestHandler_Transfer_Security(t *testing.T) {
 			mockSetup: func(ctrl *gomock.Controller, mockUser *usermocks.MockUserServiceClient, mockTicket *ticketmocks.MockService) {
 				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice", IsAdmin: false}}, nil)
-				mockTicket.EXPECT().Transfer(gomock.Any(), "10", "alice", false, []string{"charlie"}).
+				mockTicket.EXPECT().Transfer(gomock.Any(), gomock.Any(), "10", "alice", false, []string{"charlie"}).
 					Return(domain.ErrTaskUnauthorized)
 			},
 			wantCode:   403,
@@ -79,7 +81,7 @@ func TestHandler_Transfer_Security(t *testing.T) {
 			mockSetup: func(ctrl *gomock.Controller, mockUser *usermocks.MockUserServiceClient, mockTicket *ticketmocks.MockService) {
 				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice", IsAdmin: false}}, nil)
-				mockTicket.EXPECT().Transfer(gomock.Any(), "10", "alice", false, []string{"charlie"}).
+				mockTicket.EXPECT().Transfer(gomock.Any(), gomock.Any(), "10", "alice", false, []string{"charlie"}).
 					Return(nil)
 			},
 			wantCode:   200,
@@ -92,7 +94,7 @@ func TestHandler_Transfer_Security(t *testing.T) {
 			mockSetup: func(ctrl *gomock.Controller, mockUser *usermocks.MockUserServiceClient, mockTicket *ticketmocks.MockService) {
 				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 99}).
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 99, Username: "admin", IsAdmin: true}}, nil)
-				mockTicket.EXPECT().Transfer(gomock.Any(), "10", "admin", true, []string{"charlie"}).
+				mockTicket.EXPECT().Transfer(gomock.Any(), gomock.Any(), "10", "admin", true, []string{"charlie"}).
 					Return(nil)
 			},
 			wantCode:   200,
@@ -168,7 +170,7 @@ func TestHandler_Revoke_Security(t *testing.T) {
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice", IsAdmin: false}}, nil)
 				mockTicket.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID(200)).
 					Return(domain.Ticket{CreateBy: "alice", Status: domain.PROCESS}, nil)
-				mockWithdrawal.EXPECT().Revoke(gomock.Any(), domain.NewID(200), true, "alice", "自测撤销").
+				mockWithdrawal.EXPECT().Revoke(gomock.Any(), gomock.Any(), domain.NewID(200), true, "alice", "自测撤销").
 					Return(nil)
 			},
 			wantCode: 0,
@@ -185,7 +187,7 @@ func TestHandler_Revoke_Security(t *testing.T) {
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 99, Username: "admin", IsAdmin: true}}, nil)
 				mockTicket.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID(200)).
 					Return(domain.Ticket{CreateBy: "bob", Status: domain.PROCESS}, nil)
-				mockWithdrawal.EXPECT().Revoke(gomock.Any(), domain.NewID(200), true, "admin", "管理员强撤").
+				mockWithdrawal.EXPECT().Revoke(gomock.Any(), gomock.Any(), domain.NewID(200), true, "admin", "管理员强撤").
 					Return(nil)
 			},
 			wantCode: 0,
@@ -266,17 +268,17 @@ func TestHandler_StartUser_CompleteData(t *testing.T) {
 	// 工单 1 正常映射节点名和处理人真实姓名，并正确填充流程提交时间
 	assert.Equal(t, "领导审批", data.Tasks[0].CurrentStep)
 	assert.Equal(t, "李领导", data.Tasks[0].ApprovedBy)
-	assert.Equal(t, 501, data.Tasks[0].TaskId)
+	assert.Equal(t, TaskID("501"), data.Tasks[0].TaskId)
 	assert.NotEmpty(t, data.Tasks[0].ProcInstCreateTime)
 	assert.Equal(t, data.Tasks[0].Ctime, data.Tasks[0].ProcInstCreateTime)
 
-	// 工单 2 撤回中，步骤展示为“撤回处理中”，超大整型 ID 必须以 string 输出防前端精度截断
+	// 工单 2 撤回中，步骤展示为“撤回处理中”，统一强类型自适应 TaskID
 	assert.Equal(t, "撤回处理中", data.Tasks[1].CurrentStep)
-	assert.Equal(t, "999999999999999999", data.Tasks[1].TaskId)
+	assert.Equal(t, TaskID("999999999999999999"), data.Tasks[1].TaskId)
 
-	// 工单 3 已完结，步骤展示为“已结束”，字符串 ID 保持 string
+	// 工单 3 已完结，步骤展示为“已结束”，统一强类型自适应 TaskID
 	assert.Equal(t, "已结束", data.Tasks[2].CurrentStep)
-	assert.Equal(t, "task_flowx_abc", data.Tasks[2].TaskId)
+	assert.Equal(t, TaskID("task_flowx_abc"), data.Tasks[2].TaskId)
 }
 
 func TestHandler_TaskRecord(t *testing.T) {
@@ -360,4 +362,76 @@ func TestHandler_TaskTimeline(t *testing.T) {
 	assert.Equal(t, "node_1", data.Events[0].NodeID)
 	assert.Equal(t, 1, data.Events[0].Summary.Passed)
 	assert.Equal(t, "王HR", data.Events[0].Members[0].ApprovedBy)
+}
+
+func TestHandler_Detail(t *testing.T) {
+	testCases := []struct {
+		name       string
+		req        DetailProcessInstIdReq
+		mockSetup  func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService)
+		wantCode   int
+		wantErr    bool
+		wantErrMsg string
+	}{
+		{
+			name: "参数为空返回400",
+			req:  DetailProcessInstIdReq{},
+			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService) {
+			},
+			wantCode: 400,
+		},
+		{
+			name: "通过process_instance_id雪花纯数字查询成功",
+			req:  DetailProcessInstIdReq{ProcessInstanceId: InstanceID("377374770910412800")},
+			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService) {
+				mockSvc.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID("377374770910412800")).
+					Return(domain.Ticket{Id: 101, CreateBy: "alice"}, nil)
+				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
+					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice"}}, nil)
+				mockRating.EXPECT().FindByTicketID(gomock.Any(), int64(101)).
+					Return(domain.TicketRating{}, false, nil)
+			},
+			wantCode: 0,
+		},
+		{
+			name: "未检索到工单返回明确错误包装",
+			req:  DetailProcessInstIdReq{ProcessInstanceId: InstanceID("377374770910412800")},
+			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService) {
+				mockSvc.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID("377374770910412800")).
+					Return(domain.Ticket{}, errors.New("record not found"))
+			},
+			wantErr:    true,
+			wantErrMsg: "根据流程实例标识 [377374770910412800] 查询工单详情失败",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockUser := usermocks.NewMockUserServiceClient(ctrl)
+			mockSvc := ticketmocks.NewMockService(ctrl)
+			mockRating := ratingmocks.NewMockService(ctrl)
+			tc.mockSetup(mockUser, mockSvc, mockRating)
+
+			h := &Handler{
+				logger:    elog.DefaultLogger,
+				userSvc:   mockUser,
+				svc:       mockSvc,
+				ratingSvc: mockRating,
+			}
+
+			ctx := newTestContext(1)
+			res, err := h.Detail(ctx, tc.req)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErrMsg)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantCode, res.Code)
+		})
+	}
 }

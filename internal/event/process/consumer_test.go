@@ -36,16 +36,6 @@ func (s *stubTicketService) BindProcess(_ context.Context, _ int64, engineType d
 	return s.bindErr
 }
 
-func (s *stubTicketService) BindProcessInstanceID(_ context.Context, _ int64, instanceId int) error {
-	s.bindId = instanceId
-	return s.bindErr
-}
-
-func (s *stubTicketService) BindProcessInstanceKey(_ context.Context, _ int64, instanceKey string) error {
-	s.bindKey = instanceKey
-	return s.bindErr
-}
-
 type stubWorkflowService struct {
 	workflowSvc.Service
 	workflow   domain.Workflow

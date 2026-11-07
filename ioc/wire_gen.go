@@ -59,7 +59,7 @@ func InitApp() (*App, error) {
 	taskFormDAO := dao.NewTaskFormDAO(db)
 	ticketRepository := repository.NewTicketRepository(ticketDAO, taskFormDAO)
 	engine := InitFlowxEngine(db, ticketRepository)
-	iEngine := InitEngine(iEngineRepository, engine)
+	iEngine := InitEngine(iEngineRepository, engine, ticketRepository)
 	iCompositeCompiler := compiler.NewDefaultCompositeCompiler()
 	workflowService := workflow.NewWorkflowService(iWorkflowRepository, iEngine, iCompositeCompiler)
 	workflowHandler := workflow2.NewHandler(workflowService)

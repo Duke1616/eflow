@@ -3,7 +3,6 @@ package ticket
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
@@ -23,10 +22,6 @@ import (
 
 var systemErrorResult = ginx.Result{Code: 500, Msg: "系统内部错误"}
 var ticketNotAccessibleResult = ginx.Result{Code: 403, Msg: "工单不存在或无权访问"}
-
-// maxSafeInteger 为 JavaScript 的 Number.MAX_SAFE_INTEGER (2^53 - 1)
-// 超过此范围的纯整型 ID（如 64 位雪花算法）必须以字符串下发，防止前端 JSON 反序列化产生精度截断
-const maxSafeInteger = 9007199254740991
 
 type Handler struct {
 	capability.IRegistry
@@ -218,7 +213,7 @@ func (h *Handler) Transfer(ctx *ginx.Context, req TransferReq) (ginx.Result, err
 		return systemErrorResult, err
 	}
 
-	err = h.svc.Transfer(ctx.Context, req.TaskId.String(), user.Username, user.IsAdmin, req.Usernames)
+	err = h.svc.Transfer(ctx.Context, domain.EngineType(req.EngineType), req.TaskId.String(), user.Username, user.IsAdmin, req.Usernames)
 	if err != nil {
 		if errors.Is(err, domain.ErrTaskUnauthorized) {
 			return ginx.Result{Code: 403, Msg: err.Error()}, nil
@@ -238,6 +233,10 @@ func (h *Handler) Transfer(ctx *ginx.Context, req TransferReq) (ginx.Result, err
 }
 
 func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, error) {
+	if req.InstanceId.IsZero() {
+		return ginx.Result{Code: 400, Msg: "撤销工单失败: 流程实例标识不能为空 (instance_id)"}, nil
+	}
+
 	user, err := h.getSessUser(ctx)
 	if err != nil {
 		return systemErrorResult, err
@@ -249,7 +248,8 @@ func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, er
 		if errors.Is(err, domain.ErrTicketNotAccessible) {
 			return ticketNotAccessibleResult, nil
 		}
-		return systemErrorResult, fmt.Errorf("查询撤回工单信息失败: %w", err)
+		h.logger.Error("撤回工单前检索工单失败", elog.String("instance_id", req.InstanceId.String()), elog.FieldErr(err))
+		return systemErrorResult, fmt.Errorf("查询待撤回工单信息失败 [instance_id=%s]: %w", req.InstanceId, err)
 	}
 	// 由工单领域模型统一防卫：仅允许发起人本人或管理员撤回，并断言当前处于可撤回状态
 	if err = ticket.CanRevokeBy(user.Username, user.IsAdmin); err != nil {
@@ -259,7 +259,12 @@ func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, er
 		return ginx.Result{Code: 400, Msg: err.Error()}, nil
 	}
 
-	err = h.withdrawalSvc.Revoke(ctx.Context, req.InstanceId, req.Force, user.Username, req.Reason)
+	engineType := domain.EngineType(req.EngineType)
+	if engineType == "" {
+		engineType = ticket.Process.EngineType
+	}
+
+	err = h.withdrawalSvc.Revoke(ctx.Context, engineType, req.InstanceId, req.Force, user.Username, req.Reason)
 	if err != nil {
 		if errors.Is(err, withdrawalSvc.ErrInvalidRevokeReason) {
 			return ginx.Result{Code: 400, Msg: err.Error()}, nil
@@ -267,7 +272,8 @@ func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, er
 		if errors.Is(err, withdrawalSvc.ErrAutomationRunning) {
 			return ginx.Result{Code: 409, Msg: err.Error()}, nil
 		}
-		return systemErrorResult, err
+		h.logger.Error("执行工单撤回失败", elog.String("instance_id", req.InstanceId.String()), elog.FieldErr(err))
+		return systemErrorResult, fmt.Errorf("执行工单撤回失败 [instance_id=%s]: %w", req.InstanceId, err)
 	}
 
 	return ginx.Result{
@@ -306,7 +312,7 @@ func (h *Handler) Pass(ctx *ginx.Context, req PassOrderReq) (ginx.Result, error)
 	if err != nil {
 		return systemErrorResult, err
 	}
-	if err = h.svc.Pass(ctx.Context, req.TaskId.String(), user.Username, user.IsAdmin, req.Comment, req.ExtraData); err != nil {
+	if err = h.svc.Pass(ctx.Context, domain.EngineType(req.EngineType), req.TaskId.String(), user.Username, user.IsAdmin, req.Comment, req.ExtraData); err != nil {
 		if errors.Is(err, domain.ErrTaskUnauthorized) {
 			return ginx.Result{Code: 403, Msg: err.Error()}, nil
 		}
@@ -332,7 +338,7 @@ func (h *Handler) Reject(ctx *ginx.Context, req RejectOrderReq) (ginx.Result, er
 		return systemErrorResult, err
 	}
 
-	err = h.svc.Reject(ctx.Context, req.TaskId.String(), user.Username, user.IsAdmin, req.Comment)
+	err = h.svc.Reject(ctx.Context, domain.EngineType(req.EngineType), req.TaskId.String(), user.Username, user.IsAdmin, req.Comment)
 	if err != nil {
 		if errors.Is(err, domain.ErrTaskUnauthorized) {
 			return ginx.Result{Code: 403, Msg: err.Error()}, nil
@@ -370,12 +376,17 @@ func (h *Handler) StartUser(ctx *ginx.Context, req StartUserReq) (ginx.Result, e
 }
 
 func (h *Handler) Detail(ctx *ginx.Context, req DetailProcessInstIdReq) (ginx.Result, error) {
+	if req.ProcessInstanceId.IsZero() {
+		return ginx.Result{Code: 400, Msg: "流程实例标识不能为空 (process_instance_id)"}, nil
+	}
+
 	ticket, err := h.svc.GetByProcessInstance(ctx.Context, req.ProcessInstanceId)
 	if err != nil {
 		if errors.Is(err, domain.ErrTicketNotAccessible) {
 			return ticketNotAccessibleResult, nil
 		}
-		return systemErrorResult, err
+		h.logger.Error("获取工单详情失败: 未找到流程实例关联工单", elog.String("process_instance_id", req.ProcessInstanceId.String()), elog.FieldErr(err))
+		return systemErrorResult, fmt.Errorf("根据流程实例标识 [%s] 查询工单详情失败: %w", req.ProcessInstanceId, err)
 	}
 
 	username, err := h.getSessUsername(ctx)
@@ -384,7 +395,8 @@ func (h *Handler) Detail(ctx *ginx.Context, req DetailProcessInstIdReq) (ginx.Re
 	}
 	rating, exists, err := h.ratingSvc.FindByTicketID(ctx.Context, ticket.Id)
 	if err != nil {
-		return systemErrorResult, err
+		h.logger.Error("查询工单评价信息失败", elog.Int64("ticket_id", ticket.Id), elog.FieldErr(err))
+		return systemErrorResult, fmt.Errorf("查询工单 [%d] 评价信息失败: %w", ticket.Id, err)
 	}
 	result := h.toVoTicket(ticket)
 	result.CanRate = canRateTicket(ticket, username, exists)
@@ -485,19 +497,14 @@ func (h *Handler) toVoTicket(req domain.Ticket) Ticket {
 		wtime = time.Unix(req.Wtime/1000, 0).Format("2006-01-02 15:04:05")
 	}
 
-	var procInstID any
+	var procInstID InstanceID
 	if !req.Process.InstanceID.IsZero() {
-		if idInt := req.Process.InstanceID.Int(); idInt > 0 && int64(idInt) <= maxSafeInteger && strconv.Itoa(idInt) == req.Process.InstanceID.String() {
-			procInstID = idInt
-		} else {
-			procInstID = req.Process.InstanceID.String()
-		}
-	} else {
-		procInstID = 0
+		procInstID = InstanceID(req.Process.InstanceID.String())
 	}
 
 	return Ticket{
 		Id:                   req.Id,
+		EngineType:           req.Process.EngineType.String(),
 		TemplateId:           req.TemplateId,
 		Starter:              req.CreateBy,
 		ProcessInstanceId:    procInstID,
@@ -542,11 +549,7 @@ func (h *Handler) toVoTicketViews(views []domain.TicketTaskView) []Ticket {
 func (h *Handler) toVoTicketView(view domain.TicketTaskView) Ticket {
 	vo := h.toVoTicket(view.Ticket)
 	if !view.TaskID.IsZero() {
-		if idInt := view.TaskID.Int(); idInt > 0 && int64(idInt) <= maxSafeInteger && strconv.Itoa(idInt) == view.TaskID.String() {
-			vo.TaskId = idInt
-		} else {
-			vo.TaskId = view.TaskID.String()
-		}
+		vo.TaskId = TaskID(view.TaskID.String())
 	}
 	if view.CurrentStep != "" {
 		vo.CurrentStep = view.CurrentStep

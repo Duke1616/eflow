@@ -19,8 +19,8 @@ func InitFlowxEngine(db *gorm.DB, ticketRepo repository.TicketRepository) flowx.
 }
 
 // InitEngine 基于微内核驱动架构组装底层引擎，对外暴露统一 IEngine
-func InitEngine(repo repository.IEngineRepository, flowxEngine flowx.Engine) engineSvc.IEngine {
+func InitEngine(repo repository.IEngineRepository, flowxEngine flowx.Engine, ticketRepo repository.TicketRepository) engineSvc.IEngine {
 	easyflowEngine := easyflowDrv.NewEngine(repo)
-	flowxDriver := flowxDrv.NewEngine(flowxEngine)
+	flowxDriver := flowxDrv.NewEngine(flowxEngine, ticketRepo)
 	return engineSvc.NewEngineDispatcher(easyflowEngine, flowxDriver)
 }

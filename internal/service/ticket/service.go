@@ -37,24 +37,12 @@ type Service interface {
 	CreateTicket(ctx context.Context, req domain.Ticket) error
 	// GetByProcessInstance 根据流程实例唯一标识统一检索工单明细
 	GetByProcessInstance(ctx context.Context, instanceID domain.ID) (domain.Ticket, error)
-	// GetByProcessInstanceID 根据流程引擎的实例执行 ID 反查物理工单明细
-	GetByProcessInstanceID(ctx context.Context, instanceId int) (domain.Ticket, error)
-	// GetByProcessInstanceKey 根据现代流程引擎的实例全局唯一 Key 反查物理工单明细
-	GetByProcessInstanceKey(ctx context.Context, instanceKey string) (domain.Ticket, error)
 	// GetByID 根据自增主键 ID 查询物理工单及其动态表单属性详情
 	GetByID(ctx context.Context, id int64) (domain.Ticket, error)
 	// UpdateStatusByProcessInstance 根据流程实例唯一标识统一更新本地物理工单状态
 	UpdateStatusByProcessInstance(ctx context.Context, instanceID domain.ID, status uint8, wtime ...int64) error
-	// UpdateStatusByProcessInstanceID 根据引擎流程实例 ID 同步更新本地物理工单的最新流转状态
-	UpdateStatusByProcessInstanceID(ctx context.Context, instanceId int, status uint8) error
-	// UpdateStatusByProcessInstanceKey 根据引擎流程实例全局唯一 Key 同步更新本地物理工单的最新流转状态
-	UpdateStatusByProcessInstanceKey(ctx context.Context, instanceKey string, status uint8, wtime int64) error
 	// BindProcess 在流程引擎成功创建实例后反向登记引擎类型与实例全局唯一标识到工单记录中
 	BindProcess(ctx context.Context, id int64, engineType domain.EngineType, instanceID domain.ID) error
-	// BindProcessInstanceID 在流程引擎成功创建实例后反登记引擎的流程实例 ID 到物理工单上
-	BindProcessInstanceID(ctx context.Context, id int64, instanceId int) error
-	// BindProcessInstanceKey 在现代流程引擎成功创建实例后反登记引擎的流程实例全局唯一 Key 到物理工单上
-	BindProcessInstanceKey(ctx context.Context, id int64, instanceKey string) error
 	// MarkProcessStartFailed 保留工单并记录流程启动失败原因
 	MarkProcessStartFailed(ctx context.Context, id int64, reason string) error
 	// RestartProcess 使用原工单数据重新发送流程启动事件
@@ -68,11 +56,11 @@ type Service interface {
 	// ListTaskFormsByTicketID 查询某个物理工单下所有审批节点曾提交过的物理表单数据集
 	ListTaskFormsByTicketID(ctx context.Context, ticketID int64) ([]domain.FormValue, error)
 	// Pass 同意当前代办节点审批，统一执行领域自卫校验、变量合并与必填校验并驱动引擎推进
-	Pass(ctx context.Context, taskId string, operator string, isAdmin bool, comment string, extraData map[string]interface{}) error
+	Pass(ctx context.Context, engineType domain.EngineType, taskId string, operator string, isAdmin bool, comment string, extraData map[string]interface{}) error
 	// Reject 驳回当前节点审批，统一执行领域自卫校验并驱动引擎执行驳回流转
-	Reject(ctx context.Context, taskId string, operator string, isAdmin bool, comment string) error
+	Reject(ctx context.Context, engineType domain.EngineType, taskId string, operator string, isAdmin bool, comment string) error
 	// Transfer 将当前审批任务转签指派给其他用户
-	Transfer(ctx context.Context, taskId string, operator string, isAdmin bool, targetUsers []string) error
+	Transfer(ctx context.Context, engineType domain.EngineType, taskId string, operator string, isAdmin bool, targetUsers []string) error
 	// GetTaskFormConfig 获取指定任务节点在当时流程版本中定义的表单字段列表
 	GetTaskFormConfig(ctx context.Context, taskId string, workflowId int64) ([]flowdsl.Field, error)
 }
@@ -191,15 +179,11 @@ func (s *ticketService) CreateTicket(ctx context.Context, req domain.Ticket) err
 }
 
 func (s *ticketService) GetByProcessInstance(ctx context.Context, instanceID domain.ID) (domain.Ticket, error) {
-	return s.repo.DetailByProcessInstance(ctx, instanceID)
-}
-
-func (s *ticketService) GetByProcessInstanceID(ctx context.Context, instanceId int) (domain.Ticket, error) {
-	return s.GetByProcessInstance(ctx, domain.NewID(instanceId))
-}
-
-func (s *ticketService) GetByProcessInstanceKey(ctx context.Context, instanceKey string) (domain.Ticket, error) {
-	return s.GetByProcessInstance(ctx, domain.NewID(instanceKey))
+	ticket, err := s.repo.DetailByProcessInstance(ctx, instanceID)
+	if err != nil {
+		return domain.Ticket{}, fmt.Errorf("根据流程实例标识 [%s] 获取工单失败: %w", instanceID, err)
+	}
+	return ticket, nil
 }
 
 func (s *ticketService) GetByID(ctx context.Context, id int64) (domain.Ticket, error) {
@@ -214,24 +198,8 @@ func (s *ticketService) UpdateStatusByProcessInstance(ctx context.Context, insta
 	return s.repo.UpdateStatusByProcessInstance(ctx, instanceID, status, wt)
 }
 
-func (s *ticketService) UpdateStatusByProcessInstanceID(ctx context.Context, instanceId int, status uint8) error {
-	return s.UpdateStatusByProcessInstance(ctx, domain.NewID(instanceId), status)
-}
-
-func (s *ticketService) UpdateStatusByProcessInstanceKey(ctx context.Context, instanceKey string, status uint8, wtime int64) error {
-	return s.UpdateStatusByProcessInstance(ctx, domain.NewID(instanceKey), status, wtime)
-}
-
 func (s *ticketService) BindProcess(ctx context.Context, id int64, engineType domain.EngineType, instanceID domain.ID) error {
 	return s.repo.RegisterProcess(ctx, id, engineType, instanceID)
-}
-
-func (s *ticketService) BindProcessInstanceID(ctx context.Context, id int64, instanceId int) error {
-	return s.repo.RegisterProcessInstanceId(ctx, id, instanceId)
-}
-
-func (s *ticketService) BindProcessInstanceKey(ctx context.Context, id int64, instanceKey string) error {
-	return s.repo.RegisterProcessInstanceKey(ctx, id, instanceKey)
 }
 
 // MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因。
@@ -281,9 +249,9 @@ func (s *ticketService) ListTaskFormsByTicketID(ctx context.Context, ticketID in
 }
 
 // Pass 审批通过当前代办的流程节点，包含数据合并、必填校验与动态快照记录
-func (s *ticketService) Pass(ctx context.Context, taskId string, operator string, isAdmin bool, comment string, extraData map[string]interface{}) error {
+func (s *ticketService) Pass(ctx context.Context, engineType domain.EngineType, taskId string, operator string, isAdmin bool, comment string, extraData map[string]interface{}) error {
 	tID := domain.NewID(taskId)
-	taskInfo, err := s.engine.GetTaskContext(ctx, tID)
+	taskInfo, err := s.engine.GetTaskContext(ctx, engineType, tID)
 	if err != nil {
 		return fmt.Errorf("获取任务明细失败: %w", err)
 	}
@@ -339,8 +307,8 @@ func (s *ticketService) Pass(ctx context.Context, taskId string, operator string
 		return err
 	}
 
-	// 8. 统一加载工单实体以进行数据合并与表单快照落库（仓储层统一抹平实例 ID 与 Key 寻址）
-	ticket, err := s.repo.DetailByProcessInstance(ctx, taskInfo.ProcessInstanceID)
+	// 8. 依据任务关联的明确引擎类型精准加载工单实体（架构防腐，避免字面量推测）
+	ticket, err := s.repo.DetailByEngineInstance(ctx, taskInfo.EngineType, taskInfo.ProcessInstanceID)
 	if err != nil {
 		return fmt.Errorf("查询工单实体关联失败: %w", err)
 	}
@@ -400,9 +368,9 @@ func (s *ticketService) collectAndValidateFields(fields []flowdsl.Field, extraDa
 }
 
 // Reject 审批节点驳回
-func (s *ticketService) Reject(ctx context.Context, taskId string, operator string, isAdmin bool, comment string) error {
+func (s *ticketService) Reject(ctx context.Context, engineType domain.EngineType, taskId string, operator string, isAdmin bool, comment string) error {
 	tID := domain.NewID(taskId)
-	taskInfo, err := s.engine.GetTaskContext(ctx, tID)
+	taskInfo, err := s.engine.GetTaskContext(ctx, engineType, tID)
 	if err != nil {
 		return fmt.Errorf("获取任务明细失败: %w", err)
 	}
@@ -430,13 +398,13 @@ func (s *ticketService) Reject(ctx context.Context, taskId string, operator stri
 }
 
 // Transfer 审批任务转签指派
-func (s *ticketService) Transfer(ctx context.Context, taskId string, operator string, isAdmin bool, targetUsers []string) error {
+func (s *ticketService) Transfer(ctx context.Context, engineType domain.EngineType, taskId string, operator string, isAdmin bool, targetUsers []string) error {
 	if len(targetUsers) == 0 {
 		return fmt.Errorf("%w: 转签目标用户不能为空", domain.ErrInvalidParameter)
 	}
 
 	tID := domain.NewID(taskId)
-	taskInfo, err := s.engine.GetTaskContext(ctx, tID)
+	taskInfo, err := s.engine.GetTaskContext(ctx, engineType, tID)
 	if err != nil {
 		return fmt.Errorf("获取任务明细失败: %w", err)
 	}
@@ -465,17 +433,21 @@ func (s *ticketService) Transfer(ctx context.Context, taskId string, operator st
 // GetTaskFormConfig 获取指定任务节点在流程版本中定义的表单字段配置
 func (s *ticketService) GetTaskFormConfig(ctx context.Context, taskId string, workflowId int64) ([]flowdsl.Field, error) {
 	tID := domain.NewID(taskId)
-	taskCtx, err := s.engine.GetTaskContext(ctx, tID)
+	wf, err := s.workflowSvc.Find(ctx, workflowId)
+	if err != nil {
+		return nil, fmt.Errorf("查询工作流失败: %w", err)
+	}
+	taskCtx, err := s.engine.GetTaskContext(ctx, wf.ResolveEngineType(), tID)
 	if err != nil {
 		return nil, err
 	}
 
-	wf, err := s.workflowSvc.FindInstanceFlow(ctx, workflowId, taskCtx.ProcessID, taskCtx.ProcessVersion)
+	targetWf, err := s.workflowSvc.FindInstanceFlow(ctx, workflowId, taskCtx.ProcessID, taskCtx.ProcessVersion)
 	if err != nil {
 		return nil, err
 	}
 
-	graph, err := flowdsl.Parse(wf.FlowData)
+	graph, err := flowdsl.Parse(targetWf.FlowData)
 	if err != nil {
 		return nil, fmt.Errorf("解析流程拓扑失败: %w", err)
 	}

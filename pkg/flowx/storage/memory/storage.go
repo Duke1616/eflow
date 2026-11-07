@@ -146,7 +146,7 @@ func (m *Storage) ListPendingTasksByAssignee(ctx context.Context, assignee strin
 
 	var matched []*model.Task
 	for _, t := range m.tasks {
-		if t.Assignee == assignee && t.Status == model.TaskPending {
+		if (assignee == "" || t.Assignee == assignee) && t.Status == model.TaskPending {
 			cp := *t
 			matched = append(matched, &cp)
 		}

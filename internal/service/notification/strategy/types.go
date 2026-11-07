@@ -36,9 +36,10 @@ type CurrentNode struct {
 
 // Task 承载通知策略所需处理的流转任务概要信息
 type Task struct {
-	TaskID     domain.ID // 任务全局统一强类型自适应标识 (兼容数字与现代字符串形态)
-	UserID     string    // 任务分配的处理人
-	IsCosigned int       // 是否会签任务 (1: 会签, 0: 或签/普通)
+	EngineType domain.EngineType // 所属工作流底层引擎类型
+	TaskID     domain.ID         // 任务全局统一强类型自适应标识 (兼容数字与现代字符串形态)
+	UserID     string            // 任务分配的处理人
+	IsCosigned int               // 是否会签任务 (1: 会签, 0: 或签/普通)
 }
 
 type FlowContext struct {

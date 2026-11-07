@@ -17,37 +17,34 @@ func New[T ~int | ~int64 | ~int32 | ~string](val T) ID {
 }
 
 // Int 安全解析为整型，失败返回 0
-func (id *ID) Int() int {
-	if id == nil {
-		return 0
-	}
-	v, _ := strconv.Atoi(string(*id))
+func (id ID) Int() int {
+	v, _ := strconv.Atoi(string(id))
 	return v
 }
 
 // Int64 安全解析为 64 位整型，失败返回 0
-func (id *ID) Int64() int64 {
-	if id == nil {
-		return 0
-	}
-	v, _ := strconv.ParseInt(string(*id), 10, 64)
+func (id ID) Int64() int64 {
+	v, _ := strconv.ParseInt(string(id), 10, 64)
 	return v
 }
 
 // String 返回字符串形态
-func (id *ID) String() string {
-	if id == nil {
-		return ""
-	}
-	return string(*id)
+func (id ID) String() string {
+	return string(id)
 }
 
 // IsZero 判断是否为零值
-func (id *ID) IsZero() bool {
-	if id == nil {
-		return true
+func (id ID) IsZero() bool {
+	return id == "" || id == "0"
+}
+
+// IsNumeric 检查标识底层是否为纯数字形式（用于兼容历史整型 ID 探测）
+func (id ID) IsNumeric() bool {
+	if id == "" {
+		return false
 	}
-	return *id == "" || *id == "0"
+	_, err := strconv.Atoi(string(id))
+	return err == nil
 }
 
 // UnmarshalJSON 统一解析 JSON 格式的 ID，兼顾数字与字符串形态

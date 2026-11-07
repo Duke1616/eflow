@@ -46,8 +46,15 @@ func (s *channelActionService) DispatchAction(ctx context.Context, evt domain.Ch
 		comment = "无"
 	}
 
+	var engineType domain.EngineType
+	if evt.TicketID > 0 {
+		if ticket, err := s.ticketSvc.GetByID(ctx, evt.TicketID); err == nil {
+			engineType = ticket.Process.EngineType
+		}
+	}
+
 	// 2. 身份解析（核心鉴权防线）
-	user, err := s.identityResolver.ResolveUser(ctx, evt.Channel, evt.ChannelUserID, evt.TaskID)
+	user, err := s.identityResolver.ResolveUser(ctx, evt.Channel, evt.ChannelUserID, engineType, evt.TaskID)
 	if err != nil {
 		s.logger.Error("跨渠道审批身份解析失败，强行阻断流转",
 			elog.String("channel", string(evt.Channel)),
@@ -78,9 +85,9 @@ func (s *channelActionService) DispatchAction(ctx context.Context, evt domain.Ch
 	// 3. 按照动作分发业务执行
 	switch evt.Action {
 	case domain.ChannelActionPass:
-		return s.handlePass(ctx, evt, operator, isAdmin, comment)
+		return s.handlePass(ctx, evt, engineType, operator, isAdmin, comment)
 	case domain.ChannelActionReject:
-		return s.handleReject(ctx, evt, operator, isAdmin, comment)
+		return s.handleReject(ctx, evt, engineType, operator, isAdmin, comment)
 	case domain.ChannelActionRevoke:
 		return s.handleRevoke(ctx, evt, operator, comment)
 	case domain.ChannelActionProgress:
@@ -97,8 +104,8 @@ func (s *channelActionService) DispatchAction(ctx context.Context, evt domain.Ch
 }
 
 // handlePass 统一处理审批同意逻辑
-func (s *channelActionService) handlePass(ctx context.Context, evt domain.ChannelActionEvent, operator string, isAdmin bool, comment string) (*domain.ChannelActionResult, error) {
-	err := s.ticketSvc.Pass(ctx, evt.TaskID.String(), operator, isAdmin, comment, evt.FormValues)
+func (s *channelActionService) handlePass(ctx context.Context, evt domain.ChannelActionEvent, engineType domain.EngineType, operator string, isAdmin bool, comment string) (*domain.ChannelActionResult, error) {
+	err := s.ticketSvc.Pass(ctx, engineType, evt.TaskID.String(), operator, isAdmin, comment, evt.FormValues)
 	if err != nil {
 		s.logger.Error("渠道审批[同意]执行失败",
 			elog.String("taskID", evt.TaskID.String()),
@@ -124,8 +131,8 @@ func (s *channelActionService) handlePass(ctx context.Context, evt domain.Channe
 }
 
 // handleReject 统一处理审批驳回逻辑
-func (s *channelActionService) handleReject(ctx context.Context, evt domain.ChannelActionEvent, operator string, isAdmin bool, comment string) (*domain.ChannelActionResult, error) {
-	err := s.ticketSvc.Reject(ctx, evt.TaskID.String(), operator, isAdmin, comment)
+func (s *channelActionService) handleReject(ctx context.Context, evt domain.ChannelActionEvent, engineType domain.EngineType, operator string, isAdmin bool, comment string) (*domain.ChannelActionResult, error) {
+	err := s.ticketSvc.Reject(ctx, engineType, evt.TaskID.String(), operator, isAdmin, comment)
 	if err != nil {
 		s.logger.Error("渠道审批[驳回]执行失败",
 			elog.String("taskID", evt.TaskID.String()),
@@ -181,7 +188,7 @@ func (s *channelActionService) handleRevoke(ctx context.Context, evt domain.Chan
 		}, nil
 	}
 
-	err = s.withdrawalSvc.Revoke(ctx, ticket.Process.InstanceID, true, operator, reason)
+	err = s.withdrawalSvc.Revoke(ctx, ticket.Process.EngineType, ticket.Process.InstanceID, true, operator, reason)
 	if err != nil {
 		s.logger.Error("渠道操作[撤销]执行失败",
 			elog.Int64("ticketID", evt.TicketID),

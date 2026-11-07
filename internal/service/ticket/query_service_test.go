@@ -100,7 +100,7 @@ func TestQueryService_ListUserInitiated(t *testing.T) {
 		},
 		{
 			name:     "工单存在网关并行分支审批时展开为多条记录以支持前端表格跨行合并",
-			username: "luankz",
+			username: "zhangsan",
 			offset:   0,
 			limit:    10,
 			mockSetup: func(repo *repomocks.MockTicketRepository,
@@ -108,27 +108,27 @@ func TestQueryService_ListUserInitiated(t *testing.T) {
 				userSvc *usermocks.MockUserServiceClient) {
 				tickets := []domain.Ticket{
 					{
-						Id: 2735, CreateBy: "luankz", Status: domain.PROCESS,
+						Id: 2735, CreateBy: "zhangsan", Status: domain.PROCESS,
 						Process: domain.Process{EngineType: domain.EngineTypeEasyFlow, InstanceID: domain.NewID(2001)},
 					},
 				}
-				repo.EXPECT().ListTicket(gomock.Any(), "luankz", gomock.Any(), int64(0), int64(10)).
+				repo.EXPECT().ListTicket(gomock.Any(), "zhangsan", gomock.Any(), int64(0), int64(10)).
 					Return(tickets, nil)
-				repo.EXPECT().CountTicket(gomock.Any(), "luankz", gomock.Any()).
+				repo.EXPECT().CountTicket(gomock.Any(), "zhangsan", gomock.Any()).
 					Return(int64(1), nil)
 
 				// 流程引擎返回两个处于等待审批中的并行节点：后端与前端
 				engineSvc.EXPECT().ListPendingSteps(gomock.Any(), []domain.ID{domain.NewID(2001)}).
 					Return([]domain.TodoTask{
 						{InstanceID: domain.NewID(2001), NodeName: "后端", ApprovedBy: "peicy", TaskID: domain.NewID(5242)},
-						{InstanceID: domain.NewID(2001), NodeName: "前端", ApprovedBy: "luankz", TaskID: domain.NewID(5243)},
+						{InstanceID: domain.NewID(2001), NodeName: "前端", ApprovedBy: "zhangsan", TaskID: domain.NewID(5243)},
 					}, nil)
 
 				userSvc.EXPECT().QueryByUsernames(gomock.Any(), gomock.Any()).
 					Return(&userv1.QueryUsersResp{
 						Users: []*userv1.User{
 							{Username: "peicy", DisplayName: "裴承运"},
-							{Username: "luankz", DisplayName: "栾凯朝"},
+							{Username: "zhangsan", DisplayName: "张三"},
 						},
 					}, nil)
 			},
@@ -144,7 +144,7 @@ func TestQueryService_ListUserInitiated(t *testing.T) {
 				// 第二条视图对应“前端”分支，工单主体数据完全一致，供前端根据 ID 合并行
 				assert.Equal(t, int64(2735), views[1].Ticket.Id)
 				assert.Equal(t, "前端", views[1].CurrentStep)
-				assert.Equal(t, "栾凯朝", views[1].ApprovedBy)
+				assert.Equal(t, "张三", views[1].ApprovedBy)
 				assert.Equal(t, domain.NewID("5243"), views[1].TaskID)
 			},
 		},
@@ -288,7 +288,7 @@ func TestQueryService_ListUserTodo_CrossEngine(t *testing.T) {
 	// 2. 组装多态统一工作流引擎 (EngineDispatcher) 驱动
 	mockEngineRepo := repomocks.NewMockIEngineRepository(ctrl)
 	easyflowEngine := easyflowDrv.NewEngine(mockEngineRepo)
-	flowxEngine := flowxDrv.NewEngine(flowxEng)
+	flowxEngine := flowxDrv.NewEngine(flowxEng, nil)
 	unifiedEngine := engine.NewEngineDispatcher(easyflowEngine, flowxEngine)
 
 	// Mock EasyFlow 产生一条待办

@@ -138,6 +138,7 @@ func TestService_Deploy(t *testing.T) {
 			},
 			mockRepo: func(ctrl *gomock.Controller) repository.IWorkflowRepository {
 				repo := repomocks.NewMockIWorkflowRepository(ctrl)
+				repo.EXPECT().GetMaxSnapshotVersion(gomock.Any(), int64(1001)).Return(0, nil)
 				repo.EXPECT().UpdateProcessId(gomock.Any(), int64(1001), 1001).Return(nil)
 				repo.EXPECT().CreateSnapshot(gomock.Any(), gomock.Any(), 1001, 1).Return(nil)
 				return repo
@@ -157,6 +158,7 @@ func TestService_Deploy(t *testing.T) {
 			},
 			mockRepo: func(ctrl *gomock.Controller) repository.IWorkflowRepository {
 				repo := repomocks.NewMockIWorkflowRepository(ctrl)
+				repo.EXPECT().GetMaxSnapshotVersion(gomock.Any(), int64(2002)).Return(0, nil)
 				repo.EXPECT().UpdateProcessId(gomock.Any(), int64(2002), 999).Return(nil)
 				repo.EXPECT().CreateSnapshot(gomock.Any(), gomock.Any(), 999, 1).Return(nil)
 				return repo
@@ -179,6 +181,7 @@ func TestService_Deploy(t *testing.T) {
 			},
 			mockRepo: func(ctrl *gomock.Controller) repository.IWorkflowRepository {
 				repo := repomocks.NewMockIWorkflowRepository(ctrl)
+				repo.EXPECT().GetMaxSnapshotVersion(gomock.Any(), int64(3003)).Return(1, nil)
 				repo.EXPECT().UpdateProcessId(gomock.Any(), int64(3003), 888).Return(nil)
 				repo.EXPECT().CreateSnapshot(gomock.Any(), gomock.Any(), 888, 2).Return(nil)
 				return repo
@@ -217,7 +220,7 @@ func TestService_Deploy(t *testing.T) {
 			repo := tc.mockRepo(ctrl)
 
 			flowxEngine := flowx.NewEngine(memory.NewStorage())
-			flowxDrv := flowxAdapter.NewEngine(flowxEngine)
+			flowxDrv := flowxAdapter.NewEngine(flowxEngine, nil)
 
 			adapters := []engine.IEngine{flowxDrv}
 			if tc.mockAdapter != nil {
@@ -268,8 +271,8 @@ func TestService_GetHighlightedGraph(t *testing.T) {
 		},
 	}, nil)
 
-	// 3. Mock FindSnapshot (FindInstanceFlow 内部调用)
-	repo.EXPECT().FindSnapshot(gomock.Any(), 101, 1).Return(domain.Workflow{
+	// 3. Mock FindSnapshotByWorkflowVersion (FindInstanceFlow 内部调用)
+	repo.EXPECT().FindSnapshotByWorkflowVersion(gomock.Any(), int64(10), domain.EngineType(""), 1).Return(domain.Workflow{
 		Id: 10,
 		FlowData: domain.CanvasData{
 			"nodes": []map[string]any{
@@ -290,7 +293,7 @@ func TestService_GetHighlightedGraph(t *testing.T) {
 	dispatcher := engine.NewEngineDispatcher(adapterMock)
 	svc := NewWorkflowService(repo, dispatcher, nil)
 
-	highlightedFlow, err := svc.GetHighlightedGraph(context.Background(), 10, 201, domain.Status(1))
+	highlightedFlow, err := svc.GetHighlightedGraph(context.Background(), 10, domain.NewID(201), domain.Status(1))
 	assert.NoError(t, err)
 
 	edges, ok := highlightedFlow.FlowData["edges"].([]any)

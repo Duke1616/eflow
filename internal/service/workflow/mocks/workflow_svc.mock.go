@@ -162,18 +162,18 @@ func (mr *MockIWorkflowCoreServiceMockRecorder) GetAutomationNodes(ctx, workflow
 }
 
 // GetHighlightedGraph mocks base method.
-func (m *MockIWorkflowCoreService) GetHighlightedGraph(ctx context.Context, workflowId int64, processInstanceId int, status domain.Status) (domain.Workflow, error) {
+func (m *MockIWorkflowCoreService) GetHighlightedGraph(ctx context.Context, workflowId int64, instanceID domain.ID, status domain.Status) (domain.Workflow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetHighlightedGraph", ctx, workflowId, processInstanceId, status)
+	ret := m.ctrl.Call(m, "GetHighlightedGraph", ctx, workflowId, instanceID, status)
 	ret0, _ := ret[0].(domain.Workflow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetHighlightedGraph indicates an expected call of GetHighlightedGraph.
-func (mr *MockIWorkflowCoreServiceMockRecorder) GetHighlightedGraph(ctx, workflowId, processInstanceId, status any) *gomock.Call {
+func (mr *MockIWorkflowCoreServiceMockRecorder) GetHighlightedGraph(ctx, workflowId, instanceID, status any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHighlightedGraph", reflect.TypeOf((*MockIWorkflowCoreService)(nil).GetHighlightedGraph), ctx, workflowId, processInstanceId, status)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHighlightedGraph", reflect.TypeOf((*MockIWorkflowCoreService)(nil).GetHighlightedGraph), ctx, workflowId, instanceID, status)
 }
 
 // GetWorkflowSnapshot mocks base method.
@@ -367,18 +367,18 @@ func (mr *MockServiceMockRecorder) GetAutomationNodes(ctx, workflowId any) *gomo
 }
 
 // GetHighlightedGraph mocks base method.
-func (m *MockService) GetHighlightedGraph(ctx context.Context, workflowId int64, processInstanceId int, status domain.Status) (domain.Workflow, error) {
+func (m *MockService) GetHighlightedGraph(ctx context.Context, workflowId int64, instanceID domain.ID, status domain.Status) (domain.Workflow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetHighlightedGraph", ctx, workflowId, processInstanceId, status)
+	ret := m.ctrl.Call(m, "GetHighlightedGraph", ctx, workflowId, instanceID, status)
 	ret0, _ := ret[0].(domain.Workflow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetHighlightedGraph indicates an expected call of GetHighlightedGraph.
-func (mr *MockServiceMockRecorder) GetHighlightedGraph(ctx, workflowId, processInstanceId, status any) *gomock.Call {
+func (mr *MockServiceMockRecorder) GetHighlightedGraph(ctx, workflowId, instanceID, status any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHighlightedGraph", reflect.TypeOf((*MockService)(nil).GetHighlightedGraph), ctx, workflowId, processInstanceId, status)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHighlightedGraph", reflect.TypeOf((*MockService)(nil).GetHighlightedGraph), ctx, workflowId, instanceID, status)
 }
 
 // GetWorkflowSnapshot mocks base method.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
@@ -45,10 +46,11 @@ type gormWithdrawalDAO struct{ db *gorm.DB }
 func NewWithdrawalDAO(db *gorm.DB) WithdrawalDAO { return &gormWithdrawalDAO{db: db} }
 
 func whereWithdrawalInstance(tx *gorm.DB, instanceID domain.ID) *gorm.DB {
-	if intID := instanceID.Int(); intID > 0 {
-		return tx.Where("process_instance_id = ?", intID)
+	idStr := instanceID.String()
+	if intID, err := strconv.Atoi(idStr); err == nil && intID > 0 {
+		return tx.Where("process_instance_key = ? OR process_instance_id = ?", idStr, intID)
 	}
-	return tx.Where("process_instance_key = ?", instanceID.String())
+	return tx.Where("process_instance_key = ?", idStr)
 }
 
 func (g *gormWithdrawalDAO) Prepare(ctx context.Context, instanceID domain.ID, reason string) error {

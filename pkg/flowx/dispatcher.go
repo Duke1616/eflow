@@ -20,6 +20,7 @@ func newDefaultExecutors(e *flowEngine) map[model.NodeType]nodeExecutor {
 	return map[model.NodeType]nodeExecutor{
 		model.NodeApproval:   &approvalNodeExecutor{engine: e},
 		model.NodeCarbonCopy: &carbonCopyNodeExecutor{engine: e},
+		model.NodeChatGroup:  &chatGroupNodeExecutor{engine: e},
 		model.NodeTask:       &taskNodeExecutor{engine: e},
 		model.NodeEnd:        &endNodeExecutor{},
 	}
@@ -273,4 +274,24 @@ type endNodeExecutor struct{}
 
 func (x *endNodeExecutor) Execute(ctx context.Context, session *flowSession, node model.NodeSpec, batchCode int, operator string) error {
 	return nil
+}
+
+// chatGroupNodeExecutor 群聊通知节点执行器 (职责明确：广播群聊通知事件、瞬时穿透推进下一节点)
+type chatGroupNodeExecutor struct {
+	engine *flowEngine
+}
+
+func (x *chatGroupNodeExecutor) Execute(ctx context.Context, session *flowSession, node model.NodeSpec, batchCode int, operator string) error {
+	inst := session.Instance()
+
+	// 1. 广播群聊通知节点激活事件（供上层通知监听器消费并发送飞书群卡片）
+	x.engine.eventBus.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &node, operator, "群聊通知自动穿透"))
+
+	// 2. 瞬时自动穿透推进：驱动群聊通知节点下一步流转决策
+	nextDec, err := session.Plan().ResolveNextStep(node.ID, inst.Variables, session.AllTasks(), batchCode)
+	if err != nil {
+		return err
+	}
+
+	return x.engine.applyStepDecision(ctx, session, nextDec, batchCode, operator)
 }

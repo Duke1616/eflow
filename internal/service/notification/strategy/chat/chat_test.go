@@ -100,7 +100,7 @@ func (s *ChatTestSuite) TestSend_ExistingGroup() {
 			{ChatId: "oc_chat123", Name: "交付群", Channel: notificationv1.Channel_LARK_CARD},
 		},
 	}, nil)
-	s.mockBase.EXPECT().PassTask(gomock.Any(), domain.NewID(70001), gomock.Any()).Return(nil)
+	s.mockBase.EXPECT().PassTask(gomock.Any(), gomock.Any(), domain.NewID(70001), gomock.Any()).Return(nil)
 
 	s.mockSender.EXPECT().BatchSend(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context,
 		ns []notification.Notification) (notification.Response, error) {

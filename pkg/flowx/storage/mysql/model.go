@@ -10,12 +10,12 @@ import (
 
 // FlowDefinitionPO 流程定义持久化模型
 type FlowDefinitionPO struct {
-	ID         int64  `gorm:"primaryKey;autoIncrement;column:id"`
-	ProcKey    string `gorm:"column:proc_key;type:varchar(64);not null;uniqueIndex:uk_key_version"`
-	Name       string `gorm:"column:name;type:varchar(128);not null"`
-	Version    int    `gorm:"column:version;not null;uniqueIndex:uk_key_version"`
-	DSLContent string `gorm:"column:dsl_content;type:mediumtext;not null"`
-	Ctime      int64  `gorm:"column:ctime;not null"`
+	ID         int64  `gorm:"primaryKey;autoIncrement;column:id;comment:'流程定义自增ID'"`
+	ProcKey    string `gorm:"column:proc_key;type:varchar(64);not null;uniqueIndex:uk_key_version;comment:'流程唯一标识Key'"`
+	Name       string `gorm:"column:name;type:varchar(128);not null;comment:'流程定义展示名称'"`
+	Version    int    `gorm:"column:version;not null;uniqueIndex:uk_key_version;comment:'流程定义版本号'"`
+	DSLContent string `gorm:"column:dsl_content;type:mediumtext;not null;comment:'流程DSL完整定义(JSON)'"`
+	Ctime      int64  `gorm:"column:ctime;not null;comment:'创建时间(毫秒)'"`
 }
 
 func (FlowDefinitionPO) TableName() string {
@@ -24,15 +24,15 @@ func (FlowDefinitionPO) TableName() string {
 
 // FlowInstancePO 流程运行实例持久化模型
 type FlowInstancePO struct {
-	ID          string        `gorm:"primaryKey;column:id;type:varchar(64)"`
-	ProcKey     string        `gorm:"column:proc_key;type:varchar(64);not null;index:idx_key"`
-	Version     int           `gorm:"column:version;not null"`
-	Starter     string        `gorm:"column:starter;type:varchar(64);not null;index:idx_starter"`
-	Status      uint8         `gorm:"column:status;not null;index:idx_status"`
-	CurrentNode string        `gorm:"column:current_node;type:varchar(64);not null"`
-	Variables   string        `gorm:"column:variables;type:json;not null"`
-	Ctime       int64         `gorm:"column:ctime;not null"`
-	Ftime       sql.NullInt64 `gorm:"column:ftime"`
+	ID          string        `gorm:"primaryKey;column:id;type:varchar(64);comment:'流程运行实例全局唯一Key'"`
+	ProcKey     string        `gorm:"column:proc_key;type:varchar(64);not null;index:idx_key;comment:'流程唯一标识Key'"`
+	Version     int           `gorm:"column:version;not null;comment:'执行版本号'"`
+	Starter     string        `gorm:"column:starter;type:varchar(64);not null;index:idx_starter;comment:'流程发起人用户名'"`
+	Status      uint8         `gorm:"column:status;not null;index:idx_status;comment:'实例状态(0:Running, 1:Completed, 2:Rejected, 3:Revoked)'"`
+	CurrentNode string        `gorm:"column:current_node;type:varchar(64);not null;comment:'当前流转节点ID'"`
+	Variables   string        `gorm:"column:variables;type:json;not null;comment:'流程全局运行变量集(JSON)'"`
+	Ctime       int64         `gorm:"column:ctime;not null;comment:'发起创建时间(毫秒)'"`
+	Ftime       sql.NullInt64 `gorm:"column:ftime;comment:'办结/终态时间(毫秒)'"`
 }
 
 func (FlowInstancePO) TableName() string {
@@ -41,17 +41,17 @@ func (FlowInstancePO) TableName() string {
 
 // FlowTaskPO 流转任务持久化模型
 type FlowTaskPO struct {
-	ID         string        `gorm:"primaryKey;column:id;type:varchar(64)"`
-	InstanceID string        `gorm:"column:instance_id;type:varchar(64);not null;index:idx_inst_batch,priority:1"`
-	NodeID     string        `gorm:"column:node_id;type:varchar(64);not null"`
-	NodeName   string        `gorm:"column:node_name;type:varchar(128);not null"`
-	BatchCode  int           `gorm:"column:batch_code;not null;index:idx_inst_batch,priority:2"`
-	Assignee   string        `gorm:"column:assignee;type:varchar(64);not null;index:idx_assignee_status,priority:1"`
-	SignRule   string        `gorm:"column:sign_rule;type:varchar(32);not null"`
-	Status     uint8         `gorm:"column:status;not null;index:idx_assignee_status,priority:2"`
-	Comment    string        `gorm:"column:comment;type:text"`
-	Ctime      int64         `gorm:"column:ctime;not null"`
-	Ftime      sql.NullInt64 `gorm:"column:ftime"`
+	ID         string        `gorm:"primaryKey;column:id;type:varchar(64);comment:'流转任务全局唯一Key'"`
+	InstanceID string        `gorm:"column:instance_id;type:varchar(64);not null;index:idx_inst_batch,priority:1;comment:'关联流程运行实例Key'"`
+	NodeID     string        `gorm:"column:node_id;type:varchar(64);not null;comment:'流程图节点ID'"`
+	NodeName   string        `gorm:"column:node_name;type:varchar(128);not null;comment:'流程图节点展示名称'"`
+	BatchCode  int           `gorm:"column:batch_code;not null;index:idx_inst_batch,priority:2;comment:'节点执行批次序号(用于驳回重审区分)'"`
+	Assignee   string        `gorm:"column:assignee;type:varchar(64);not null;index:idx_assignee_status,priority:1;comment:'任务指派审批人用户名'"`
+	SignRule   string        `gorm:"column:sign_rule;type:varchar(32);not null;comment:'会签/或签审批规则(or/and)'"`
+	Status     uint8         `gorm:"column:status;not null;index:idx_assignee_status,priority:2;comment:'任务状态(0:Pending, 1:Passed, 2:Rejected, 3:Skipped)'"`
+	Comment    string        `gorm:"column:comment;type:text;comment:'审批意见/流转批注'"`
+	Ctime      int64         `gorm:"column:ctime;not null;comment:'任务生成时间(毫秒)'"`
+	Ftime      sql.NullInt64 `gorm:"column:ftime;comment:'任务完成时间(毫秒)'"`
 }
 
 func (FlowTaskPO) TableName() string {

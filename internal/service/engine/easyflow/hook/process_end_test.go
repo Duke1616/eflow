@@ -39,8 +39,8 @@ type endTicketServiceStub struct {
 	err    error
 }
 
-func (s *endTicketServiceStub) UpdateStatusByProcessInstanceID(_ context.Context,
-	_ int, status uint8) error {
+func (s *endTicketServiceStub) UpdateStatusByProcessInstance(_ context.Context,
+	_ domain.ID, status uint8, _ ...int64) error {
 	s.status = status
 	return s.err
 }

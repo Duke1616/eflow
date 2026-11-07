@@ -113,17 +113,29 @@ func TestMySQLStorage_DoTxInterfaceGuard(t *testing.T) {
 	require.NotNil(t, txStore)
 }
 
-func TestMySQLStorage_UpdateTasksStatusSQL(t *testing.T) {
+func TestMySQLStorage_ListPendingTasksByAssigneeSQL(t *testing.T) {
 	db := newTestDryRunDB(t)
 	s := NewStorage(db)
 
-	sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
-		return s.WithTx(tx).db.Model(&FlowTaskPO{}).
-			Where("id IN ?", []string{"t1", "t2"}).
-			Updates(map[string]any{"status": uint8(model.TaskSkipped), "ftime": time.Now()})
+	t.Run("指定审批人查询待办", func(t *testing.T) {
+		sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+			query := s.buildListPendingTasksQuery(tx, "leader_zhang")
+			var pos []FlowTaskPO
+			return query.Order("ctime DESC").Offset(0).Limit(10).Find(&pos)
+		})
+		assert.Contains(t, sql, "SELECT * FROM `flow_task`")
+		assert.Contains(t, sql, "status = 0")
+		assert.Contains(t, sql, "assignee = 'leader_zhang'")
 	})
 
-	assert.Contains(t, sql, "UPDATE `flow_task` SET")
-	assert.Contains(t, sql, "`ftime`")
-	assert.Contains(t, sql, "`status`")
+	t.Run("空审批人查询全部待办", func(t *testing.T) {
+		sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+			query := s.buildListPendingTasksQuery(tx, "")
+			var pos []FlowTaskPO
+			return query.Order("ctime DESC").Offset(0).Limit(10).Find(&pos)
+		})
+		assert.Contains(t, sql, "SELECT * FROM `flow_task`")
+		assert.Contains(t, sql, "status = 0")
+		assert.NotContains(t, sql, "assignee")
+	})
 }

@@ -47,7 +47,7 @@ func (l *EventListener) OnEvent(ctx context.Context, evt flowx.Event) error {
 	case flowx.EventProcessFinished:
 		// 流程正常办结：同步更新工单状态为 END，并记录办结时间 wtime
 		now := time.Now().UnixMilli()
-		if err := l.repo.UpdateStatusByInstanceKey(safeCtx, instanceKey, domain.END.ToUint8(), now); err != nil {
+		if err := l.repo.UpdateStatusByProcessInstance(safeCtx, domain.NewID(instanceKey), domain.END.ToUint8(), now); err != nil {
 			l.logger.Error("flowx 事件处理: 流程办结同步工单状态失败",
 				elog.String("instanceKey", instanceKey),
 				elog.FieldErr(err))
@@ -58,7 +58,7 @@ func (l *EventListener) OnEvent(ctx context.Context, evt flowx.Event) error {
 	case flowx.EventProcessRejected:
 		// 流程驳回/直接终止：同步更新工单状态为 WITHDRAW
 		now := time.Now().UnixMilli()
-		if err := l.repo.UpdateStatusByInstanceKey(safeCtx, instanceKey, domain.WITHDRAW.ToUint8(), now); err != nil {
+		if err := l.repo.UpdateStatusByProcessInstance(safeCtx, domain.NewID(instanceKey), domain.WITHDRAW.ToUint8(), now); err != nil {
 			l.logger.Error("flowx 事件处理: 流程驳回同步工单状态失败",
 				elog.String("instanceKey", instanceKey),
 				elog.FieldErr(err))
@@ -69,7 +69,7 @@ func (l *EventListener) OnEvent(ctx context.Context, evt flowx.Event) error {
 	case flowx.EventProcessCancelled:
 		// 提单人撤销：同步更新工单状态为 WITHDRAW
 		now := time.Now().UnixMilli()
-		if err := l.repo.UpdateStatusByInstanceKey(safeCtx, instanceKey, domain.WITHDRAW.ToUint8(), now); err != nil {
+		if err := l.repo.UpdateStatusByProcessInstance(safeCtx, domain.NewID(instanceKey), domain.WITHDRAW.ToUint8(), now); err != nil {
 			l.logger.Error("flowx 事件处理: 流程撤销同步工单状态失败",
 				elog.String("instanceKey", instanceKey),
 				elog.FieldErr(err))

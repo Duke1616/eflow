@@ -80,7 +80,7 @@ func TestEngineDispatcher_Deploy(t *testing.T) {
 			}
 
 			flowxEng := flowx.NewEngine(memory.NewStorage())
-			flowxDrv := flowxDrvPkg.NewEngine(flowxEng)
+			flowxDrv := flowxDrvPkg.NewEngine(flowxEng, nil)
 
 			dispatcher := engine.NewEngineDispatcher(easyMock, flowxDrv)
 			info, err := dispatcher.Deploy(context.Background(), tc.engineType, tc.rawDef)
@@ -184,7 +184,7 @@ func TestEngineDispatcher_Launch(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			flowxDrv := flowxDrvPkg.NewEngine(flowxEng)
+			flowxDrv := flowxDrvPkg.NewEngine(flowxEng, nil)
 			dispatcher := engine.NewEngineDispatcher(easyMock, flowxDrv)
 
 			tc.req.EngineType = tc.engineType
@@ -269,4 +269,48 @@ func TestEngineDispatcher_PassAndReject(t *testing.T) {
 	err = dispatcher.Reject(context.Background(), emptyTaskReject)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, engine.ErrInvalidParameter)
+
+	// 6. 测试未显式提供 EngineType 时直接拦截报错（契约固定，杜绝隐式猜测）
+	noEnginePassReq := domain.TaskPassReq{
+		TaskId:   domain.NewID("377369916761903105"),
+		Operator: "zhangsan",
+		Comment:  "同意",
+	}
+	err = dispatcher.Pass(context.Background(), noEnginePassReq)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, engine.ErrEngineNotFound)
+
+	// 7. 测试显式携带 EngineTypeFlowx 时精准路由到 FlowX
+	snowflakePassReq := domain.TaskPassReq{
+		EngineType: domain.EngineTypeFlowx,
+		TaskId:     domain.NewID("377369916761903105"),
+		Operator:   "zhangsan",
+		Comment:    "同意",
+	}
+	flowxMock.EXPECT().Pass(gomock.Any(), gomock.AssignableToTypeOf(domain.TaskPassReq{})).DoAndReturn(
+		func(_ context.Context, req domain.TaskPassReq) error {
+			assert.Equal(t, domain.EngineTypeFlowx, req.EngineType)
+			assert.Equal(t, domain.NewID("377369916761903105"), req.TaskId)
+			return nil
+		},
+	)
+	err = dispatcher.Pass(context.Background(), snowflakePassReq)
+	require.NoError(t, err)
+
+	// 7. 测试显式携带 EngineTypeEasyFlow 时精准路由到 EasyFlow 防腐层
+	legacyPassReq := domain.TaskPassReq{
+		EngineType: domain.EngineTypeEasyFlow,
+		TaskId:     domain.NewID("1002"),
+		Operator:   "alice",
+		Comment:    "同意",
+	}
+	easyMock.EXPECT().Pass(gomock.Any(), gomock.AssignableToTypeOf(domain.TaskPassReq{})).DoAndReturn(
+		func(_ context.Context, req domain.TaskPassReq) error {
+			assert.Equal(t, domain.EngineTypeEasyFlow, req.EngineType)
+			assert.Equal(t, domain.NewID("1002"), req.TaskId)
+			return nil
+		},
+	)
+	err = dispatcher.Pass(context.Background(), legacyPassReq)
+	require.NoError(t, err)
 }

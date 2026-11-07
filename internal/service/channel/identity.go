@@ -30,7 +30,7 @@ func NewChannelIdentityResolver(
 }
 
 // ResolveUser 基于多级防御策略，将第三方渠道平台的用户标识解析为系统内部用户实体
-func (r *channelIdentityResolver) ResolveUser(ctx context.Context, channel domain.ChannelType, channelUserID string, taskID domain.ID) (*userv1.User, error) {
+func (r *channelIdentityResolver) ResolveUser(ctx context.Context, channel domain.ChannelType, channelUserID string, engineType domain.EngineType, taskID domain.ID) (*userv1.User, error) {
 	trimmedID := strings.TrimSpace(channelUserID)
 	if trimmedID == "" {
 		return nil, fmt.Errorf("%w: 渠道用户标识不能为空", ErrChannelUserNotFound)
@@ -38,8 +38,8 @@ func (r *channelIdentityResolver) ResolveUser(ctx context.Context, channel domai
 
 	// 策略 1（核心高命中）：基于待审批任务上下文的指派人精准推导
 	// 审批卡片交互必然具备 taskID，通过直接核对该节点 Assignee 的三方绑定标识，能够以极低开销实现 100% 鉴权闭环
-	if !taskID.IsZero() && r.engine != nil {
-		if matchedUser, err := r.resolveByTaskAssignee(ctx, channel, trimmedID, taskID); err == nil && matchedUser != nil {
+	if !taskID.IsZero() && r.engine != nil && engineType != "" {
+		if matchedUser, err := r.resolveByTaskAssignee(ctx, channel, trimmedID, engineType, taskID); err == nil && matchedUser != nil {
 			r.logger.Info("通过任务上下文指派人成功解析第三方身份",
 				elog.String("channel", string(channel)),
 				elog.String("channelUserID", trimmedID),
@@ -72,8 +72,8 @@ func (r *channelIdentityResolver) ResolveUser(ctx context.Context, channel domai
 }
 
 // resolveByTaskAssignee 通过任务上下文的 Assignee 提取用户信息并校验三方渠道绑定关系
-func (r *channelIdentityResolver) resolveByTaskAssignee(ctx context.Context, channel domain.ChannelType, channelUserID string, taskID domain.ID) (*userv1.User, error) {
-	taskCtx, err := r.engine.GetTaskContext(ctx, taskID)
+func (r *channelIdentityResolver) resolveByTaskAssignee(ctx context.Context, channel domain.ChannelType, channelUserID string, engineType domain.EngineType, taskID domain.ID) (*userv1.User, error) {
+	taskCtx, err := r.engine.GetTaskContext(ctx, engineType, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("查询任务上下文失败: %w", err)
 	}

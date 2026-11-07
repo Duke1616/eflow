@@ -16,6 +16,8 @@ import (
 
 // StartReq 流程实例发起请求
 type StartReq struct {
+	// 预分配流程实例唯一标识（可选，若提供则作为实例物理主键）
+	InstanceID string
 	// 流程图定义快照（可选，若提供则自动部署；主要用于单元测试与快速演练，Value Semantics 优先）
 	Def model.ProcessDefinition
 	// 流程唯一标识（当 Def 未提供时必填）
@@ -100,6 +102,10 @@ type IProcessOperator interface {
 	ListPendingTasks(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error)
 	// ListTasksByInstance 获取指定流程实例下的全部流转与历史任务列表
 	ListTasksByInstance(ctx context.Context, instanceID string) ([]*model.Task, error)
+	// GetDefinition 根据流程唯一标识与版本号加载流程图定义快照
+	GetDefinition(ctx context.Context, key string, version int) (model.ProcessDefinition, error)
+	// GenInstanceID 预分配符合引擎规范的流程实例全局唯一标识
+	GenInstanceID(procKey string) string
 }
 
 // IProcessAdmin 流程定义部署与组件注册管理视角接口，供初始化、后台管理或运维脚手架使用
@@ -288,6 +294,10 @@ func (e *flowEngine) Start(ctx context.Context, req StartReq) (string, error) {
 	return actCtx.InstanceID, nil
 }
 
+func (e *flowEngine) GenInstanceID(procKey string) string {
+	return e.idGen.GenInstanceID(procKey)
+}
+
 func (e *flowEngine) doStart(ctx context.Context, req StartReq) (string, error) {
 	def, err := e.loadOrDeployDefinition(ctx, req)
 	if err != nil {
@@ -300,7 +310,10 @@ func (e *flowEngine) doStart(ctx context.Context, req StartReq) (string, error) 
 		return "", err
 	}
 
-	instID := e.idGen.GenInstanceID(def.Key)
+	instID := req.InstanceID
+	if instID == "" {
+		instID = e.idGen.GenInstanceID(def.Key)
+	}
 	inst := &model.Instance{
 		ID:          instID,
 		ProcKey:     def.Key,
@@ -641,4 +654,12 @@ func (e *flowEngine) ListTasksByInstance(ctx context.Context, instanceID string)
 		return nil, errors.New("流程实例 ID 不能为空")
 	}
 	return e.storage.ListTasksByInstance(ctx, instanceID)
+}
+
+// GetDefinition 根据流程唯一标识与版本号加载流程图定义快照
+func (e *flowEngine) GetDefinition(ctx context.Context, key string, version int) (model.ProcessDefinition, error) {
+	if e.storage == nil {
+		return model.ProcessDefinition{}, errors.New("存储层未初始化")
+	}
+	return e.storage.GetDefinition(ctx, key, version)
 }

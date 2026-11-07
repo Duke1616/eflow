@@ -69,7 +69,7 @@ func TestValidator_TableDriven(t *testing.T) {
 					{"id": "cond-a", "type": "condition"},
 					{"id": "cond-b", "type": "condition"},
 					{"id": "user-a", "type": "user", "properties": map[string]interface{}{"name": "后端", "rule": "appoint", "approved": []string{"yangwz"}}},
-					{"id": "user-b", "type": "user", "properties": map[string]interface{}{"name": "前端", "rule": "appoint", "approved": []string{"luankz"}}},
+					{"id": "user-b", "type": "user", "properties": map[string]interface{}{"name": "前端", "rule": "appoint", "approved": []string{"zhangsan"}}},
 					{"id": "join-1", "type": "parallel"},
 					{"id": "end-1", "type": "end"},
 				},

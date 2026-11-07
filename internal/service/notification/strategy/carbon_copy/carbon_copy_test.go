@@ -87,7 +87,7 @@ func (s *CarbonCopyTestSuite) TestSend() {
 	s.mockSender.EXPECT().BatchSend(gomock.Any(), gomock.Any()).Return(notification.NewSuccessResponse(0, "success"), nil)
 
 	// Mock PassTask
-	s.mockBase.EXPECT().PassTask(gomock.Any(), domain.NewID(1001), "抄送系统自动通过").Return(nil)
+	s.mockBase.EXPECT().PassTask(gomock.Any(), gomock.Any(), domain.NewID(1001), "抄送系统自动通过").Return(nil)
 
 	resp, err := s.strategy.Send(ctx, info)
 	s.NoError(err)

@@ -48,7 +48,7 @@ func TestRevokeCoordinatesStateTransitions(t *testing.T) {
 			revoker := &processRevokerStub{err: testCase.revokeErr}
 			svc := newService(repo, planner, revoker)
 
-			err := svc.Revoke(context.Background(), domain.NewID(101), true, "starter", "不再需要该申请")
+			err := svc.Revoke(context.Background(), domain.EngineTypeEasyFlow, domain.NewID(101), true, "starter", "不再需要该申请")
 
 			if testCase.wantErr == "" {
 				require.NoError(t, err)
@@ -72,9 +72,9 @@ func TestRevokeCoordinatesStateTransitions(t *testing.T) {
 func TestRevokeValidatesIdentity(t *testing.T) {
 	svc := newService(&withdrawalRepositoryStub{}, &compensationPlannerStub{}, &processRevokerStub{})
 
-	require.Error(t, svc.Revoke(context.Background(), "", false, "starter", "不再需要"))
-	require.Error(t, svc.Revoke(context.Background(), domain.NewID(1), false, "", "不再需要"))
-	require.ErrorIs(t, svc.Revoke(context.Background(), domain.NewID(1), false, "starter", " "), ErrInvalidRevokeReason)
+	require.Error(t, svc.Revoke(context.Background(), domain.EngineTypeEasyFlow, "", false, "starter", "不再需要"))
+	require.Error(t, svc.Revoke(context.Background(), domain.EngineTypeEasyFlow, domain.NewID(1), false, "", "不再需要"))
+	require.ErrorIs(t, svc.Revoke(context.Background(), domain.EngineTypeEasyFlow, domain.NewID(1), false, "starter", " "), ErrInvalidRevokeReason)
 }
 
 type withdrawalRepositoryStub struct {
@@ -125,7 +125,7 @@ func (s *compensationPlannerStub) Apply(context.Context, int, CompensationPlan) 
 	return s.applyErr
 }
 
-func (s *processRevokerStub) Revoke(_ context.Context, _ domain.ID, _ bool, _ string) error {
+func (s *processRevokerStub) Revoke(_ context.Context, _ domain.EngineType, _ domain.ID, _ bool, _ string) error {
 	s.calls++
 	return s.err
 }

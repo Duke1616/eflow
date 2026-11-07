@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +22,7 @@ import (
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	withdrawalSvc "github.com/Duke1616/eflow/internal/service/withdrawal"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
+	"github.com/Duke1616/eflow/pkg/mapx"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	enotifyfeishu "github.com/Duke1616/enotify/notify/feishu"
 	"github.com/chromedp/chromedp"
@@ -422,7 +422,7 @@ func getCallbackValue(evt domain.ChannelActionEvent) []notification.Value {
 }
 
 // extractChannelActionEvent 将飞书卡片的原生触发事件解包并标准化为通用的领域交互事件
-// 解释设计原因：直接将平台原生 Payload 映射为领域模型，避免中间过渡结构体产生的冗余内存分配与多次二次序列化
+// 解释设计原因：依托基础设施层通用 MapX 进行强类型安全提取，杜绝手写弱类型探测胶水代码
 func extractChannelActionEvent(cte *larkcallback.CardActionTriggerEvent) domain.ChannelActionEvent {
 	actionValue := cte.Event.Action.Value
 	formValue := cte.Event.Action.FormValue
@@ -445,47 +445,20 @@ func extractChannelActionEvent(cte *larkcallback.CardActionTriggerEvent) domain.
 		delete(formValue, "comment")
 	}
 
-	// 3. 优雅回退动作类型（使用 lo.CoalesceOrEmpty 优先使用 Action.Name，为空时回退使用 Action.Value["action"]）
-	valAction, _ := actionValue["action"].(string)
+	// 3. 优雅回退动作类型（优先使用 Action.Name，为空时回退使用 Action.Value 载荷中的 action 字段）
+	actionMap := mapx.Map(actionValue)
+	valAction := actionMap.GetString("action")
 	actionName := strings.TrimSpace(lo.CoalesceOrEmpty(cte.Event.Action.Name, valAction))
 
 	return domain.ChannelActionEvent{
 		Channel:       domain.ChannelFeishu,
 		ChannelUserID: userID,
 		Action:        domain.ChannelActionType(actionName),
-		TenantID:      parseMapInt64(actionValue, "tenant_id"),
-		TicketID:      parseMapInt64(actionValue, "ticket_id"),
-		TaskID:        parseMapDomainID(actionValue, "task_id"),
+		TenantID:      actionMap.GetInt64("tenant_id"),
+		TicketID:      actionMap.GetInt64("ticket_id"),
+		TaskID:        domain.NewID(actionMap.GetString("task_id")),
 		MessageID:     msgID,
 		Comment:       comment,
 		FormValues:    formValue,
-	}
-}
-
-// parseMapDomainID 从通用 map 中健壮解析 domain.ID（兼容数字与字符串）
-func parseMapDomainID(m map[string]interface{}, key string) domain.ID {
-	if m == nil || m[key] == nil {
-		return ""
-	}
-	return domain.NewID(fmt.Sprint(m[key]))
-}
-
-// parseMapInt64 从通用 map 中健壮解析 int64（兼容 string/float64/int/int64 等 JSON 反序列化产物）
-func parseMapInt64(m map[string]interface{}, key string) int64 {
-	if m == nil {
-		return 0
-	}
-	switch v := m[key].(type) {
-	case string:
-		val, _ := strconv.ParseInt(v, 10, 64)
-		return val
-	case float64:
-		return int64(v)
-	case int64:
-		return v
-	case int:
-		return int64(v)
-	default:
-		return 0
 	}
 }

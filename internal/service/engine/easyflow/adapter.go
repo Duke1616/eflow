@@ -145,7 +145,7 @@ func ensureEssentialVariables(vars domain.Variables, starter string, ticketID in
 	return result
 }
 
-func (a *adapter) GetTaskContext(ctx context.Context, taskID domain.ID) (domain.TaskContext, error) {
+func (a *adapter) GetTaskContext(ctx context.Context, _ domain.EngineType, taskID domain.ID) (domain.TaskContext, error) {
 	id := taskID.Int()
 	if id <= 0 {
 		return domain.TaskContext{}, fmt.Errorf("easyflow 任务 ID 非法: %s", taskID)

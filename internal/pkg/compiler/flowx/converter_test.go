@@ -447,3 +447,64 @@ func TestFlowxConverter_AntV_X6(t *testing.T) {
 	require.NotEmpty(t, timeline)
 	assert.Equal(t, "manager", timeline[0].Tasks[0].Assignee)
 }
+
+func TestFlowxConverter_ChatGroupNode(t *testing.T) {
+	flow := map[string]any{
+		"nodes": []any{
+			map[string]any{"id": "start_1", "type": "start", "properties": map[string]any{"name": "提单"}},
+			map[string]any{
+				"id":   "chat_1",
+				"type": "chatGroup",
+				"properties": map[string]any{
+					"name":           "发布通知群",
+					"mode":           "existing",
+					"chat_group_ids": []int64{1001, 1002},
+				},
+			},
+			map[string]any{
+				"id":   "approval_1",
+				"type": "user",
+				"properties": map[string]any{
+					"name": "主管审批",
+					"assignees": []map[string]any{
+						{"rule": "appoint", "values": []string{"manager"}},
+					},
+				},
+			},
+			map[string]any{"id": "end_1", "type": "end", "properties": map[string]any{"name": "归档"}},
+		},
+		"edges": []any{
+			map[string]any{"id": "e1", "sourceNodeId": "start_1", "targetNodeId": "chat_1"},
+			map[string]any{"id": "e2", "sourceNodeId": "chat_1", "targetNodeId": "approval_1"},
+			map[string]any{"id": "e3", "sourceNodeId": "approval_1", "targetNodeId": "end_1"},
+		},
+	}
+
+	graph, err := flowdsl.Parse(flow)
+	require.NoError(t, err)
+
+	converter := NewConverter()
+	def, err := converter.Convert("chat_proc", "群通知流程测试", graph)
+	require.NoError(t, err)
+	assert.Equal(t, "chat_proc", def.Key)
+	assert.Len(t, def.Nodes, 4)
+
+	chatNode := def.Nodes[1]
+	assert.Equal(t, model.NodeChatGroup, chatNode.Type)
+	assert.Equal(t, "发布通知群", chatNode.Name)
+
+	// 部署到 FlowX 引擎：群聊节点瞬时穿透，直接流转到主管审批
+	ctx := context.Background()
+	engine := flowx.NewEngine(memory.NewStorage())
+	_, err = engine.Deploy(ctx, def)
+	require.NoError(t, err)
+
+	instID, err := engine.Start(ctx, flowx.StartReq{Key: "chat_proc", Starter: "alice"})
+	require.NoError(t, err)
+
+	tasks, err := engine.ListTasksByInstance(ctx, instID)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	assert.Equal(t, "approval_1", tasks[0].NodeID)
+	assert.Equal(t, "manager", tasks[0].Assignee)
+}

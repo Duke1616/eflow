@@ -86,7 +86,7 @@ func (e *ProcessEvent) EventStart(instID int, node *model.Node, prevNode model.N
 	}
 
 	// 1. 优先绑定工单与流程实例（确立核心领域状态基石）
-	if err = e.ticketSvc.BindProcessInstanceID(ctx, fCtx.Ticket.Id, instID); err != nil {
+	if err = e.ticketSvc.BindProcess(ctx, fCtx.Ticket.Id, domain.EngineTypeEasyFlow, domain.NewID(instID)); err != nil {
 		e.logger.Error("【EventStart】绑定工单与流程实例失败", elog.FieldErr(err), elog.Int("instID", instID))
 		return err
 	}
@@ -173,7 +173,7 @@ func (e *ProcessEvent) EventNotify(instID int, node *model.Node, prevNode model.
 		e.logger.Info("【EventNotify】检测到流转至结束节点，自动归档并关闭工单",
 			elog.Int("instID", instID))
 		baseCtx := gormx.IgnoreTenantContext(ctx)
-		if err := e.ticketSvc.UpdateStatusByProcessInstanceID(baseCtx, instID, domain.END.ToUint8()); err != nil {
+		if err := e.ticketSvc.UpdateStatusByProcessInstance(baseCtx, domain.NewID(instID), domain.END.ToUint8()); err != nil {
 			e.logger.Error("EventNotify 关闭工单失败：", elog.FieldErr(err), elog.Int("instID", instID))
 			return fmt.Errorf("关闭工单失败: %w", err)
 		}

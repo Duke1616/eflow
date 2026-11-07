@@ -99,7 +99,7 @@ func (n *Notification) asyncHandleChat(ctx context.Context, info strategy.Info, 
 
 func (n *Notification) autoPassTasks(ctx context.Context, tasks []strategy.Task) {
 	for _, t := range tasks {
-		if err := n.PassTask(ctx, t.TaskID, "ChatGroup Auto Pass"); err != nil {
+		if err := n.PassTask(ctx, t.EngineType, t.TaskID, "ChatGroup Auto Pass"); err != nil {
 			n.Logger().Error("Notification 流程自动推进失败",
 				elog.FieldErr(err),
 				elog.String("taskId", t.TaskID.String()))

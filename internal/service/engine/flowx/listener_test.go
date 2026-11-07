@@ -31,7 +31,7 @@ func TestEventListener_OnEvent(t *testing.T) {
 			},
 			setupMock: func(repo *repomocks.MockTicketRepository) {
 				repo.EXPECT().
-					UpdateStatusByInstanceKey(gomock.Any(), "inst_test_1001", domain.END.ToUint8(), gomock.Any()).
+					UpdateStatusByProcessInstance(gomock.Any(), domain.NewID("inst_test_1001"), domain.END.ToUint8(), gomock.Any()).
 					Return(nil)
 			},
 			wantErr: false,
@@ -46,7 +46,7 @@ func TestEventListener_OnEvent(t *testing.T) {
 			},
 			setupMock: func(repo *repomocks.MockTicketRepository) {
 				repo.EXPECT().
-					UpdateStatusByInstanceKey(gomock.Any(), "inst_test_1002", domain.WITHDRAW.ToUint8(), gomock.Any()).
+					UpdateStatusByProcessInstance(gomock.Any(), domain.NewID("inst_test_1002"), domain.WITHDRAW.ToUint8(), gomock.Any()).
 					Return(nil)
 			},
 			wantErr: false,
@@ -61,7 +61,7 @@ func TestEventListener_OnEvent(t *testing.T) {
 			},
 			setupMock: func(repo *repomocks.MockTicketRepository) {
 				repo.EXPECT().
-					UpdateStatusByInstanceKey(gomock.Any(), "inst_test_1003", domain.WITHDRAW.ToUint8(), gomock.Any()).
+					UpdateStatusByProcessInstance(gomock.Any(), domain.NewID("inst_test_1003"), domain.WITHDRAW.ToUint8(), gomock.Any()).
 					Return(nil)
 			},
 			wantErr: false,
@@ -76,7 +76,7 @@ func TestEventListener_OnEvent(t *testing.T) {
 			},
 			setupMock: func(repo *repomocks.MockTicketRepository) {
 				repo.EXPECT().
-					UpdateStatusByInstanceKey(gomock.Any(), "inst_test_1004", domain.END.ToUint8(), gomock.Any()).
+					UpdateStatusByProcessInstance(gomock.Any(), domain.NewID("inst_test_1004"), domain.END.ToUint8(), gomock.Any()).
 					Return(errors.New("db error"))
 			},
 			wantErr:    true,

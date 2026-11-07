@@ -20,7 +20,7 @@ var ErrInvalidRevokeReason = errors.New("撤单原因不能为空且不能超过
 // Service 统一编排流程实例撤回及其自动化任务状态迁移。
 type Service interface {
 	// Revoke 校验撤单原因，撤回流程实例，并启动已成功动作对应的撤回补偿。
-	Revoke(ctx context.Context, processInstanceID domain.ID, force bool, username, reason string) error
+	Revoke(ctx context.Context, engineType domain.EngineType, processInstanceID domain.ID, force bool, username, reason string) error
 }
 
 type service struct {
@@ -35,18 +35,19 @@ func NewService(repo repository.WithdrawalRepository, planner CompensationPlanne
 
 type processRevoker interface {
 	// Revoke 将指定流程实例交由流程引擎撤回。
-	Revoke(ctx context.Context, processInstanceID domain.ID, force bool, username string) error
+	Revoke(ctx context.Context, engineType domain.EngineType, processInstanceID domain.ID, force bool, username string) error
 }
 
 type engineRevoker struct {
 	engine engineSvc.IEngine
 }
 
-func (r engineRevoker) Revoke(ctx context.Context, processInstanceID domain.ID, force bool, username string) error {
+func (r engineRevoker) Revoke(ctx context.Context, engineType domain.EngineType, processInstanceID domain.ID, force bool, username string) error {
 	if r.engine == nil {
 		return fmt.Errorf("工作流引擎未配置")
 	}
 	return r.engine.Revoke(ctx, domain.RevokeReq{
+		EngineType: engineType,
 		InstanceID: processInstanceID,
 		Force:      force,
 		Operator:   username,
@@ -57,7 +58,7 @@ func newService(repo repository.WithdrawalRepository, planner CompensationPlanne
 	return &service{repo: repo, planner: planner, revoker: revoker}
 }
 
-func (s *service) Revoke(ctx context.Context, processInstanceID domain.ID, force bool, username, reason string) error {
+func (s *service) Revoke(ctx context.Context, engineType domain.EngineType, processInstanceID domain.ID, force bool, username, reason string) error {
 	if processInstanceID.IsZero() || username == "" {
 		return fmt.Errorf("撤回流程参数非法")
 	}
@@ -86,7 +87,7 @@ func (s *service) Revoke(ctx context.Context, processInstanceID domain.ID, force
 		}
 	}()
 
-	if err := s.revoker.Revoke(ctx, processInstanceID, force, username); err != nil {
+	if err := s.revoker.Revoke(ctx, engineType, processInstanceID, force, username); err != nil {
 		return err
 	}
 	revoked = true

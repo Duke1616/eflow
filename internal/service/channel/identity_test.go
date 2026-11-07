@@ -29,46 +29,46 @@ func TestChannelIdentityResolver_ResolveUser(t *testing.T) {
 			channelUserID: "bcegag66",
 			taskID:        domain.NewID(5242),
 			mockSetup: func(userMock *usermocks.MockUserServiceClient, engineMock *enginemocks.MockIEngine) {
-				engineMock.EXPECT().GetTaskContext(gomock.Any(), domain.NewID(5242)).Return(domain.TaskContext{
-					Assignee: "luankz",
+				engineMock.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID(5242)).Return(domain.TaskContext{
+					Assignee: "zhangsan",
 				}, nil)
 				userMock.EXPECT().QueryByUsername(gomock.Any(), &userv1.QueryByUsernameReq{
-					Username: "luankz",
+					Username: "zhangsan",
 				}).Return(&userv1.QueryUserResp{
 					User: &userv1.User{
 						Id:          1,
-						Username:    "luankz",
-						DisplayName: "栾凯朝",
+						Username:    "zhangsan",
+						DisplayName: "张三",
 						LarkUserId:  "bcegag66",
 						IsAdmin:     true,
 					},
 				}, nil)
 			},
 			wantErr:      nil,
-			wantUsername: "luankz",
+			wantUsername: "zhangsan",
 		},
 		{
 			name:          "通过待办任务上下文成功匹配企微身份",
 			channel:       domain.ChannelWechat,
-			channelUserID: "LuanKaiZhao",
+			channelUserID: "ZhangSan",
 			taskID:        domain.NewID(5243),
 			mockSetup: func(userMock *usermocks.MockUserServiceClient, engineMock *enginemocks.MockIEngine) {
-				engineMock.EXPECT().GetTaskContext(gomock.Any(), domain.NewID(5243)).Return(domain.TaskContext{
-					Assignee: "luankz",
+				engineMock.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID(5243)).Return(domain.TaskContext{
+					Assignee: "zhangsan",
 				}, nil)
 				userMock.EXPECT().QueryByUsername(gomock.Any(), &userv1.QueryByUsernameReq{
-					Username: "luankz",
+					Username: "zhangsan",
 				}).Return(&userv1.QueryUserResp{
 					User: &userv1.User{
 						Id:           1,
-						Username:     "luankz",
-						DisplayName:  "栾凯朝",
-						WechatUserId: "LuanKaiZhao",
+						Username:     "zhangsan",
+						DisplayName:  "张三",
+						WechatUserId: "ZhangSan",
 					},
 				}, nil)
 			},
 			wantErr:      nil,
-			wantUsername: "luankz",
+			wantUsername: "zhangsan",
 		},
 		{
 			name:          "通过FlowX字符串任务ID成功匹配飞书身份",
@@ -76,23 +76,23 @@ func TestChannelIdentityResolver_ResolveUser(t *testing.T) {
 			channelUserID: "bcegag66",
 			taskID:        domain.NewID("flowx_node_alice_1"),
 			mockSetup: func(userMock *usermocks.MockUserServiceClient, engineMock *enginemocks.MockIEngine) {
-				engineMock.EXPECT().GetTaskContext(gomock.Any(), domain.NewID("flowx_node_alice_1")).Return(domain.TaskContext{
-					Assignee: "luankz",
+				engineMock.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("flowx_node_alice_1")).Return(domain.TaskContext{
+					Assignee: "zhangsan",
 				}, nil)
 				userMock.EXPECT().QueryByUsername(gomock.Any(), &userv1.QueryByUsernameReq{
-					Username: "luankz",
+					Username: "zhangsan",
 				}).Return(&userv1.QueryUserResp{
 					User: &userv1.User{
 						Id:          1,
-						Username:    "luankz",
-						DisplayName: "栾凯朝",
+						Username:    "zhangsan",
+						DisplayName: "张三",
 						LarkUserId:  "bcegag66",
 						IsAdmin:     true,
 					},
 				}, nil)
 			},
 			wantErr:      nil,
-			wantUsername: "luankz",
+			wantUsername: "zhangsan",
 		},
 		{
 			name:          "任务指派人与操作者三方标识不匹配且无同名账号",
@@ -100,14 +100,14 @@ func TestChannelIdentityResolver_ResolveUser(t *testing.T) {
 			channelUserID: "stranger_feishu_id",
 			taskID:        domain.NewID(5244),
 			mockSetup: func(userMock *usermocks.MockUserServiceClient, engineMock *enginemocks.MockIEngine) {
-				engineMock.EXPECT().GetTaskContext(gomock.Any(), domain.NewID(5244)).Return(domain.TaskContext{
-					Assignee: "luankz",
+				engineMock.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID(5244)).Return(domain.TaskContext{
+					Assignee: "zhangsan",
 				}, nil)
 				userMock.EXPECT().QueryByUsername(gomock.Any(), &userv1.QueryByUsernameReq{
-					Username: "luankz",
+					Username: "zhangsan",
 				}).Return(&userv1.QueryUserResp{
 					User: &userv1.User{
-						Username:   "luankz",
+						Username:   "zhangsan",
 						LarkUserId: "bcegag66",
 					},
 				}, nil)
@@ -138,7 +138,7 @@ func TestChannelIdentityResolver_ResolveUser(t *testing.T) {
 			tc.mockSetup(userMock, engineMock)
 
 			resolver := NewChannelIdentityResolver(userMock, engineMock)
-			user, err := resolver.ResolveUser(context.Background(), tc.channel, tc.channelUserID, tc.taskID)
+			user, err := resolver.ResolveUser(context.Background(), tc.channel, tc.channelUserID, domain.EngineTypeFlowx, tc.taskID)
 
 			if tc.wantErr != nil {
 				require.Error(t, err)

@@ -3,6 +3,7 @@ package dao
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
@@ -22,6 +23,7 @@ type Ticket struct {
 	Key                  string                            `gorm:"column:key;type:varchar(64);index;comment:'工单业务唯一单据号Key'"`
 	TemplateId           int64                             `gorm:"column:template_id;type:bigint;not null;index;comment:'绑定工单模板ID'"`
 	WorkflowId           int64                             `gorm:"column:workflow_id;type:bigint;not null;index;comment:'绑定工作流流程ID'"`
+	EngineType           string                            `gorm:"column:engine_type;type:varchar(32);not null;default:'easy-workflow';index;comment:'流程引擎类型(easy-workflow/flowx)'"`
 	ProcessInstanceId    int                               `gorm:"column:process_instance_id;type:int;index;comment:'关联流程实例执行ID'"`
 	ProcessInstanceKey   string                            `gorm:"column:process_instance_key;type:varchar(64);not null;default:'';index;comment:'现代流程引擎实例全局唯一标识Key'"`
 	CreateBy             string                            `gorm:"column:create_by;type:varchar(128);index;comment:'工单创建人用户名'"`
@@ -54,6 +56,10 @@ type TicketDAO interface {
 	DetailByProcessInstId(ctx context.Context, instanceId int) (Ticket, error)
 	// DetailByProcessInstKey 依据绑定的工作流引擎流程实例全局唯一 Key 从物理表获取单据
 	DetailByProcessInstKey(ctx context.Context, instanceKey string) (Ticket, error)
+	// DetailByProcessInstance 根据流程实例标识（覆盖 key 与历史整型 id）获取工单
+	DetailByProcessInstance(ctx context.Context, instanceID string) (Ticket, error)
+	// UpdateStatusByProcessInstance 根据流程实例标识更新工单流转状态
+	UpdateStatusByProcessInstance(ctx context.Context, instanceID string, status uint8, wtime int64) error
 	// AccessibleDetailByProcessInstId 获取经过 PBAC AccessScope 约束的单条工单。
 	AccessibleDetailByProcessInstId(ctx context.Context, instanceId int) (Ticket, error)
 	// Detail 依据物理主键 ID 获取单条工单详情
@@ -151,9 +157,53 @@ func (g *gormTicketDAO) DetailByProcessInstKey(ctx context.Context, instanceKey 
 	return res, err
 }
 
+func (g *gormTicketDAO) DetailByProcessInstance(ctx context.Context, instanceID string) (Ticket, error) {
+	var res Ticket
+	// 优先查询现代引擎全局唯一标识 Key（涵盖纯数字雪花 ID 与字符串 Key）
+	err := g.db.WithContext(ctx).Scopes(gormx.IgnoreTenant()).
+		Where("process_instance_key = ?", instanceID).
+		First(&res).Error
+	if err == nil {
+		return res, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return res, err
+	}
+	// 兜底支持历史 EasyFlow 小整型自增 ID
+	if intID, parseErr := strconv.Atoi(instanceID); parseErr == nil && intID > 0 {
+		return g.DetailByProcessInstId(ctx, intID)
+	}
+	return res, gorm.ErrRecordNotFound
+}
+
+func (g *gormTicketDAO) UpdateStatusByProcessInstance(ctx context.Context, instanceID string, status uint8, wtime int64) error {
+	now := time.Now().UnixMilli()
+	updates := map[string]interface{}{
+		"status": status,
+		"utime":  now,
+	}
+	if wtime > 0 {
+		updates["wtime"] = wtime
+	}
+	res := g.db.WithContext(ctx).Model(&Ticket{}).Scopes(gormx.IgnoreTenant()).
+		Where("process_instance_key = ?", instanceID).
+		Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		return nil
+	}
+	if intID, err := strconv.Atoi(instanceID); err == nil && intID > 0 {
+		return g.UpdateStatusByInstanceId(ctx, intID, status)
+	}
+	return nil
+}
+
 func (g *gormTicketDAO) RegisterProcessInstanceId(ctx context.Context, id int64, instanceId int, status uint8) error {
 	return g.db.WithContext(ctx).Model(&Ticket{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"process_instance_id": instanceId,
+		"engine_type":         "easy-workflow",
 		"status":              status,
 		"process_start_error": "",
 		"utime":               time.Now().UnixMilli(),
@@ -163,6 +213,7 @@ func (g *gormTicketDAO) RegisterProcessInstanceId(ctx context.Context, id int64,
 func (g *gormTicketDAO) RegisterProcessInstanceKey(ctx context.Context, id int64, instanceKey string, status uint8) error {
 	return g.db.WithContext(ctx).Model(&Ticket{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"process_instance_key": instanceKey,
+		"engine_type":          "flowx",
 		"status":               status,
 		"process_start_error":  "",
 		"utime":                time.Now().UnixMilli(),

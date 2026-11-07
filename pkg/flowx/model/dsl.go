@@ -15,6 +15,7 @@ const (
 	NodeEnd              NodeType = "END"               // 结束节点
 	NodeApproval         NodeType = "APPROVAL"          // 人工审批节点
 	NodeCarbonCopy       NodeType = "CC"                // 抄送节点 (只读知会相关人，瞬时穿透推进，不阻塞流程)
+	NodeChatGroup        NodeType = "CHAT_GROUP"        // 群聊通知节点 (IM 群聊广播通知，瞬时穿透，不阻塞流程)
 	NodeTask             NodeType = "TASK"              // 自动化任务节点
 	NodeGatewayExclusive NodeType = "GATEWAY_EXCLUSIVE" // 排他网关 (XOR / 或网关)：顺次求值，首个命中立即短路，仅走单条分支；汇聚任一到达即放行
 	NodeGatewayParallel  NodeType = "GATEWAY_PARALLEL"  // 并行网关 (AND / 并网关)：无条件全部分支并发激活；汇聚等待全部前置入边完成
@@ -140,7 +141,7 @@ type NodeSpec struct {
 
 // IsActivity 是否属于活动/任务节点 (审批节点、自动化节点、抄送节点等具有业务执行或任务特征的实体)
 func (n NodeSpec) IsActivity() bool {
-	return n.Type == NodeApproval || n.Type == NodeTask || n.Type == NodeCarbonCopy
+	return n.Type == NodeApproval || n.Type == NodeTask || n.Type == NodeCarbonCopy || n.Type == NodeChatGroup
 }
 
 // IsGateway 是否属于分支或汇聚网关节点
