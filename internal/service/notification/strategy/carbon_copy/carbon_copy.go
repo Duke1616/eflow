@@ -80,7 +80,7 @@ func (n *Notification) asyncHandleCarbonCopy(ctx context.Context, info strategy.
 					Name:     domain.NotifyTypeCC,
 					Title:    title,
 					Fields:   fields,
-					Values:   notification.GenerateCallbackValues(info.Ticket.Id, src.TaskID, info.Ticket.TenantID),
+					Values:   notification.GenerateCallbackValues(info.Ticket.Id, src.TaskID.String(), info.Ticket.TenantID),
 					HideForm: true,
 				},
 			}
@@ -94,7 +94,7 @@ func (n *Notification) asyncHandleCarbonCopy(ctx context.Context, info strategy.
 	// 3. 自动通过任务流转
 	for _, task := range tasks {
 		if err = n.PassTask(ctx, task.TaskID, "抄送系统自动通过"); err != nil {
-			n.Logger().Error("CarbonCopy 自动流转失败", elog.FieldErr(err), elog.Int("taskId", task.TaskID))
+			n.Logger().Error("CarbonCopy 自动流转失败", elog.FieldErr(err), elog.String("taskId", task.TaskID.String()))
 		}
 	}
 }

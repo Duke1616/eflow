@@ -74,7 +74,7 @@ func (s *CarbonCopyTestSuite) TestSend() {
 
 	// 5. Inside async part
 	// Mock FetchTasksWithRetry
-	tasks := []strategy.Task{{TaskID: 1001, UserID: "user1"}}
+	tasks := []strategy.Task{{TaskID: domain.NewID(1001), UserID: "user1"}}
 	s.mockBase.EXPECT().FetchTasksWithRetry(gomock.Any(), gomock.Any()).Return(tasks, nil)
 
 	// Mock IsGlobalNotify
@@ -87,7 +87,7 @@ func (s *CarbonCopyTestSuite) TestSend() {
 	s.mockSender.EXPECT().BatchSend(gomock.Any(), gomock.Any()).Return(notification.NewSuccessResponse(0, "success"), nil)
 
 	// Mock PassTask
-	s.mockBase.EXPECT().PassTask(gomock.Any(), 1001, "抄送系统自动通过").Return(nil)
+	s.mockBase.EXPECT().PassTask(gomock.Any(), domain.NewID(1001), "抄送系统自动通过").Return(nil)
 
 	resp, err := s.strategy.Send(ctx, info)
 	s.NoError(err)

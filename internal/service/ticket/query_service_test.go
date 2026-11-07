@@ -91,7 +91,7 @@ func TestQueryService_ListUserInitiated(t *testing.T) {
 				assert.Equal(t, int64(1), views[0].Ticket.Id)
 				assert.Equal(t, "组长审批", views[0].CurrentStep)
 				assert.Equal(t, "鲍勃", views[0].ApprovedBy)
-				assert.Equal(t, "999", views[0].TaskID)
+				assert.Equal(t, domain.NewID("999"), views[0].TaskID)
 
 				// 工单 2 已撤回，步骤展示为“已撤回”
 				assert.Equal(t, int64(2), views[1].Ticket.Id)
@@ -139,13 +139,13 @@ func TestQueryService_ListUserInitiated(t *testing.T) {
 				assert.Equal(t, int64(2735), views[0].Ticket.Id)
 				assert.Equal(t, "后端", views[0].CurrentStep)
 				assert.Equal(t, "裴承运", views[0].ApprovedBy)
-				assert.Equal(t, "5242", views[0].TaskID)
+				assert.Equal(t, domain.NewID("5242"), views[0].TaskID)
 
 				// 第二条视图对应“前端”分支，工单主体数据完全一致，供前端根据 ID 合并行
 				assert.Equal(t, int64(2735), views[1].Ticket.Id)
 				assert.Equal(t, "前端", views[1].CurrentStep)
 				assert.Equal(t, "栾凯朝", views[1].ApprovedBy)
-				assert.Equal(t, "5243", views[1].TaskID)
+				assert.Equal(t, domain.NewID("5243"), views[1].TaskID)
 			},
 		},
 	}
@@ -327,7 +327,7 @@ func TestQueryService_ListUserTodo_CrossEngine(t *testing.T) {
 	// 验证包含 EasyFlow 待办
 	easyView, foundEasy := lo.Find(views, func(v domain.TicketTaskView) bool { return v.Ticket.Id == 1 })
 	assert.True(t, foundEasy)
-	assert.Equal(t, "501", easyView.TaskID)
+	assert.Equal(t, domain.NewID(501), easyView.TaskID)
 	assert.Equal(t, "组长初审", easyView.CurrentStep)
 	assert.Equal(t, "爱丽丝", easyView.ApprovedBy)
 

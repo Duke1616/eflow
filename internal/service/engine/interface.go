@@ -46,6 +46,9 @@ type IEngine interface {
 	// GetAutomationTask 获取流程实例在当前自动化节点下待执行的任务记录
 	GetAutomationTask(ctx context.Context, instanceID domain.ID, nodeID string) (domain.TaskRecord, error)
 
+	// GetTasksByCurrentNode 获取指定流程实例在特定节点下当前挂起/未完成的任务记录集合
+	GetTasksByCurrentNode(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, nodeID string) ([]domain.TaskRecord, error)
+
 	// GetInstanceExecutionView 获取指定流程实例的运行态点亮视图（含已流转边与节点状态映射）
 	GetInstanceExecutionView(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, status uint8) (domain.InstanceExecutionView, error)
 

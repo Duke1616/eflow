@@ -268,6 +268,15 @@ func (d *engineDispatcher) GetAutomationTask(ctx context.Context, instanceID dom
 	return eng.GetAutomationTask(ctx, instanceID, nodeID)
 }
 
+// GetTasksByCurrentNode 获取指定流程实例在特定节点下当前挂起/未完成的任务记录集合
+func (d *engineDispatcher) GetTasksByCurrentNode(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, nodeID string) ([]domain.TaskRecord, error) {
+	eng, err := d.resolveEngine(engineType, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	return eng.GetTasksByCurrentNode(ctx, engineType, instanceID, nodeID)
+}
+
 // ListTodoTasks 并发聚合所有已注册底层引擎的待办任务，向业务层屏蔽底层异构细节（多态聚合）
 func (d *engineDispatcher) ListTodoTasks(ctx context.Context, req domain.TodoQueryReq) ([]domain.TodoTask, int64, error) {
 	d.mu.RLock()

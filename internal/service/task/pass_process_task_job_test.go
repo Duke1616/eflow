@@ -149,7 +149,7 @@ func (s *passEngineStub) GetAutomationTask(ctx context.Context, instanceID domai
 	if err := s.errors[procInstID]; err != nil {
 		return domain.TaskRecord{}, err
 	}
-	return domain.TaskRecord{TaskID: procInstID}, nil
+	return domain.TaskRecord{TaskID: domain.NewID(procInstID)}, nil
 }
 
 func (s *passEngineStub) Pass(context.Context, domain.TaskPassReq) error { return nil }

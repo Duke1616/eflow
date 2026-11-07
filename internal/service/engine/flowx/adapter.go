@@ -173,9 +173,35 @@ func (a *flowxEngine) GetTimeline(ctx context.Context, _ domain.EngineType, inst
 }
 
 func (a *flowxEngine) GetInstanceExecutionView(ctx context.Context, _ domain.EngineType, instanceID domain.ID, status uint8) (domain.InstanceExecutionView, error) {
+	if a.engine == nil {
+		return domain.InstanceExecutionView{}, errors.New("flowx 流程引擎未初始化")
+	}
+
+	instID := instanceID.String()
+	if instID == "" {
+		return domain.InstanceExecutionView{}, fmt.Errorf("%w: 流程实例 ID 不能为空", engine.ErrInvalidParameter)
+	}
+
+	tasks, err := a.engine.ListTasksByInstance(ctx, instID)
+	if err != nil {
+		return domain.InstanceExecutionView{}, fmt.Errorf("flowx 查询任务执行记录失败: %w", err)
+	}
+
+	nodeStatusMap := lo.Associate(tasks, func(t *flowxModel.Task) (string, int) {
+		return t.NodeID, int(t.Status)
+	})
+
+	pendingUsers := lo.Uniq(lo.FilterMap(tasks, func(t *flowxModel.Task, _ int) (string, bool) {
+		if t.IsPending() && t.Assignee != "" {
+			return t.Assignee, true
+		}
+		return "", false
+	}))
+
 	return domain.InstanceExecutionView{
-		NodeStatusMap:  make(map[string]int),
+		NodeStatusMap:  nodeStatusMap,
 		TraversedEdges: make(map[string][]string),
+		PendingUsers:   pendingUsers,
 	}, nil
 }
 
@@ -199,6 +225,36 @@ func (a *flowxEngine) Transfer(ctx context.Context, req domain.TaskTransferReq) 
 
 func (a *flowxEngine) GetAutomationTask(ctx context.Context, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
 	return domain.TaskRecord{}, fmt.Errorf("flowx 暂未直接支持根据 nodeID 获取自动化任务")
+}
+
+func (a *flowxEngine) GetTasksByCurrentNode(ctx context.Context, _ domain.EngineType, instanceID domain.ID, nodeID string) ([]domain.TaskRecord, error) {
+	if a.engine == nil {
+		return nil, errors.New("flowx 流程引擎未初始化")
+	}
+	instID := instanceID.String()
+	if instID == "" {
+		return nil, fmt.Errorf("%w: 流程实例 ID 不能为空", engine.ErrInvalidParameter)
+	}
+
+	tasks, err := a.engine.ListTasksByInstance(ctx, instID)
+	if err != nil {
+		return nil, err
+	}
+
+	pendingTasks := lo.Filter(tasks, func(t *flowxModel.Task, _ int) bool {
+		return t.NodeID == nodeID && t.IsPending()
+	})
+
+	return lo.Map(pendingTasks, func(t *flowxModel.Task, _ int) domain.TaskRecord {
+		return domain.TaskRecord{
+			TaskID:     domain.NewID(t.ID),
+			NodeID:     t.NodeID,
+			NodeName:   t.NodeName,
+			ApprovedBy: t.Assignee,
+			Status:     0,
+			IsFinished: 0,
+		}
+	}), nil
 }
 
 func (a *flowxEngine) ListTodoTasks(ctx context.Context, req domain.TodoQueryReq) ([]domain.TodoTask, int64, error) {
@@ -283,6 +339,7 @@ func (a *flowxEngine) GetTaskRecords(ctx context.Context, _ domain.EngineType, i
 			endTimeStr = t.FinishTime.Format(time.RFC3339)
 		}
 		return domain.TaskRecord{
+			TaskID:       domain.NewID(t.ID),
 			NodeID:       t.NodeID,
 			BatchCode:    fmt.Sprintf("%d", t.BatchCode),
 			NodeName:     t.NodeName,
@@ -317,6 +374,7 @@ func (a *flowxEngine) GetTaskTimeline(ctx context.Context, _ domain.EngineType, 
 
 		members := lo.Map(evt.Tasks, func(t *flowxModel.Task, _ int) domain.TaskRecord {
 			return domain.TaskRecord{
+				TaskID:     domain.NewID(t.ID),
 				NodeID:     t.NodeID,
 				BatchCode:  fmt.Sprintf("%d", t.BatchCode),
 				NodeName:   t.NodeName,

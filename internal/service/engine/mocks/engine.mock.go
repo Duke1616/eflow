@@ -186,6 +186,21 @@ func (mr *MockIEngineMockRecorder) GetTaskTimeline(ctx, engineType, instanceID, 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTaskTimeline", reflect.TypeOf((*MockIEngine)(nil).GetTaskTimeline), ctx, engineType, instanceID, offset, limit)
 }
 
+// GetTasksByCurrentNode mocks base method.
+func (m *MockIEngine) GetTasksByCurrentNode(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, nodeID string) ([]domain.TaskRecord, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetTasksByCurrentNode", ctx, engineType, instanceID, nodeID)
+	ret0, _ := ret[0].([]domain.TaskRecord)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetTasksByCurrentNode indicates an expected call of GetTasksByCurrentNode.
+func (mr *MockIEngineMockRecorder) GetTasksByCurrentNode(ctx, engineType, instanceID, nodeID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTasksByCurrentNode", reflect.TypeOf((*MockIEngine)(nil).GetTasksByCurrentNode), ctx, engineType, instanceID, nodeID)
+}
+
 // GetTimeline mocks base method.
 func (m *MockIEngine) GetTimeline(ctx context.Context, engineType domain.EngineType, instanceID domain.ID) ([]domain.TimelineNode, error) {
 	m.ctrl.T.Helper()

@@ -1,76 +1,34 @@
 package domain
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"strconv"
 	"time"
+
+	"github.com/Duke1616/eflow/pkg/idx"
 )
 
-// ID 引擎实体（任务、实例等）强类型自适应标识
-// 支持 int 与 string 的无缝安全转换，消除底层代码对 any 的防御性反射断言
-type ID string
+// ID 引擎实体（任务、实例等）强类型自适应标识，对齐基础设施通用包 pkg/idx.ID
+type ID = idx.ID
 
-// NewID 从任意整型或字符串创建强类型 ID（泛型工厂方法）
+// TaskID 流程审批任务领域强类型唯一标识（自适应整型自增与现代字符串形态）
+type TaskID = idx.ID
+
+// InstanceID 流程实例领域强类型唯一标识（自适应整型主键与现代字符串形态）
+type InstanceID = idx.ID
+
+// NewID 从任意整型或字符串创建强类型 ID
 func NewID[T ~int | ~int64 | ~int32 | ~string](val T) ID {
-	return ID(fmt.Sprint(val))
+	return idx.New(val)
 }
 
-// Int 安全解析为整型，失败返回 0
-func (id *ID) Int() int {
-	if id == nil {
-		return 0
-	}
-	v, _ := strconv.Atoi(string(*id))
-	return v
+// NewTaskID 从任意整型或字符串创建强类型任务标识
+func NewTaskID[T ~int | ~int64 | ~int32 | ~string](val T) TaskID {
+	return idx.New(val)
 }
 
-// Int64 安全解析为 64 位整型，失败返回 0
-func (id *ID) Int64() int64 {
-	if id == nil {
-		return 0
-	}
-	v, _ := strconv.ParseInt(string(*id), 10, 64)
-	return v
-}
-
-// String 返回字符串形态
-func (id *ID) String() string {
-	if id == nil {
-		return ""
-	}
-	return string(*id)
-}
-
-// IsZero 判断是否为零值
-func (id *ID) IsZero() bool {
-	if id == nil {
-		return true
-	}
-	return *id == "" || *id == "0"
-}
-
-// UnmarshalJSON 兼容 JSON 中以数字或字符串表示的 ID。
-func (id *ID) UnmarshalJSON(b []byte) error {
-	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
-		*id = ""
-		return nil
-	}
-
-	var text string
-	if err := json.Unmarshal(b, &text); err == nil {
-		*id = ID(text)
-		return nil
-	}
-
-	var number json.Number
-	if err := json.Unmarshal(b, &number); err != nil {
-		return fmt.Errorf("ID 必须是 JSON 字符串或数字: %w", err)
-	}
-	*id = ID(number.String())
-	return nil
+// NewInstanceID 从任意整型或字符串创建强类型流程实例标识
+func NewInstanceID[T ~int | ~int64 | ~int32 | ~string](val T) InstanceID {
+	return idx.New(val)
 }
 
 // DeployInfo 流程引擎部署完成返回的元信息

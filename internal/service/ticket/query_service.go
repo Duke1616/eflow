@@ -275,7 +275,7 @@ func (q *queryService) assemblePendingTasks(ctx context.Context, todos []domain.
 
 	return lo.Map(todos, func(t domain.TodoTask, _ int) domain.TicketTaskView {
 		view := domain.TicketTaskView{
-			TaskID:      t.TaskID.String(),
+			TaskID:      t.TaskID,
 			CurrentStep: t.NodeName,
 		}
 		if !t.CreateTime.IsZero() {
@@ -347,7 +347,7 @@ func (q *queryService) assembleTimelineEvents(ctx context.Context, groups []doma
 		return g.Members
 	})
 	allRecords := q.toTaskRecords(ctx, allMembers)
-	recordsMap := make(map[int]domain.TaskRecord, len(allMembers))
+	recordsMap := make(map[domain.ID]domain.TaskRecord, len(allMembers))
 	for idx, record := range allRecords {
 		recordsMap[allMembers[idx].TaskID] = record
 	}
@@ -384,8 +384,9 @@ func (q *queryService) toTaskRecords(ctx context.Context, ts []domain.TaskRecord
 
 	uMap := q.getUserMap(ctx, uniqueUserIDs)
 
-	taskIDs := lo.Map(ts, func(src domain.TaskRecord, _ int) int {
-		return src.TaskID
+	taskIDs := lo.FilterMap(ts, func(src domain.TaskRecord, _ int) (int, bool) {
+		idInt := src.TaskID.Int()
+		return idInt, idInt > 0
 	})
 	taskDataMap, err := q.repo.FindTaskFormsBatch(ctx, taskIDs)
 	if err != nil {
@@ -410,7 +411,7 @@ func (q *queryService) toTaskRecords(ctx context.Context, ts []domain.TaskRecord
 			Comment:      src.Comment,
 			IsFinished:   src.IsFinished,
 			FinishedTime: src.FinishedTime,
-			FormValues:   taskDataMap[src.TaskID],
+			FormValues:   taskDataMap[src.TaskID.Int()],
 		}
 	})
 }

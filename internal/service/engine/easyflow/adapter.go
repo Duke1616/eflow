@@ -327,7 +327,7 @@ func (a *adapter) GetAutomationTask(ctx context.Context, instanceID domain.ID, n
 	}
 
 	return domain.TaskRecord{
-		TaskID:       task.TaskID,
+		TaskID:       domain.NewID(task.TaskID),
 		NodeID:       task.NodeID,
 		PrevNodeID:   task.PrevNodeID,
 		BatchCode:    task.BatchCode,
@@ -339,6 +339,34 @@ func (a *adapter) GetAutomationTask(ctx context.Context, instanceID domain.ID, n
 		IsFinished:   task.IsFinished,
 		FinishedTime: task.FinishedTime,
 	}, nil
+}
+
+func (a *adapter) GetTasksByCurrentNode(ctx context.Context, _ domain.EngineType, instanceID domain.ID, nodeID string) ([]domain.TaskRecord, error) {
+	procInstID := instanceID.Int()
+	if procInstID <= 0 {
+		return nil, fmt.Errorf("easyflow 流程实例 ID 非法: %s", instanceID)
+	}
+
+	tasks, err := a.repo.GetTasksByCurrentNodeId(ctx, procInstID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	return lo.Map(tasks, func(t model.Task, _ int) domain.TaskRecord {
+		return domain.TaskRecord{
+			TaskID:       domain.NewID(t.TaskID),
+			NodeID:       t.NodeID,
+			PrevNodeID:   t.PrevNodeID,
+			BatchCode:    t.BatchCode,
+			NodeName:     t.NodeName,
+			ApprovedBy:   t.UserID,
+			IsCosigned:   t.IsCosigned,
+			Status:       t.Status,
+			Comment:      t.Comment,
+			IsFinished:   t.IsFinished,
+			FinishedTime: t.FinishedTime,
+		}
+	}), nil
 }
 
 func (a *adapter) ListTodoTasks(ctx context.Context, req domain.TodoQueryReq) ([]domain.TodoTask, int64, error) {
@@ -449,7 +477,7 @@ func (a *adapter) GetTaskRecords(ctx context.Context, _ domain.EngineType, insta
 
 	domainRecords := lo.Map(records, func(t model.Task, _ int) domain.TaskRecord {
 		return domain.TaskRecord{
-			TaskID:       t.TaskID,
+			TaskID:       domain.NewID(t.TaskID),
 			NodeID:       t.NodeID,
 			PrevNodeID:   t.PrevNodeID,
 			BatchCode:    t.BatchCode,
@@ -508,7 +536,7 @@ func (a *adapter) GetTaskTimeline(ctx context.Context, _ domain.EngineType, inst
 		key := fmt.Sprintf("%s:%s", g.NodeID, g.BatchCode)
 		g.Members = lo.Map(byKey[key], func(t model.Task, _ int) domain.TaskRecord {
 			return domain.TaskRecord{
-				TaskID:       t.TaskID,
+				TaskID:       domain.NewID(t.TaskID),
 				NodeID:       t.NodeID,
 				PrevNodeID:   t.PrevNodeID,
 				BatchCode:    t.BatchCode,

@@ -73,6 +73,9 @@ func (e *flowEngine) activateNodes(ctx context.Context, session *flowSession, no
 	for _, node := range nodes {
 		inst.CurrentNode = node.ID
 
+		// 广播节点激活进入事件 (便于抄送知会、群通知及流程点亮追踪)
+		e.eventBus.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &node, operator, ""))
+
 		// 若当前节点为 End 且当前流转中已无任何等待态节点，全单圆满办结
 		if node.Type == model.NodeEnd {
 			if !hasActiveNodes {

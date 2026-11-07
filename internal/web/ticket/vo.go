@@ -1,38 +1,14 @@
 package ticket
 
 import (
-	"strconv"
-	"strings"
-
-	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/pkg/idx"
 )
 
-// TaskID 审批任务强类型标识，自动兼容 JSON 中的整型数字（如 102）与字符串（如 "task_xxx"）
-type TaskID string
+// TaskID 审批任务强类型自适应标识，直接对齐底层通用包 pkg/idx.ID
+type TaskID = idx.ID
 
-// UnmarshalJSON 统一解析 JSON 格式的任务 ID，兼顾数字与字符串形态
-func (t *TaskID) UnmarshalJSON(b []byte) error {
-	raw := strings.Trim(string(b), "\"")
-	*t = TaskID(raw)
-	return nil
-}
-
-// String 返回字符串形态，空指针安全保护
-func (t *TaskID) String() string {
-	if t == nil {
-		return ""
-	}
-	return string(*t)
-}
-
-// Int 安全解析为整型，失败返回 0，空指针安全保护
-func (t *TaskID) Int() int {
-	if t == nil {
-		return 0
-	}
-	i, _ := strconv.Atoi(string(*t))
-	return i
-}
+// InstanceID 流程实例强类型自适应标识，直接对齐底层通用包 pkg/idx.ID
+type InstanceID = idx.ID
 
 type CreateTicketReq struct {
 	TemplateId int64                  `json:"template_id"`
@@ -42,7 +18,7 @@ type CreateTicketReq struct {
 }
 
 type DetailProcessInstIdReq struct {
-	ProcessInstanceId domain.ID `json:"process_instance_id"`
+	ProcessInstanceId idx.ID `json:"process_instance_id"`
 }
 
 // RestartProcessReq 表示重新启动指定工单流程的请求参数。
@@ -51,16 +27,16 @@ type RestartProcessReq struct {
 }
 
 type RecordTaskReq struct {
-	ProcessInstId domain.ID `json:"process_inst_id"`
-	Offset        int64     `json:"offset"`
-	Limit         int64     `json:"limit"`
+	ProcessInstId idx.ID `json:"process_inst_id"`
+	Offset        int64  `json:"offset"`
+	Limit         int64  `json:"limit"`
 }
 
 // TaskTimelineReq 按节点执行批次分页查询工单流转时间线。
 type TaskTimelineReq struct {
-	ProcessInstId domain.ID `json:"process_inst_id"`
-	Offset        int64     `json:"offset"`
-	Limit         int64     `json:"limit"`
+	ProcessInstId idx.ID `json:"process_inst_id"`
+	Offset        int64  `json:"offset"`
+	Limit         int64  `json:"limit"`
 }
 
 type Todo struct {
@@ -99,9 +75,9 @@ type TransferReq struct {
 }
 
 type RevokeOrderReq struct {
-	InstanceId domain.ID `json:"instance_id"`
-	Force      bool      `json:"force"`
-	Reason     string    `json:"reason"`
+	InstanceId idx.ID `json:"instance_id"`
+	Force      bool   `json:"force"`
+	Reason     string `json:"reason"`
 }
 
 type SubmitRatingReq struct {
@@ -174,7 +150,7 @@ type Ticket struct {
 	Starter              string                 `json:"starter"`
 	Status               uint8                  `json:"status"`
 	Provide              uint8                  `json:"provide"`
-	ProcessInstanceId    int                    `json:"process_instance_id"`
+	ProcessInstanceId    any                    `json:"process_instance_id"`
 	WorkflowId           int64                  `json:"workflow_id"`
 	Ctime                string                 `json:"ctime"`
 	Wtime                string                 `json:"wtime"`

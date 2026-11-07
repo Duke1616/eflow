@@ -3,6 +3,7 @@ package ticket
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
@@ -22,6 +23,10 @@ import (
 
 var systemErrorResult = ginx.Result{Code: 500, Msg: "系统内部错误"}
 var ticketNotAccessibleResult = ginx.Result{Code: 403, Msg: "工单不存在或无权访问"}
+
+// maxSafeInteger 为 JavaScript 的 Number.MAX_SAFE_INTEGER (2^53 - 1)
+// 超过此范围的纯整型 ID（如 64 位雪花算法）必须以字符串下发，防止前端 JSON 反序列化产生精度截断
+const maxSafeInteger = 9007199254740991
 
 type Handler struct {
 	capability.IRegistry
@@ -201,7 +206,7 @@ func (h *Handler) TodoByUser(ctx *ginx.Context, req Todo) (ginx.Result, error) {
 }
 
 func (h *Handler) Transfer(ctx *ginx.Context, req TransferReq) (ginx.Result, error) {
-	if req.TaskId == "" {
+	if req.TaskId.IsZero() {
 		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
 	}
 	if len(req.Usernames) == 0 {
@@ -293,7 +298,7 @@ func (h *Handler) SubmitRating(ctx *ginx.Context, req SubmitRatingReq) (ginx.Res
 }
 
 func (h *Handler) Pass(ctx *ginx.Context, req PassOrderReq) (ginx.Result, error) {
-	if req.TaskId == "" {
+	if req.TaskId.IsZero() {
 		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
 	}
 
@@ -318,7 +323,7 @@ func (h *Handler) Pass(ctx *ginx.Context, req PassOrderReq) (ginx.Result, error)
 }
 
 func (h *Handler) Reject(ctx *ginx.Context, req RejectOrderReq) (ginx.Result, error) {
-	if req.TaskId == "" {
+	if req.TaskId.IsZero() {
 		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
 	}
 
@@ -480,11 +485,22 @@ func (h *Handler) toVoTicket(req domain.Ticket) Ticket {
 		wtime = time.Unix(req.Wtime/1000, 0).Format("2006-01-02 15:04:05")
 	}
 
+	var procInstID any
+	if !req.Process.InstanceID.IsZero() {
+		if idInt := req.Process.InstanceID.Int(); idInt > 0 && int64(idInt) <= maxSafeInteger && strconv.Itoa(idInt) == req.Process.InstanceID.String() {
+			procInstID = idInt
+		} else {
+			procInstID = req.Process.InstanceID.String()
+		}
+	} else {
+		procInstID = 0
+	}
+
 	return Ticket{
 		Id:                   req.Id,
 		TemplateId:           req.TemplateId,
 		Starter:              req.CreateBy,
-		ProcessInstanceId:    req.Process.InstanceID.Int(),
+		ProcessInstanceId:    procInstID,
 		Provide:              req.Provide.ToUint8(),
 		Status:               req.Status.ToUint8(),
 		WorkflowId:           req.WorkflowId,
@@ -525,8 +541,12 @@ func (h *Handler) toVoTicketViews(views []domain.TicketTaskView) []Ticket {
 
 func (h *Handler) toVoTicketView(view domain.TicketTaskView) Ticket {
 	vo := h.toVoTicket(view.Ticket)
-	if view.TaskID != nil && view.TaskID != 0 && view.TaskID != "" {
-		vo.TaskId = view.TaskID
+	if !view.TaskID.IsZero() {
+		if idInt := view.TaskID.Int(); idInt > 0 && int64(idInt) <= maxSafeInteger && strconv.Itoa(idInt) == view.TaskID.String() {
+			vo.TaskId = idInt
+		} else {
+			vo.TaskId = view.TaskID.String()
+		}
 	}
 	if view.CurrentStep != "" {
 		vo.CurrentStep = view.CurrentStep

@@ -143,7 +143,7 @@ func TestHandler_Revoke_Security(t *testing.T) {
 	}{
 		{
 			name:   "非发起人且非管理员尝试撤回被403拦截",
-			req:    RevokeOrderReq{InstanceId: domain.NewID(200), Force: true, Reason: "测试撤回"},
+			req:    RevokeOrderReq{InstanceId: InstanceID("200"), Force: true, Reason: "测试撤回"},
 			userID: 1,
 			mockSetup: func(ctrl *gomock.Controller,
 				mockUser *usermocks.MockUserServiceClient,
@@ -158,7 +158,7 @@ func TestHandler_Revoke_Security(t *testing.T) {
 		},
 		{
 			name:   "工单发起人允许撤销自己的工单",
-			req:    RevokeOrderReq{InstanceId: domain.NewID(200), Force: true, Reason: "自测撤销"},
+			req:    RevokeOrderReq{InstanceId: InstanceID("200"), Force: true, Reason: "自测撤销"},
 			userID: 1,
 			mockSetup: func(ctrl *gomock.Controller,
 				mockUser *usermocks.MockUserServiceClient,
@@ -175,7 +175,7 @@ func TestHandler_Revoke_Security(t *testing.T) {
 		},
 		{
 			name:   "管理员允许撤回任意工单",
-			req:    RevokeOrderReq{InstanceId: domain.NewID(200), Force: true, Reason: "管理员强撤"},
+			req:    RevokeOrderReq{InstanceId: InstanceID("200"), Force: true, Reason: "管理员强撤"},
 			userID: 99,
 			mockSetup: func(ctrl *gomock.Controller,
 				mockUser *usermocks.MockUserServiceClient,
@@ -228,15 +228,17 @@ func TestHandler_StartUser_CompleteData(t *testing.T) {
 			Ticket:      domain.Ticket{Id: 1, CreateBy: "alice", Status: domain.PROCESS, Ctime: 1716999999000},
 			CurrentStep: "领导审批",
 			ApprovedBy:  "李领导",
-			TaskID:      501,
+			TaskID:      domain.NewID(501),
 		},
 		{
 			Ticket:      domain.Ticket{Id: 2, CreateBy: "alice", Status: domain.WITHDRAWING, Ctime: 1716999999000},
 			CurrentStep: "撤回处理中",
+			TaskID:      domain.NewID("999999999999999999"),
 		},
 		{
 			Ticket:      domain.Ticket{Id: 3, CreateBy: "alice", Status: domain.END, Ctime: 1716999999000},
 			CurrentStep: "已结束",
+			TaskID:      domain.NewID("task_flowx_abc"),
 		},
 	}
 
@@ -268,11 +270,13 @@ func TestHandler_StartUser_CompleteData(t *testing.T) {
 	assert.NotEmpty(t, data.Tasks[0].ProcInstCreateTime)
 	assert.Equal(t, data.Tasks[0].Ctime, data.Tasks[0].ProcInstCreateTime)
 
-	// 工单 2 撤回中，步骤展示为“撤回处理中”
+	// 工单 2 撤回中，步骤展示为“撤回处理中”，超大整型 ID 必须以 string 输出防前端精度截断
 	assert.Equal(t, "撤回处理中", data.Tasks[1].CurrentStep)
+	assert.Equal(t, "999999999999999999", data.Tasks[1].TaskId)
 
-	// 工单 3 已完结，步骤展示为“已结束”
+	// 工单 3 已完结，步骤展示为“已结束”，字符串 ID 保持 string
 	assert.Equal(t, "已结束", data.Tasks[2].CurrentStep)
+	assert.Equal(t, "task_flowx_abc", data.Tasks[2].TaskId)
 }
 
 func TestHandler_TaskRecord(t *testing.T) {
@@ -300,7 +304,7 @@ func TestHandler_TaskRecord(t *testing.T) {
 	}
 
 	ctx := newTestContext(1)
-	res, err := h.TaskRecord(ctx, RecordTaskReq{ProcessInstId: domain.NewID(100), Offset: 0, Limit: 10})
+	res, err := h.TaskRecord(ctx, RecordTaskReq{ProcessInstId: InstanceID("100"), Offset: 0, Limit: 10})
 	require.NoError(t, err)
 
 	data, ok := res.Data.(RetrieveTaskRecords)
@@ -346,7 +350,7 @@ func TestHandler_TaskTimeline(t *testing.T) {
 	}
 
 	ctx := newTestContext(1)
-	res, err := h.TaskTimeline(ctx, TaskTimelineReq{ProcessInstId: domain.NewID(200), Offset: 0, Limit: 10})
+	res, err := h.TaskTimeline(ctx, TaskTimelineReq{ProcessInstId: InstanceID("200"), Offset: 0, Limit: 10})
 	require.NoError(t, err)
 
 	data, ok := res.Data.(RetrieveTaskTimeline)

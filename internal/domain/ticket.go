@@ -238,7 +238,7 @@ type FormValue struct {
 // TicketTaskView 聚合了工单业务主实体与其在底层流程引擎中的流转步骤、审批人展示信息
 type TicketTaskView struct {
 	Ticket             Ticket
-	TaskID             any // 任务标识（自适应支持整型与字符串）
+	TaskID             ID // 任务标识强类型统一 ID（自适应支持整型与字符串）
 	CurrentStep        string
 	ApprovedBy         string
 	ProcInstCreateTime any
@@ -314,7 +314,7 @@ func (t *Ticket) ResolveViews(steps []TodoTask, displayNames map[string]string) 
 
 		return TicketTaskView{
 			Ticket:             *t,
-			TaskID:             s.TaskID.String(),
+			TaskID:             s.TaskID,
 			CurrentStep:        stepName,
 			ApprovedBy:         approver,
 			ProcInstCreateTime: createTime,

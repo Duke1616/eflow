@@ -102,12 +102,12 @@ func (n *Notification) autoPassTasks(ctx context.Context, tasks []strategy.Task)
 		if err := n.PassTask(ctx, t.TaskID, "ChatGroup Auto Pass"); err != nil {
 			n.Logger().Error("Notification 流程自动推进失败",
 				elog.FieldErr(err),
-				elog.Int("taskId", t.TaskID))
+				elog.String("taskId", t.TaskID.String()))
 			continue
 		}
 
 		n.Logger().Info("Notification 节点任务已自动推进",
-			elog.Int("taskId", t.TaskID))
+			elog.String("taskId", t.TaskID.String()))
 
 		// 抄送或自动通知通常一人通过全组通过 (非会签)
 		if t.IsCosigned != 1 {

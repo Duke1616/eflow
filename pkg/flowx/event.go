@@ -164,6 +164,9 @@ const (
 	// EventProcessCancelled 流程实例被提单人主动撤回作废
 	EventProcessCancelled EventType = "PROCESS_CANCELLED"
 
+	// EventNodeEntered 节点被激活进入 (用于抄送知会、群通知、外部联动等)
+	EventNodeEntered EventType = "NODE_ENTERED"
+
 	// EventTaskCreated 新待办任务生成并派发
 	EventTaskCreated EventType = "TASK_CREATED"
 	// EventTaskPassed 任务被审批人同意通过

@@ -629,9 +629,9 @@ func (e *ProcessEvent) autoPassNode(parentCtx context.Context, instID int, nodeI
 		case <-ticker.C:
 			tasks, err := e.engineSvc.GetTasksByCurrentNodeId(ctx, instID, nodeID)
 			if err == nil && len(tasks) > 0 {
-				if passErr := e.engineSvc.Pass(ctx, tasks[0].TaskID, comment); passErr != nil {
+				if passErr := e.engineSvc.Pass(ctx, tasks[0].TaskID.Int(), comment); passErr != nil {
 					e.logger.Error("节点自动流转通过失败",
-						elog.Int("taskID", tasks[0].TaskID),
+						elog.Int("taskID", tasks[0].TaskID.Int()),
 						elog.FieldErr(passErr))
 				}
 				return

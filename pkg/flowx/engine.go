@@ -98,6 +98,8 @@ type IProcessOperator interface {
 	Transfer(ctx context.Context, taskID string, targetUsers []string) error
 	// ListPendingTasks 分页查询指定处理人的未办结待办任务列表
 	ListPendingTasks(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error)
+	// ListTasksByInstance 获取指定流程实例下的全部流转与历史任务列表
+	ListTasksByInstance(ctx context.Context, instanceID string) ([]*model.Task, error)
 }
 
 // IProcessAdmin 流程定义部署与组件注册管理视角接口，供初始化、后台管理或运维脚手架使用
@@ -631,4 +633,12 @@ func (e *flowEngine) GetTimeline(ctx context.Context, instanceID string) ([]mode
 // ListPendingTasks 分页查询指定处理人的未办结待办任务列表
 func (e *flowEngine) ListPendingTasks(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
 	return e.storage.ListPendingTasksByAssignee(ctx, assignee, offset, limit)
+}
+
+// ListTasksByInstance 获取指定流程实例下的全部流转与历史任务列表
+func (e *flowEngine) ListTasksByInstance(ctx context.Context, instanceID string) ([]*model.Task, error) {
+	if instanceID == "" {
+		return nil, errors.New("流程实例 ID 不能为空")
+	}
+	return e.storage.ListTasksByInstance(ctx, instanceID)
 }

@@ -255,7 +255,7 @@ func (s *service) listTodoTasks(
 
 func toDomainTaskRecord(task model.Task) domain.TaskRecord {
 	return domain.TaskRecord{
-		TaskID:       task.TaskID,
+		TaskID:       domain.NewID(task.TaskID),
 		NodeID:       task.NodeID,
 		PrevNodeID:   task.PrevNodeID,
 		BatchCode:    task.BatchCode,

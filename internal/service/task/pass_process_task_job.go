@@ -97,9 +97,9 @@ func (j *PassProcessTaskJob) run(ctx context.Context) error {
 				continue
 			}
 
-			if mt.TaskID != 0 {
+			if !mt.TaskID.IsZero() {
 				err = j.engine.Pass(taskCtx, domain.TaskPassReq{
-					TaskId:   domain.NewID(mt.TaskID),
+					TaskId:   mt.TaskID,
 					Operator: "SYSTEM",
 					Comment:  "任务执行完成",
 				})

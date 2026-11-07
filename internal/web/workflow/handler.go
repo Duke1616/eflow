@@ -265,6 +265,7 @@ func (h *Handler) toDomain(req CreateReq) domain.Workflow {
 		IsNotify:     req.IsNotify,
 		NotifyMethod: domain.NotifyMethod(req.NotifyMethod),
 		TemplateId:   req.TemplateId,
+		EngineType:   domain.EngineType(req.EngineType),
 		FlowData:     req.FlowData,
 	}
 
@@ -279,6 +280,7 @@ func (h *Handler) toUpdateDomain(req UpdateReq) domain.Workflow {
 		Owner:        req.Owner,
 		IsNotify:     req.IsNotify,
 		NotifyMethod: domain.NotifyMethod(req.NotifyMethod),
+		EngineType:   domain.EngineType(req.EngineType),
 		FlowData:     req.FlowData,
 	}
 
@@ -295,6 +297,7 @@ func (h *Handler) toWorkflowVo(req domain.Workflow) Workflow {
 		IsNotify:     req.IsNotify,
 		NotifyMethod: req.NotifyMethod.ToUint8(),
 		TemplateId:   req.TemplateId,
+		EngineType:   req.ResolveEngineType().String(),
 		FlowData:     req.FlowData,
 	}
 

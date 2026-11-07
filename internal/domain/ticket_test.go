@@ -247,12 +247,12 @@ func TestTicket_ResolveViews(t *testing.T) {
 		assert.Len(t, views, 2)
 		assert.Equal(t, "技术主管审批", views[0].CurrentStep)
 		assert.Equal(t, "张主管", views[0].ApprovedBy)
-		assert.Equal(t, "666", views[0].TaskID)
+		assert.Equal(t, NewID(666), views[0].TaskID)
 		assert.Equal(t, &now, views[0].ProcInstCreateTime)
 
 		assert.Equal(t, "人事主管审批", views[1].CurrentStep)
 		assert.Equal(t, "李人事", views[1].ApprovedBy)
-		assert.Equal(t, "667", views[1].TaskID)
+		assert.Equal(t, NewID(667), views[1].TaskID)
 	})
 }
 

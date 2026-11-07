@@ -4,7 +4,7 @@ import "github.com/samber/lo"
 
 // TaskRecord 任务执行记录领域模型，承载时间线与流转历史中各节点的审批明细
 type TaskRecord struct {
-	TaskID       int         // 任务实例标识
+	TaskID       ID          // 任务实例全局强类型自适应标识 (兼容整型自增与现代字符串形态)
 	NodeID       string      // 流程节点定义标识
 	PrevNodeID   string      // 上游前驱节点标识
 	BatchCode    string      // 同节点流转批次号（用于会签/循环聚合）

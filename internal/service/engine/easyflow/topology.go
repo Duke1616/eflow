@@ -122,20 +122,68 @@ func lightUpForward(fromID, toID string, litEdges map[string][]string,
 	}
 
 	if toNode.NodeType == model.GateWayNode {
-		for _, nextID := range effectiveGraph[toID] {
+		nextIDs := effectiveGraph[toID]
+
+		inDegree := len(toNode.PrevNodeIDs)
+		outDegree := len(nextIDs)
+		waitType := toNode.GWConfig.WaitForAllPrevNode
+
+		// 1. 并行汇聚网关 (waitType == 1 && inDegree > 1)：汇聚节点必须等待所有前驱分支全部完成，单分支流转不能提前穿透点亮下游
+		if waitType == 1 && inDegree > 1 {
+			return
+		}
+
+		// 2. 包容网关 (waitType == 0)：单分支流转不得穿透点亮
+		if waitType == 0 {
+			return
+		}
+
+		// 3. 条件分流网关 (waitType == 3 && outDegree > 1)：多出度条件网关必须等待下游真实命中任务通过 findPath 点亮，不能盲目向下广播
+		if waitType == 3 && outDegree > 1 {
+			return
+		}
+
+		for _, nextID := range nextIDs {
 			lightUpForward(toID, nextID, litEdges, nodesMap, effectiveGraph)
 		}
 	}
 }
 
 func buildEffectiveGraph(nodesMap map[string]model.Node) map[string][]string {
-	adj := make(map[string][]string)
+	graph := make(map[string][]string)
+
 	for id, node := range nodesMap {
-		for _, prevID := range node.PrevNodeIDs {
-			uniqueAppend(adj, prevID, id)
+		if isProxyNode(node) {
+			continue
+		}
+
+		realPrevs := resolveRealPrevs(node, nodesMap)
+		for _, prevID := range realPrevs {
+			uniqueAppend(graph, prevID, id)
 		}
 	}
-	return adj
+	return graph
+}
+
+func resolveRealPrevs(node model.Node, nodesMap map[string]model.Node) []string {
+	var result []string
+	for _, prevID := range node.PrevNodeIDs {
+		prevNode, exists := nodesMap[prevID]
+		if !exists {
+			continue
+		}
+
+		if isProxyNode(prevNode) {
+			result = append(result, resolveRealPrevs(prevNode, nodesMap)...)
+		} else {
+			result = append(result, prevID)
+		}
+	}
+	return result
+}
+
+func isProxyNode(node model.Node) bool {
+	return slices.Contains(node.UserIDs, easyflow.SysAutoUser)
 }
 
 type batchStats struct {
@@ -242,12 +290,7 @@ func (g *graphTopologyService) resolveLogicalPrev(rawPrevID string) string {
 }
 
 func (g *graphTopologyService) isProxyNode(node model.Node) bool {
-	for _, uid := range node.UserIDs {
-		if uid == easyflow.SysAutoUser {
-			return true
-		}
-	}
-	return false
+	return isProxyNode(node)
 }
 
 func (g *graphTopologyService) findPath(startID, endID string) []string {
@@ -277,14 +320,19 @@ func (g *graphTopologyService) findPath(startID, endID string) []string {
 				continue
 			}
 
-			if nextID == endID || nextNode.NodeType == model.GateWayNode {
-				if !visited[nextID] {
-					visited[nextID] = true
-					newNodes := make([]string, len(currPath.nodes)+1)
-					copy(newNodes, currPath.nodes)
-					newNodes[len(currPath.nodes)] = nextID
-					queue = append(queue, path{nodes: newNodes})
+			isTarget := nextID == endID
+			isGateway := nextNode.NodeType == model.GateWayNode
+
+			if (isTarget || isGateway) && !visited[nextID] {
+				visited[nextID] = true
+				newNodes := make([]string, len(currPath.nodes)+1)
+				copy(newNodes, currPath.nodes)
+				newNodes[len(currPath.nodes)] = nextID
+
+				if isTarget {
+					return newNodes
 				}
+				queue = append(queue, path{nodes: newNodes})
 			}
 		}
 	}

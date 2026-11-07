@@ -125,7 +125,7 @@ func InitApp() (*App, error) {
 	chatNotification := chat.NewNotification(strategyService, notificationSender, larkClient, teamServiceClient)
 	carbon_copyNotification := carbon_copy.NewNotification(strategyService, notificationSender)
 	sendStrategy := InitSendStrategy(strategyService, notification, automationNotification, startNotification, chatNotification, carbon_copyNotification)
-	processEvent := InitWorkflowEngineOnce(db, easyflowService, iEngineRepository, producer, taskService, ticketService, workflowService, sendStrategy)
+	processEvent := InitWorkflowEngineOnce(db, easyflowService, engine, ticketRepository, iEngineRepository, producer, taskService, ticketService, workflowService, sendStrategy)
 	executeResultConsumer, err := InitExecuteResultConsumer(mq, taskService)
 	if err != nil {
 		return nil, err

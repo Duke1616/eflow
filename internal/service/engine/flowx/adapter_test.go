@@ -105,6 +105,15 @@ func TestFlowxAdapter_EndToEndLifecycle(t *testing.T) {
 	assert.GreaterOrEqual(t, groupTotal, int64(1))
 	require.NotEmpty(t, timelineGroups)
 
+	// 8.1 运行态点亮视图 (GetInstanceExecutionView)
+	execView, err := adapter.GetInstanceExecutionView(ctx, domain.EngineTypeFlowx, launchRes.InstanceID, 1)
+	require.NoError(t, err)
+	assert.Contains(t, execView.NodeStatusMap, "manager_audit")
+	assert.Equal(t, 1, execView.NodeStatusMap["manager_audit"]) // 主管审批通过
+	assert.Contains(t, execView.NodeStatusMap, "hr_audit")
+	assert.Equal(t, 0, execView.NodeStatusMap["hr_audit"]) // HR 待办中
+	assert.Contains(t, execView.PendingUsers, "hr_li")
+
 	// 9. 提单人撤销/撤单流程 (Revoke)
 	err = adapter.Revoke(ctx, domain.RevokeReq{
 		EngineType: domain.EngineTypeFlowx,

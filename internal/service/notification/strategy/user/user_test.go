@@ -88,7 +88,7 @@ func (s *UserTestSuite) TestSend_StandardApproval() {
 	})
 
 	s.mockBase.EXPECT().FetchTasksWithRetry(gomock.Any(), gomock.Any()).Return([]strategy.Task{
-		{TaskID: 50001, UserID: "approver1"},
+		{TaskID: domain.NewID(50001), UserID: "approver1"},
 	}, nil)
 
 	s.mockBase.EXPECT().IsGlobalNotify(gomock.Any()).Return(true)
@@ -158,7 +158,7 @@ func (s *UserTestSuite) TestSend_AlertOrder() {
 		f(ctx)
 	})
 	s.mockBase.EXPECT().FetchTasksWithRetry(gomock.Any(), gomock.Any()).Return([]strategy.Task{
-		{TaskID: 60001, UserID: "op1"},
+		{TaskID: domain.NewID(60001), UserID: "op1"},
 	}, nil)
 
 	s.mockBase.EXPECT().IsGlobalNotify(gomock.Any()).Return(true)

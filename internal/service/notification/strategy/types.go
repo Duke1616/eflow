@@ -36,9 +36,9 @@ type CurrentNode struct {
 
 // Task 承载通知策略所需处理的流转任务概要信息
 type Task struct {
-	TaskID     int    // 任务标识
-	UserID     string // 任务分配的处理人
-	IsCosigned int    // 是否会签任务 (1: 会签, 0: 或签/普通)
+	TaskID     domain.ID // 任务全局统一强类型自适应标识 (兼容数字与现代字符串形态)
+	UserID     string    // 任务分配的处理人
+	IsCosigned int       // 是否会签任务 (1: 会签, 0: 或签/普通)
 }
 
 type FlowContext struct {
@@ -48,6 +48,17 @@ type FlowContext struct {
 	Instance    domain.Instance // 引擎实例状态
 	CurrentNode *CurrentNode    // 当前触发事件的节点
 	Nodes       []*flowdsl.Node // 解析后的流程节点
+}
+
+// ResolveInstanceID 返回自适应的流程实例唯一标识（优先取工单关联标识，兜底使用整型 ID）
+func (f FlowContext) ResolveInstanceID() domain.ID {
+	if !f.Ticket.Process.InstanceID.IsZero() {
+		return f.Ticket.Process.InstanceID
+	}
+	if f.InstID > 0 {
+		return domain.NewID(f.InstID)
+	}
+	return ""
 }
 
 type Info struct {

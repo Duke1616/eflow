@@ -18,6 +18,7 @@ import (
 	channelSvc "github.com/Duke1616/eflow/internal/service/channel"
 	easyflowDrv "github.com/Duke1616/eflow/internal/service/engine/easyflow"
 	"github.com/Duke1616/eflow/internal/service/engine/easyflow/hook"
+	"github.com/Duke1616/eflow/internal/service/notification"
 	"github.com/Duke1616/eflow/internal/service/notification/strategy"
 	"github.com/Duke1616/eflow/internal/service/notification/strategy/automation"
 	"github.com/Duke1616/eflow/internal/service/notification/strategy/carbon_copy"
@@ -35,6 +36,7 @@ import (
 	"github.com/Duke1616/eflow/internal/web/template"
 	"github.com/Duke1616/eflow/internal/web/ticket"
 	"github.com/Duke1616/eflow/internal/web/workflow"
+	"github.com/Duke1616/eflow/pkg/flowx"
 	"github.com/Duke1616/eflow/pkg/mqx"
 	"github.com/google/wire"
 	"gorm.io/gorm"
@@ -198,10 +200,10 @@ var (
 
 var engineOnce = sync.Once{}
 
-func InitWorkflowEngineOnce(db *gorm.DB, engineSvc easyflowDrv.Service, repo repository.IEngineRepository, producer mqx.Producer[event.TicketStatusModifyEvent],
+func InitWorkflowEngineOnce(db *gorm.DB, engineSvc easyflowDrv.Service, flowxEngine flowx.Engine, ticketRepo repository.TicketRepository, repo repository.IEngineRepository, producer mqx.Producer[event.TicketStatusModifyEvent],
 	taskSvc taskSvc.Service, ticketSvc ticketSvc.Service, workflowSvc workflowSvc.Service,
-	strategy strategy.SendStrategy) *hook.ProcessEvent {
-	event := hook.NewProcessEvent(producer, engineSvc, taskSvc, ticketSvc, workflowSvc, strategy, repo)
+	sendStrategy strategy.SendStrategy) *hook.ProcessEvent {
+	event := hook.NewProcessEvent(producer, engineSvc, taskSvc, ticketSvc, workflowSvc, sendStrategy, repo)
 
 	engineOnce.Do(func() {
 		easyEngine.DB = db
@@ -210,6 +212,11 @@ func InitWorkflowEngineOnce(db *gorm.DB, engineSvc easyflowDrv.Service, repo rep
 		}
 		// 是否忽略事件错误
 		easyEngine.IgnoreEventError = false
+
+		// 挂载 flowx 专属飞书通知监听器，实现与 easyflow 等价的消息广播与生命周期协同
+		if dispatcher, ok := sendStrategy.(*strategy.Dispatcher); ok && flowxEngine != nil {
+			flowxEngine.AddListener(notification.NewFlowxNotificationListener(ticketRepo, workflowSvc, dispatcher))
+		}
 	})
 
 	return event
