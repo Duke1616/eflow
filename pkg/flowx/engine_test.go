@@ -294,17 +294,19 @@ func (s *EngineTestSuite) TestPass() {
 			wantErr: ErrTaskNotPending,
 		},
 		{
-			name: "非指派操作人_越权拦截",
+			name: "查询关联实例失败_错误透传",
 			before: func() storage.IStorage {
 				m := storagemocks.NewMockIStorage(s.ctrl)
 				m.EXPECT().GetTaskForUpdate(gomock.Any(), "task_1").
-					Return(&model.Task{ID: "task_1", Assignee: "leader_tom", Status: model.TaskPending}, nil)
+					Return(&model.Task{ID: "task_1", InstanceID: "inst_1", Assignee: "leader_tom", Status: model.TaskPending}, nil)
+				m.EXPECT().GetInstanceForUpdate(gomock.Any(), "inst_1").
+					Return(nil, storage.ErrInstanceNotFound)
 				return m
 			},
 			run: func(ctx context.Context, e Engine) error {
-				return e.Pass(ctx, PassReq{TaskID: "task_1", Operator: "hacker_bob"})
+				return e.Pass(ctx, PassReq{TaskID: "task_1", Operator: "proxy_user"})
 			},
-			wantErr: ErrUnauthorizedAssignee,
+			wantErr: ErrInstanceNotFound,
 		},
 		{
 			name: "流程已非Running状态_流转拦截",

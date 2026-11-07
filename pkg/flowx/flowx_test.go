@@ -834,15 +834,18 @@ func (s *FlowxTestSuite) TestRevoke() {
 		Edge("audit_node", "end").
 		Build()
 
-	s.Run("非提单人越权撤回拦截", func() {
-		engine, _ := s.newEngine()
+	s.Run("已终结工单撤回防御拦截", func() {
+		engine, store := s.newEngine()
 		instID, _ := engine.Start(s.ctx, StartReq{Def: def, Starter: "alice"})
-		err := engine.Revoke(s.ctx, RevokeReq{InstanceID: instID, Operator: "attacker"})
+		// 先正常审批推进至办结
+		s.pass(engine, store, instID, "boss", "审批办结")
+		// 再次撤回已办结工单应当被物理拦截
+		err := engine.Revoke(s.ctx, RevokeReq{InstanceID: instID, Operator: "alice"})
 		require.Error(s.T(), err)
-		assert.True(s.T(), errors.Is(err, ErrUnauthorizedRevoke))
+		assert.True(s.T(), errors.Is(err, ErrInstanceNotRunning))
 	})
 
-	s.Run("提单人主动撤回直接作废工单", func() {
+	s.Run("流转中工单主动撤回直接作废终结", func() {
 		engine, store := s.newEngine()
 		instID, _ := engine.Start(s.ctx, StartReq{Def: def, Starter: "alice"})
 		err := engine.Revoke(s.ctx, RevokeReq{InstanceID: instID, Operator: "alice", BackToStarter: false})
@@ -850,6 +853,12 @@ func (s *FlowxTestSuite) TestRevoke() {
 
 		inst, _ := store.GetInstance(s.ctx, instID)
 		assert.Equal(s.T(), model.InstanceCancelled, inst.Status)
+
+		tasks, _ := store.ListTasksByInstance(s.ctx, instID)
+		require.NotEmpty(s.T(), tasks)
+		for _, t := range tasks {
+			assert.Equal(s.T(), model.TaskCancelled, t.Status)
+		}
 	})
 }
 
@@ -1059,4 +1068,158 @@ func (s *FlowxTestSuite) TestEventBus_Architecture() {
 		assert.Equal(s.T(), EventTaskCreated, auditListener.events[0].Type)
 		assert.Equal(s.T(), EventTaskPassed, auditListener.events[1].Type)
 	})
+
+	s.Run("内置占位符_AssigneeStarter自动解析为工单发起人", func() {
+		store := memory.NewStorage()
+		engine := NewEngine(store)
+
+		def := NewProcess("starter_placeholder_proc", "发起人占位符流").
+			Start("start", "开始").
+			Approval("submitter_review", "提交人预审", model.SignOneVote, model.AssigneeStarter).
+			Approval("cosigned_node", "发起人与主管双签", model.SignAllPass, model.AssigneeInitiator, "manager_bob").
+			End("end", "办结").
+			Edge("start", "submitter_review").
+			Edge("submitter_review", "cosigned_node").
+			Edge("cosigned_node", "end").
+			Build()
+
+		// 以 "luankz" 作为发起人启动流程
+		instID, err := engine.Start(s.ctx, StartReq{Def: def, Starter: "luankz"})
+		require.NoError(s.T(), err)
+
+		// 验证首个审批任务的处理人已就地展开为 "luankz"
+		tasks, err := store.ListTasksByInstance(s.ctx, instID)
+		require.NoError(s.T(), err)
+		require.Len(s.T(), tasks, 1)
+		assert.Equal(s.T(), "submitter_review", tasks[0].NodeID)
+		assert.Equal(s.T(), "luankz", tasks[0].Assignee)
+
+		// 提单人通过后推进到下一个会签节点
+		err = engine.Pass(s.ctx, PassReq{TaskID: tasks[0].ID, Operator: "luankz"})
+		require.NoError(s.T(), err)
+
+		nextTasks, err := store.ListTasksByInstance(s.ctx, instID)
+		require.NoError(s.T(), err)
+		require.Len(s.T(), nextTasks, 3) // 1个历史通过任务 + 2个当前并发待办
+
+		activeAssignees := lo.FilterMap(nextTasks, func(t *model.Task, _ int) (string, bool) {
+			return t.Assignee, t.IsPending()
+		})
+		assert.ElementsMatch(s.T(), []string{"luankz", "manager_bob"}, activeAssignees)
+	})
+
+	s.Run("机制策略分离_代理与代办审批流转_内核作为通用状态机推进流程并将操作人记录至审计事件", func() {
+		store := memory.NewStorage()
+		engine := NewEngine(store)
+
+		var passedOperator string
+		engine.Subscribe([]EventType{EventTaskPassed}, func(ctx context.Context, evt Event) error {
+			passedOperator = evt.Operator
+			return nil
+		})
+
+		def := NewProcess("admin_proxy_proc", "代办审批流转测试").
+			Start("start", "开始").
+			Approval("audit_node", "部门审批", model.SignOneVote, "peicg").
+			End("end", "结束").
+			Edge("start", "audit_node").
+			Edge("audit_node", "end").
+			Build()
+
+		instID, err := engine.Start(s.ctx, StartReq{Def: def, Starter: "starter_user"})
+		require.NoError(s.T(), err)
+
+		tasks, err := store.ListTasksByInstance(s.ctx, instID)
+		require.NoError(s.T(), err)
+		require.Len(s.T(), tasks, 1)
+		task := tasks[0]
+		assert.Equal(s.T(), "peicg", task.Assignee)
+
+		// 管理员或受委托人 luankz 推进审批
+		errPass := engine.Pass(s.ctx, PassReq{
+			TaskID:   task.ID,
+			Operator: "luankz",
+			Comment:  "管理员代办同意",
+		})
+		require.NoError(s.T(), errPass)
+
+		// 校验内核作为通用状态机顺利完结实例，并将实际操作人准确广播至审计事件
+		inst, err := store.GetInstance(s.ctx, instID)
+		require.NoError(s.T(), err)
+		assert.True(s.T(), inst.IsFinished())
+		assert.Equal(s.T(), "luankz", passedOperator)
+
+		// 再次重复操作时受物理防卫拦截
+		errRepeat := engine.Pass(s.ctx, PassReq{
+			TaskID:   task.ID,
+			Operator: "luankz",
+		})
+		require.Error(s.T(), errRepeat)
+		require.ErrorIs(s.T(), errRepeat, ErrTaskNotPending)
+	})
+}
+
+// TestEngine_GetExecutionView 测试引擎执行视图与高亮连线投影
+func TestEngine_GetExecutionView(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+	def := buildStandardLeaveProcess()
+	_, err := engine.Deploy(ctx, def)
+	require.NoError(t, err)
+
+	instID, err := engine.Start(ctx, StartReq{
+		Key:       "leave_process",
+		Starter:   "employee_tom",
+		Variables: map[string]any{"days": 2},
+	})
+	require.NoError(t, err)
+
+	view, err := engine.GetExecutionView(ctx, instID)
+	require.NoError(t, err)
+	assert.Equal(t, "leave_process", view.ProcessKey)
+	assert.Contains(t, view.TraversedEdges["start"], "node_leader")
+	assert.Contains(t, view.PendingUsers, "leader_alice")
+}
+
+// BenchmarkFlowxFullProcess 基准测试：单次完整综合流程（启动 -> 或签通过 -> 条件分流 -> 会签双人通过 -> 自动办结）
+func BenchmarkFlowxFullProcess(b *testing.B) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+	def := buildStandardLeaveProcess()
+	_, err := engine.Deploy(ctx, def)
+	if err != nil {
+		b.Fatalf("deploy failed: %v", err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		// 1. 启动流程 (days=5)
+		instID, err := engine.Start(ctx, StartReq{
+			Key:       "leave_process",
+			Starter:   "employee_tom",
+			Variables: map[string]any{"days": 5},
+		})
+		if err != nil {
+			b.Fatalf("start failed: %v", err)
+		}
+
+		// 2. 主管或签通过 (leader_alice)
+		tasks, _ := store.ListTasksByInstance(ctx, instID)
+		t1, _ := lo.Find(tasks, func(t *model.Task) bool { return t.Assignee == "leader_alice" && t.IsPending() })
+		_ = engine.Pass(ctx, PassReq{TaskID: t1.ID, Operator: "leader_alice"})
+
+		// 3. 总监会签第1人通过 (director_carol)
+		tasks, _ = store.ListTasksByInstance(ctx, instID)
+		t2, _ := lo.Find(tasks, func(t *model.Task) bool { return t.Assignee == "director_carol" && t.IsPending() })
+		_ = engine.Pass(ctx, PassReq{TaskID: t2.ID, Operator: "director_carol"})
+
+		// 4. 总监会签第2人通过 (director_dave) -> 自动办结
+		tasks, _ = store.ListTasksByInstance(ctx, instID)
+		t3, _ := lo.Find(tasks, func(t *model.Task) bool { return t.Assignee == "director_dave" && t.IsPending() })
+		_ = engine.Pass(ctx, PassReq{TaskID: t3.ID, Operator: "director_dave"})
+	}
 }

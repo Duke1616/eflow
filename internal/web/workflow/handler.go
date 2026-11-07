@@ -277,6 +277,7 @@ func (h *Handler) toUpdateDomain(req UpdateReq) domain.Workflow {
 		Id:           req.Id,
 		Name:         req.Name,
 		Desc:         req.Desc,
+		Icon:         req.Icon,
 		Owner:        req.Owner,
 		IsNotify:     req.IsNotify,
 		NotifyMethod: domain.NotifyMethod(req.NotifyMethod),

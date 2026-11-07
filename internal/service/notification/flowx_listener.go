@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
@@ -56,11 +57,23 @@ func (l *FlowxNotificationListener) OnEvent(ctx context.Context, evt flowx.Event
 
 	instanceKey := evt.Instance.ID
 
-	// 1. 根据 FlowX 引擎类型与实例唯一标识精准检索工单实体
-	ticket, err := l.ticketRepo.DetailByEngineInstance(safeCtx, domain.EngineTypeFlowx, domain.NewID(instanceKey))
+	// 1. 优先根据 BusinessKey（即工单 ID）秒级检索工单实体；若无则通过流程实例多态标识检索
+	var (
+		ticket domain.Ticket
+		err    error
+	)
+	if evt.Instance.BusinessKey != "" {
+		if tID, parseErr := strconv.ParseInt(evt.Instance.BusinessKey, 10, 64); parseErr == nil && tID > 0 {
+			ticket, err = l.ticketRepo.Detail(safeCtx, tID)
+		}
+	}
+	if ticket.Id == 0 || err != nil {
+		ticket, err = l.ticketRepo.DetailByEngineInstance(safeCtx, domain.EngineTypeFlowx, domain.NewID(instanceKey))
+	}
 	if err != nil {
 		l.logger.Warn("flowx 通知处理: 未检索到流程实例关联的工单",
 			elog.String("instanceKey", instanceKey),
+			elog.String("businessKey", evt.Instance.BusinessKey),
 			elog.FieldErr(err))
 		return nil
 	}

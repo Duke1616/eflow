@@ -28,13 +28,15 @@ type StartReq struct {
 	Starter string
 	// 初始业务变量（可选）
 	Variables model.Variables
+	// 业务关联唯一标识（可选，如工单 ID），透传至生命周期事件中，消除时序竞态
+	BusinessKey string
 }
 
 // PassReq 审批通过请求
 type PassReq struct {
 	// 待处理任务物理 ID（必填）
 	TaskID string
-	// 当前操作人账号（必填）
+	// 当前操作人账号（必填，作为流转审计完成人）
 	Operator string
 	// 审批意见（可选）
 	Comment string
@@ -46,7 +48,7 @@ type PassReq struct {
 type RejectReq struct {
 	// 待处理任务物理 ID（必填）
 	TaskID string
-	// 当前操作人账号（必填）
+	// 当前操作人账号（必填，作为流转审计完成人）
 	Operator string
 	// 驳回原因（必填）
 	Comment string
@@ -56,11 +58,11 @@ type RejectReq struct {
 	Terminate bool
 }
 
-// RevokeReq 提单人主动撤回请求
+// RevokeReq 流程实例撤回请求
 type RevokeReq struct {
 	// 流程实例物理 ID（必填）
 	InstanceID string
-	// 当前操作人账号（必填，必须为流程发起人 Starter）
+	// 当前操作人账号（必填，作为流转审计操作人）
 	Operator string
 	// 撤回原因（可选）
 	Comment string
@@ -102,6 +104,8 @@ type IProcessOperator interface {
 	ListPendingTasks(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error)
 	// ListTasksByInstance 获取指定流程实例下的全部流转与历史任务列表
 	ListTasksByInstance(ctx context.Context, instanceID string) ([]*model.Task, error)
+	// GetExecutionView 获取流程实例的运行态综合视图（包含节点状态映射、高亮已流转边、待处理人等）
+	GetExecutionView(ctx context.Context, instanceID string) (model.ExecutionView, error)
 	// GetDefinition 根据流程唯一标识与版本号加载流程图定义快照
 	GetDefinition(ctx context.Context, key string, version int) (model.ProcessDefinition, error)
 	// GenInstanceID 预分配符合引擎规范的流程实例全局唯一标识
@@ -319,6 +323,7 @@ func (e *flowEngine) doStart(ctx context.Context, req StartReq) (string, error) 
 		ProcKey:     def.Key,
 		Version:     def.Version,
 		Starter:     req.Starter,
+		BusinessKey: req.BusinessKey,
 		Status:      model.InstanceRunning,
 		CurrentNode: startNode.ID,
 		Variables:   req.Variables,
@@ -361,8 +366,8 @@ func (e *flowEngine) Pass(ctx context.Context, req PassReq) error {
 }
 
 func (e *flowEngine) doPass(ctx context.Context, req PassReq) error {
-	// 1. 锁查询与前置状态/权限校验
-	task, inst, err := e.loadAndValidateTaskForPass(ctx, req.TaskID, req.Operator)
+	// 1. 锁查询与客观物理状态防卫校验 (防并发重复处理、防终态非法流转)
+	task, inst, err := e.loadAndValidateTask(ctx, req.TaskID)
 	if err != nil {
 		return err
 	}
@@ -398,7 +403,7 @@ func (e *flowEngine) CompleteTask(ctx context.Context, req CompleteTaskReq) erro
 }
 
 func (e *flowEngine) doCompleteTask(ctx context.Context, req CompleteTaskReq, comment string) error {
-	task, inst, err := e.loadAndValidateTask(ctx, req.TaskID, "")
+	task, inst, err := e.loadAndValidateTask(ctx, req.TaskID)
 	if err != nil {
 		return err
 	}
@@ -474,7 +479,7 @@ func (e *flowEngine) Reject(ctx context.Context, req RejectReq) error {
 }
 
 func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
-	task, inst, err := e.loadAndValidateTaskForReject(ctx, req.TaskID)
+	task, inst, err := e.loadAndValidateTask(ctx, req.TaskID)
 	if err != nil {
 		return err
 	}
@@ -570,9 +575,6 @@ func (e *flowEngine) doRevoke(ctx context.Context, req RevokeReq) error {
 	if !inst.IsRunning() {
 		return ErrInstanceNotRunning
 	}
-	if req.Operator != "" && req.Operator != inst.Starter {
-		return fmt.Errorf("%w: 仅提单人 [%s] 可撤回工单，当前操作人 [%s]", ErrUnauthorizedRevoke, inst.Starter, req.Operator)
-	}
 
 	session, err := e.newSessionForInstance(ctx, inst)
 	if err != nil {
@@ -662,4 +664,47 @@ func (e *flowEngine) GetDefinition(ctx context.Context, key string, version int)
 		return model.ProcessDefinition{}, errors.New("存储层未初始化")
 	}
 	return e.storage.GetDefinition(ctx, key, version)
+}
+
+// GetExecutionView 获取流程实例的运行态综合视图（包含节点状态映射、高亮已流转边、待处理人等）
+func (e *flowEngine) GetExecutionView(ctx context.Context, instanceID string) (model.ExecutionView, error) {
+	if instanceID == "" {
+		return model.ExecutionView{}, errors.New("流程实例 ID 不能为空")
+	}
+
+	inst, err := e.GetInstance(ctx, instanceID)
+	if err != nil {
+		return model.ExecutionView{}, fmt.Errorf("查询流程实例详情失败: %w", err)
+	}
+
+	tasks, err := e.ListTasksByInstance(ctx, instanceID)
+	if err != nil {
+		return model.ExecutionView{}, fmt.Errorf("查询任务执行记录失败: %w", err)
+	}
+
+	plan, err := e.loadPlan(ctx, inst)
+	if err != nil {
+		return model.ExecutionView{}, fmt.Errorf("加载流程执行计划失败: %w", err)
+	}
+
+	nodeStatusMap := lo.Associate(tasks, func(t *model.Task) (string, int) {
+		return t.NodeID, int(t.Status)
+	})
+
+	pendingUsers := lo.Uniq(lo.FilterMap(tasks, func(t *model.Task, _ int) (string, bool) {
+		if t.IsPending() && t.Assignee != "" {
+			return t.Assignee, true
+		}
+		return "", false
+	}))
+
+	traversedEdges := plan.CalculateTraversedEdges(tasks, inst)
+
+	return model.ExecutionView{
+		ProcessKey:     inst.ProcKey,
+		ProcessVersion: inst.Version,
+		NodeStatusMap:  nodeStatusMap,
+		TraversedEdges: traversedEdges,
+		PendingUsers:   pendingUsers,
+	}, nil
 }

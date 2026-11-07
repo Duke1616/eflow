@@ -82,3 +82,43 @@ func TestEvaluateRuleGroup_TypeCoercion(t *testing.T) {
 
 	assert.True(t, EvaluateRuleGroup(rule, vars))
 }
+
+func TestEvaluateRuleGroup_InWithSliceAndJSON(t *testing.T) {
+	// 场景 1: 表单变量为 JSON 数组字符串
+	varsJSON := map[string]any{
+		"environment": `["ocr","frontend","backend"]`,
+	}
+	// 命中 backend
+	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "environment", Operator: model.OpIn, Value: []string{"backend"}},
+		},
+	}, varsJSON))
+	// 命中 frontend
+	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "environment", Operator: model.OpIn, Value: []string{"frontend"}},
+		},
+	}, varsJSON))
+	// 未命中 java
+	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "environment", Operator: model.OpIn, Value: []string{"java"}},
+		},
+	}, varsJSON))
+
+	// 场景 2: 表单变量为原生切片 []string
+	varsSlice := map[string]any{
+		"environment": []string{"ocr", "frontend", "backend"},
+	}
+	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "environment", Operator: model.OpIn, Value: []string{"backend"}},
+		},
+	}, varsSlice))
+	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "environment", Operator: model.OpIn, Value: []string{"java"}},
+		},
+	}, varsSlice))
+}

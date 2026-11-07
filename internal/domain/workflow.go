@@ -129,3 +129,15 @@ type AutomationNodeRef struct {
 	CodebookID int64  `json:"codebook_id"`
 	RunnerID   int64  `json:"runner_id"`
 }
+
+// FormatFlowxProcessKey 生成标准的 FlowX 流程定义全局唯一 Key
+func FormatFlowxProcessKey(workflowID int64) string {
+	return fmt.Sprintf("wf_%d", workflowID)
+}
+
+// ParseWorkflowIDFromProcessKey 从 FlowX 流程定义 Key 中解析工作流 ID（若非标准格式则返回 0）
+func ParseWorkflowIDFromProcessKey(procKey string) int64 {
+	var id int64
+	_, _ = fmt.Sscanf(procKey, "wf_%d", &id)
+	return id
+}

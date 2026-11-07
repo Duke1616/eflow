@@ -44,12 +44,9 @@ func (c *UserNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (mode
 
 	isCC := userCfg != nil && userCfg.IsCC
 	isCosigned := userCfg != nil && userCfg.IsCosigned
-	var (
-		assignees       []string
-		hasDynamicRules bool
-	)
+	var assignees []string
 	if userCfg != nil {
-		assignees, hasDynamicRules = c.resolveAssignees(userCfg.Assignees)
+		assignees = c.resolveAssignees(userCfg.Assignees)
 	}
 
 	nodeType := lo.Ternary(isCC, model.NodeCarbonCopy, model.NodeApproval)
@@ -65,19 +62,12 @@ func (c *UserNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (mode
 		Props:     make(map[string]any),
 	}
 
-	if hasDynamicRules {
-		spec.Hooks = append(spec.Hooks, "dynamic_assignee_resolver")
-	}
-
 	return spec, nil
 }
 
-// resolveAssignees 将标准 Assignee 分配规则归一化为 URN 标识符
-func (c *UserNodeConverter) resolveAssignees(assignees []flowdsl.Assignee) ([]string, bool) {
-	var (
-		result          []string
-		hasDynamicRules bool
-	)
+// resolveAssignees 将标准 Assignee 分配规则归一化为审批人列表
+func (c *UserNodeConverter) resolveAssignees(assignees []flowdsl.Assignee) []string {
+	var result []string
 
 	for _, a := range assignees {
 		switch a.Rule {
@@ -87,28 +77,27 @@ func (c *UserNodeConverter) resolveAssignees(assignees []flowdsl.Assignee) ([]st
 					result = append(result, trimmed)
 				}
 			}
-		case flowdsl.FOUNDER, flowdsl.LEADER, flowdsl.MainLeader:
+		case flowdsl.FOUNDER:
+			// 内置上下文占位符：由引擎内核调度时直接就地展开为 inst.Starter，无需注入额外 Hook
+			result = append(result, model.AssigneeStarter)
+		case flowdsl.LEADER, flowdsl.MainLeader:
 			result = append(result, "leader:starter")
-			hasDynamicRules = true
 		case flowdsl.TEAM:
 			for _, val := range a.Values {
 				if trimmed := strings.TrimSpace(val); trimmed != "" {
 					result = append(result, "team:"+trimmed)
-					hasDynamicRules = true
 				}
 			}
 		case flowdsl.OnCall:
 			for _, val := range a.Values {
 				if trimmed := strings.TrimSpace(val); trimmed != "" {
 					result = append(result, "oncall:"+trimmed)
-					hasDynamicRules = true
 				}
 			}
 		case flowdsl.DEPARTMENT:
 			for _, val := range a.Values {
 				if trimmed := strings.TrimSpace(val); trimmed != "" {
 					result = append(result, "dept:"+trimmed)
-					hasDynamicRules = true
 				}
 			}
 		default:
@@ -120,7 +109,7 @@ func (c *UserNodeConverter) resolveAssignees(assignees []flowdsl.Assignee) ([]st
 		}
 	}
 
-	return lo.Uniq(result), hasDynamicRules
+	return lo.Uniq(result)
 }
 
 // ParallelGatewayConverter 并行网关转换器 (AND)
@@ -149,7 +138,9 @@ func (c *InclusionGatewayConverter) Convert(_ *ConvertContext, node *flowdsl.Nod
 	}, nil
 }
 
-// SelectiveGatewayConverter 排他网关转换器 (XOR)
+// SelectiveGatewayConverter 排他/条件并行网关转换器
+// NOTE: 对齐 EasyFlow 条件并行分流机制，将其映射为 FlowX 的 NodeGatewayInclusive（包容网关），
+// 使得满足条件的多路分支可并发激活，未命中条件的分支自动标记为 SkippedTargets 以便汇聚。
 type SelectiveGatewayConverter struct{}
 
 func (c *SelectiveGatewayConverter) Type() flowdsl.NodeType { return flowdsl.NodeGatewayExclusive }
@@ -158,7 +149,21 @@ func (c *SelectiveGatewayConverter) Convert(_ *ConvertContext, node *flowdsl.Nod
 	return model.NodeSpec{
 		ID:   node.ID,
 		Name: node.DisplayName(),
-		Type: model.NodeGatewayExclusive,
+		Type: model.NodeGatewayInclusive,
+	}, nil
+}
+
+// ConditionGatewayConverter 兼容 LogicFlow 画布中的条件网关 (condition)，将其映射为包容条件网关
+type ConditionGatewayConverter struct{}
+
+func (c *ConditionGatewayConverter) Type() flowdsl.NodeType { return flowdsl.NodeGatewayCondition }
+
+func (c *ConditionGatewayConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
+	name := lo.Ternary(strings.TrimSpace(node.Name) != "", node.Name, "条件分支")
+	return model.NodeSpec{
+		ID:   node.ID,
+		Name: name,
+		Type: model.NodeGatewayInclusive,
 	}, nil
 }
 

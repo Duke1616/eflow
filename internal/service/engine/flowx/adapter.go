@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
@@ -13,6 +14,7 @@ import (
 	"github.com/Duke1616/eflow/pkg/flowx"
 	flowxModel "github.com/Duke1616/eflow/pkg/flowx/model"
 	"github.com/samber/lo"
+	"golang.org/x/sync/errgroup"
 )
 
 // flowxEngine flowx 现代工作流引擎实现
@@ -58,7 +60,7 @@ func (a *flowxEngine) Start(ctx context.Context, req domain.ProcessLaunchReq) (d
 		return domain.ProcessLaunchResult{}, errors.New("flowx 流程引擎未初始化")
 	}
 
-	procKey := fmt.Sprintf("wf_%d", req.WorkflowId)
+	procKey := domain.FormatFlowxProcessKey(req.WorkflowId)
 	instID := a.engine.GenInstanceID(procKey)
 
 	// 预分配实例 ID 并提前物理落盘绑定，彻底消除生命周期事件广播与工单外键落盘之间的时序竞态
@@ -69,10 +71,11 @@ func (a *flowxEngine) Start(ctx context.Context, req domain.ProcessLaunchReq) (d
 	}
 
 	_, err := a.engine.Start(ctx, flowx.StartReq{
-		InstanceID: instID,
-		Key:        procKey,
-		Starter:    req.Starter,
-		Variables:  req.Variables,
+		InstanceID:  instID,
+		Key:         procKey,
+		Starter:     req.Starter,
+		Variables:   req.Variables,
+		BusinessKey: strconv.FormatInt(req.TicketId, 10),
 	})
 	if err != nil {
 		return domain.ProcessLaunchResult{}, fmt.Errorf("flowx 启动流程实例失败: %w", err)
@@ -125,14 +128,14 @@ func (a *flowxEngine) GetTaskContext(ctx context.Context, _ domain.EngineType, t
 		return domain.TaskContext{}, fmt.Errorf("flowx 查询流程实例详情失败 [instanceID=%s]: %w", task.InstanceID, err)
 	}
 
-	// 解析 ProcessID：从 inst.ProcKey ("wf_%d") 提取 workflow/process 标识
-	var procID int
-	_, _ = fmt.Sscanf(inst.ProcKey, "wf_%d", &procID)
+	wfID := domain.ParseWorkflowIDFromProcessKey(inst.ProcKey)
 
 	return domain.TaskContext{
 		EngineType:        domain.EngineTypeFlowx,
 		TaskID:            taskID,
-		ProcessID:         procID,
+		WorkflowID:        wfID,
+		ProcessKey:        inst.ProcKey,
+		ProcessID:         int(wfID), // 兼顾历史仅读取 ProcessID 的场景
 		ProcessInstanceID: domain.NewID(task.InstanceID),
 		ProcessVersion:    inst.Version,
 		NodeID:            task.NodeID,
@@ -186,7 +189,7 @@ func (a *flowxEngine) GetTimeline(ctx context.Context, _ domain.EngineType, inst
 	return nodes, nil
 }
 
-func (a *flowxEngine) GetInstanceExecutionView(ctx context.Context, _ domain.EngineType, instanceID domain.ID, status uint8) (domain.InstanceExecutionView, error) {
+func (a *flowxEngine) GetInstanceExecutionView(ctx context.Context, _ domain.EngineType, instanceID domain.ID, _ uint8) (domain.InstanceExecutionView, error) {
 	if a.engine == nil {
 		return domain.InstanceExecutionView{}, errors.New("flowx 流程引擎未初始化")
 	}
@@ -196,163 +199,22 @@ func (a *flowxEngine) GetInstanceExecutionView(ctx context.Context, _ domain.Eng
 		return domain.InstanceExecutionView{}, fmt.Errorf("%w: 流程实例 ID 不能为空", engine.ErrInvalidParameter)
 	}
 
-	inst, err := a.engine.GetInstance(ctx, instID)
+	view, err := a.engine.GetExecutionView(ctx, instID)
 	if err != nil {
-		return domain.InstanceExecutionView{}, fmt.Errorf("flowx 查询流程实例详情失败: %w", err)
+		return domain.InstanceExecutionView{}, fmt.Errorf("flowx 获取执行拓扑视图失败: %w", err)
 	}
 
-	tasks, err := a.engine.ListTasksByInstance(ctx, instID)
-	if err != nil {
-		return domain.InstanceExecutionView{}, fmt.Errorf("flowx 查询任务执行记录失败: %w", err)
-	}
-
-	nodeStatusMap := lo.Associate(tasks, func(t *flowxModel.Task) (string, int) {
-		return t.NodeID, int(t.Status)
-	})
-
-	pendingUsers := lo.Uniq(lo.FilterMap(tasks, func(t *flowxModel.Task, _ int) (string, bool) {
-		if t.IsPending() && t.Assignee != "" {
-			return t.Assignee, true
-		}
-		return "", false
-	}))
-
-	var (
-		procID   int
-		edgeMap  = make(map[string][]string)
-	)
-	_, _ = fmt.Sscanf(inst.ProcKey, "wf_%d", &procID)
-
-	// 加载流程定义快照以进行有向图流转边投影计算
-	def, defErr := a.engine.GetDefinition(ctx, inst.ProcKey, inst.Version)
-	if defErr == nil {
-		edgeMap = calculateFlowxTraversedEdges(def, tasks, inst)
-	}
+	wfID := domain.ParseWorkflowIDFromProcessKey(view.ProcessKey)
 
 	return domain.InstanceExecutionView{
-		ProcessID:      procID,
-		ProcessVersion: inst.Version,
-		NodeStatusMap:  nodeStatusMap,
-		TraversedEdges: edgeMap,
-		PendingUsers:   pendingUsers,
+		WorkflowID:     wfID,
+		ProcessKey:     view.ProcessKey,
+		ProcessID:      int(wfID), // 兼顾下游仅读取 ProcessID 的场景
+		ProcessVersion: view.ProcessVersion,
+		NodeStatusMap:  view.NodeStatusMap,
+		TraversedEdges: view.TraversedEdges,
+		PendingUsers:   view.PendingUsers,
 	}, nil
-}
-
-// calculateFlowxTraversedEdges 根据流程图定义与实际执行任务投影计算已流转通过的边集合
-func calculateFlowxTraversedEdges(def flowxModel.ProcessDefinition, tasks []*flowxModel.Task, inst *flowxModel.Instance) map[string][]string {
-	if len(def.Nodes) == 0 || len(def.Edges) == 0 {
-		return make(map[string][]string)
-	}
-
-	nodesMap := lo.KeyBy(def.Nodes, func(n flowxModel.NodeSpec) string { return n.ID })
-
-	outEdges := make(map[string][]string)
-	inEdges := make(map[string][]string)
-	for _, e := range def.Edges {
-		outEdges[e.Source] = append(outEdges[e.Source], e.Target)
-		inEdges[e.Target] = append(inEdges[e.Target], e.Source)
-	}
-
-	// 1. 初始标记活跃/激活节点 (activated) 与已完成流转节点 (completed)
-	activatedNodeIDs := make(map[string]bool)
-	completedNodeIDs := make(map[string]bool)
-
-	// 开始节点恒定已激活且已完成
-	for _, n := range def.Nodes {
-		if n.Type == flowxModel.NodeStart {
-			activatedNodeIDs[n.ID] = true
-			completedNodeIDs[n.ID] = true
-		}
-	}
-
-	// 实例已完结时，结束节点标记为已到达
-	if inst != nil && inst.IsTerminal() {
-		for _, n := range def.Nodes {
-			if n.Type == flowxModel.NodeEnd {
-				activatedNodeIDs[n.ID] = true
-			}
-		}
-	}
-
-	// 遍历任务切片统计状态
-	for _, t := range tasks {
-		activatedNodeIDs[t.NodeID] = true
-		if t.IsPassed() || t.Status == flowxModel.TaskSkipped {
-			completedNodeIDs[t.NodeID] = true
-		}
-	}
-
-	// 2. 递归判定网关节点是否穿透（上游存在已完成且下游存在已激活）
-	var isDownstreamActivated func(currID string, visited map[string]bool) bool
-	isDownstreamActivated = func(currID string, visited map[string]bool) bool {
-		for _, nextID := range outEdges[currID] {
-			if visited[nextID] {
-				continue
-			}
-			visited[nextID] = true
-			nextNode, exists := nodesMap[nextID]
-			if !exists {
-				continue
-			}
-			if !nextNode.IsGateway() {
-				if activatedNodeIDs[nextID] {
-					return true
-				}
-			} else {
-				if isDownstreamActivated(nextID, visited) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-
-	var isUpstreamCompleted func(currID string, visited map[string]bool) bool
-	isUpstreamCompleted = func(currID string, visited map[string]bool) bool {
-		for _, prevID := range inEdges[currID] {
-			if visited[prevID] {
-				continue
-			}
-			visited[prevID] = true
-			prevNode, exists := nodesMap[prevID]
-			if !exists {
-				continue
-			}
-			if !prevNode.IsGateway() {
-				if completedNodeIDs[prevID] {
-					return true
-				}
-			} else {
-				if isUpstreamCompleted(prevID, visited) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-
-	// 针对所有网关进行拓扑状态标记
-	for _, n := range def.Nodes {
-		if !n.IsGateway() {
-			continue
-		}
-		if isUpstreamCompleted(n.ID, make(map[string]bool)) && isDownstreamActivated(n.ID, make(map[string]bool)) {
-			completedNodeIDs[n.ID] = true
-			activatedNodeIDs[n.ID] = true
-		}
-	}
-
-	// 3. 收集两端均满足激活流转条件的有向边
-	traversed := make(map[string][]string)
-	for _, e := range def.Edges {
-		if completedNodeIDs[e.Source] && activatedNodeIDs[e.Target] {
-			if !slices.Contains(traversed[e.Source], e.Target) {
-				traversed[e.Source] = append(traversed[e.Source], e.Target)
-			}
-		}
-	}
-
-	return traversed
 }
 
 func (a *flowxEngine) Revoke(ctx context.Context, req domain.RevokeReq) error {
@@ -438,16 +300,30 @@ func (a *flowxEngine) ListPendingSteps(ctx context.Context, instanceIDs []domain
 		return nil, errors.New("flowx 流程引擎未初始化")
 	}
 
-	var allPendingTasks []domain.TodoTask
-	for _, instID := range instanceIDs {
-		events, err := a.engine.GetTimeline(ctx, instID.String())
-		if err != nil {
-			continue
-		}
-		for _, evt := range events {
-			for _, t := range evt.Tasks {
+	validIDs := lo.Filter(instanceIDs, func(id domain.ID, _ int) bool {
+		return !id.IsZero()
+	})
+	if len(validIDs) == 0 {
+		return nil, nil
+	}
+
+	var (
+		mu              sync.Mutex
+		allPendingTasks []domain.TodoTask
+		eg              errgroup.Group
+	)
+
+	for _, instID := range validIDs {
+		targetID := instID
+		eg.Go(func() error {
+			tasks, err := a.engine.ListTasksByInstance(ctx, targetID.String())
+			if err != nil {
+				return nil
+			}
+			var pending []domain.TodoTask
+			for _, t := range tasks {
 				if t.IsPending() {
-					allPendingTasks = append(allPendingTasks, domain.TodoTask{
+					pending = append(pending, domain.TodoTask{
 						EngineType: domain.EngineTypeFlowx,
 						TaskID:     domain.NewID(t.ID),
 						InstanceID: domain.NewID(t.InstanceID),
@@ -458,8 +334,16 @@ func (a *flowxEngine) ListPendingSteps(ctx context.Context, instanceIDs []domain
 					})
 				}
 			}
-		}
+			if len(pending) > 0 {
+				mu.Lock()
+				allPendingTasks = append(allPendingTasks, pending...)
+				mu.Unlock()
+			}
+			return nil
+		})
 	}
+
+	_ = eg.Wait()
 	return allPendingTasks, nil
 }
 

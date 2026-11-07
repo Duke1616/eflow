@@ -64,6 +64,7 @@ type UpdateReq struct {
 	Name         string         `json:"name"`                // 流程名称
 	Desc         string         `json:"desc"`                // 流程描述
 	Owner        string         `json:"owner"`               // 流程管理员/设计者
+	Icon         string         `json:"icon,omitempty"`      // 流程展示图标
 	IsNotify     bool           `json:"is_notify"`           // 是否支持流转通知推送
 	NotifyMethod uint8          `json:"notify_method"`       // 推送渠道
 	EngineType   string         `json:"engine_type"`         // 工作流引擎类型 (easy-workflow / flowx)

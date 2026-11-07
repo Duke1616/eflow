@@ -30,6 +30,12 @@ const (
 	SignAllPass SignRule = "ALL_PASS" // 会签 (需所有人同意才可通过)
 )
 
+// 内置上下文候选人占位符常量 (支持流程引擎自动就地展开计算)
+const (
+	AssigneeStarter   = "${starter}"   // 工单发起人
+	AssigneeInitiator = "${initiator}" // 工单提单人 (BPMN兼容别名)
+)
+
 // ProcessDefinition 流程定义（标准 DSL 模型）
 type ProcessDefinition struct {
 	Key     string     `json:"key"`     // 流程唯一标识

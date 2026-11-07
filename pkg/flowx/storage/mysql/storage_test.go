@@ -139,3 +139,23 @@ func TestMySQLStorage_ListPendingTasksByAssigneeSQL(t *testing.T) {
 		assert.NotContains(t, sql, "assignee")
 	})
 }
+
+func TestMySQLStorage_UpdateTasksStatusSQL(t *testing.T) {
+	db := newTestDryRunDB(t)
+
+	now := time.Now()
+	sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+		return tx.Model(&FlowTaskPO{}).
+			Where("id IN ?", []string{"task_001", "task_002"}).
+			Updates(map[string]any{
+				"status": uint8(model.TaskCancelled),
+				"ftime":  now.UnixMilli(),
+			})
+	})
+
+	assert.Contains(t, sql, "UPDATE `flow_task`")
+	assert.Contains(t, sql, "`status`=4")
+	assert.Contains(t, sql, "`ftime`=")
+	// 验证 ftime 更新的是纯数字毫秒时间戳，而非带日期的字符串
+	assert.NotContains(t, sql, now.Format("2006-01-02"))
+}

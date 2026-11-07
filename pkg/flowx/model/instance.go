@@ -20,6 +20,7 @@ type Instance struct {
 	ProcKey     string         `json:"proc_key"`
 	Version     int            `json:"version"`
 	Starter     string         `json:"starter"`
+	BusinessKey string         `json:"business_key,omitempty"` // 业务关联主键（如工单 ID）
 	Status      InstanceStatus `json:"status"`
 	CurrentNode string         `json:"current_node"` // 当前停留的节点
 	Variables   Variables      `json:"variables"`    // 全局表单变量快照
@@ -74,4 +75,13 @@ func (i *Instance) IsTerminal() bool {
 // MergeVariables 增量合并业务表单变量，保证变量字典初始化安全
 func (i *Instance) MergeVariables(patch Variables) {
 	i.Variables.Merge(patch)
+}
+
+// ExecutionView 流程实例的执行态综合视图快照（供前端渲染拓扑与连线高亮）
+type ExecutionView struct {
+	ProcessKey     string              `json:"process_key"`
+	ProcessVersion int                 `json:"process_version"`
+	NodeStatusMap  map[string]int      `json:"node_status_map"`
+	TraversedEdges map[string][]string `json:"traversed_edges"`
+	PendingUsers   []string            `json:"pending_users"`
 }

@@ -170,7 +170,9 @@ type TaskContext struct {
 	EngineType        EngineType // 所属工作流底层引擎类型
 	TaskID            ID         // 任务强类型 ID
 	ProcessInstanceID ID         // 流程实例强类型 ID
-	ProcessID         int        // 流程定义 ID
+	WorkflowID        int64      // 关联的工作流定义主键 ID
+	ProcessKey        string     // 流程全局唯一标识 Key（FlowX 对应 procKey 如 wf_12）
+	ProcessID         int        // Deprecated: 历史流程定义 ID（仅用于兼容 EasyFlow 引擎存量实例）
 	ProcessVersion    int        // 流程定义版本号
 	NodeID            string     // 节点物理标识
 	NodeName          string     // 节点名称
@@ -181,8 +183,10 @@ type TaskContext struct {
 
 // InstanceExecutionView 流程实例运行时轨迹与点亮视图
 type InstanceExecutionView struct {
-	ProcessID      int
-	ProcessVersion int
+	WorkflowID     int64               // 关联的工作流定义主键 ID
+	ProcessKey     string              // 流程全局唯一标识 Key（FlowX 对应 procKey）
+	ProcessID      int                 // Deprecated: 历史流程定义 ID（仅用于兼容 EasyFlow 引擎存量实例）
+	ProcessVersion int                 // 流程定义版本号
 	NodeStatusMap  map[string]int      // 节点状态映射 [NodeID] -> 状态编码
 	TraversedEdges map[string][]string // 已激活流转的拓扑边映射 [SourceID] -> []TargetID
 	PendingUsers   []string            // 当前等待审批的处理人列表

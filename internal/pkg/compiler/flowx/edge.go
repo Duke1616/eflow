@@ -21,26 +21,14 @@ func ConvertEdges(edges []flowdsl.Edge) []model.EdgeSpec {
 			Target: e.Target,
 		}
 
-		if cleanExpr := sanitizeExpression(e.Expression); cleanExpr != "" {
+		rawExpr := strings.TrimSpace(e.Expression)
+		if rawExpr != "" && rawExpr != "1 = 1" && rawExpr != "true" {
+			// 采用规则引擎统一的规范化工具清洗表达式（消除前缀 $、转义单等号、规范化集合括号等）
+			cleanExpr := rule.NormalizeExpression(rawExpr)
 			edgeSpec.Condition = cleanExpr
-			edgeSpec.RuleGroup = rule.ParseConditionText(cleanExpr)
+			edgeSpec.RuleGroup = rule.ParseConditionText(rawExpr)
 		}
 
 		return edgeSpec, true
 	})
-}
-
-// sanitizeExpression 清洗条件表达式中的多余前缀 (例如将 "$days > 3" 转换为 "days > 3")
-func sanitizeExpression(expr string) string {
-	expr = strings.TrimSpace(expr)
-	if expr == "" || expr == "1 = 1" || expr == "true" {
-		return ""
-	}
-
-	// 去除首个变量名可能携带的 '$' 前缀
-	if strings.HasPrefix(expr, "$") {
-		expr = strings.TrimPrefix(expr, "$")
-	}
-
-	return strings.TrimSpace(expr)
 }

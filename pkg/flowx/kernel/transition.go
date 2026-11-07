@@ -55,7 +55,7 @@ func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables model.Va
 		}
 
 		// 2. 若目标是网关节点，先检查是否存在多路汇聚屏障阻断
-		if !p.IsJoinSatisfied(nextNode, allTasks, batchCode) {
+		if !p.IsJoinSatisfied(nextNode, allTasks) {
 			decision.IsBlocked = true
 			continue // 该网关前置尚未全部就绪，保持阻断等待
 		}
@@ -120,12 +120,19 @@ func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables mode
 	return result, nil
 }
 
-// evaluateEdge 纯粹面向标准 RuleGroup 规则组进行求值，消除运行时文本动态解析与双轨兼容
+// evaluateEdge 优先面向标准 RuleGroup 规则组进行求值；若无 RuleGroup 但配置了文本表达式，则委托表达式引擎求值
 func (p *ExecutionPlan) evaluateEdge(edge model.EdgeSpec, variables model.Variables) bool {
-	if edge.RuleGroup == nil {
-		return true // 无规则约束，默认放行
+	if edge.RuleGroup != nil {
+		return rule.EvaluateRuleGroup(edge.RuleGroup, variables)
 	}
-	return rule.EvaluateRuleGroup(edge.RuleGroup, variables)
+	if edge.Condition != "" {
+		res, err := rule.GetDefaultEngine().Evaluate(edge.Condition, variables)
+		if err != nil {
+			return false
+		}
+		return res
+	}
+	return true // 无任何规则约束，默认放行
 }
 
 // FindEffectivePrecedingTaskNodes 逆向递归溯源指定节点的有效任务前置节点（穿透纯路由性质的网关）
@@ -152,26 +159,14 @@ func (p *ExecutionPlan) FindEffectivePrecedingTaskNodes(nodeID string) []model.N
 	return lo.UniqBy(res, func(n model.NodeSpec) string { return n.ID })
 }
 
-// IsJoinSatisfied 裁决汇聚网关（Join）的上游前置分支是否全部就绪
-// 支持递归穿透非任务型网关，并支持各分支以最大批次独立裁决（规避分支驳回重审批次脱节导致的死锁）
-func (p *ExecutionPlan) IsJoinSatisfied(joinNode model.NodeSpec, allTasks []*model.Task, batchCode int) bool {
-	// 只有显式声明为并行 (PARALLEL) 或包容 (INCLUSIVE) 的网关，才执行多分支同步汇聚屏障
-	// 排他网关 (EXCLUSIVE) 或普通节点直接放行 (首到即走)
-	if joinNode.Type != model.NodeGatewayParallel && joinNode.Type != model.NodeGatewayInclusive {
-		return true
-	}
-
+// extractBranchStates 逆向萃取汇聚网关所有入边分支的物理任务流转定态快照
+func (p *ExecutionPlan) extractBranchStates(joinNode model.NodeSpec, allTasks []*model.Task) []BranchState {
 	inEdges := p.InEdges[joinNode.ID]
-	if len(inEdges) <= 1 {
-		return true // 非多路汇聚点，直接放行
+	if len(inEdges) == 0 {
+		return nil
 	}
 
-	var (
-		checkedNodeCount int
-		passedNodeCount  int
-	)
-
-	// 针对汇聚网关的每条入边分支，提取其有效前置任务节点集
+	var states []BranchState
 	for _, edge := range inEdges {
 		srcNode, ok := p.NodesMap[edge.Source]
 		if !ok {
@@ -185,20 +180,17 @@ func (p *ExecutionPlan) IsJoinSatisfied(joinNode model.NodeSpec, allTasks []*mod
 			checkNodes = p.FindEffectivePrecedingTaskNodes(srcNode.ID)
 		}
 
-		// 若该前置分支没有包含任何物理任务节点（例如直接连自 Start 节点），则视为已就绪
-		if len(checkNodes) == 0 {
-			continue
-		}
-
 		for _, node := range checkNodes {
-			checkedNodeCount++
-			// 查找该前置节点产生的所有物理任务
 			nodeTasks := lo.Filter(allTasks, func(t *model.Task, _ int) bool {
 				return t.NodeID == node.ID
 			})
 			if len(nodeTasks) == 0 {
-				// 该分支尚未到达，未产生任何任务，汇聚屏障阻断
-				return false
+				states = append(states, BranchState{
+					NodeID:   node.ID,
+					NodeName: node.Name,
+					HasTask:  false,
+				})
+				continue
 			}
 
 			// 核心防卫：取该节点最新产生的最大批次号任务进行流转状态裁决，避免不同分支因驳回重审导致批次号不相等而死锁
@@ -211,34 +203,39 @@ func (p *ExecutionPlan) IsJoinSatisfied(joinNode model.NodeSpec, allTasks []*mod
 			})
 
 			isPassed := IsNodeSatisfiedToAdvance(node, srcTasks)
-			if isPassed {
-				passedNodeCount++
-			}
+			isSkipped := lo.SomeBy(srcTasks, func(t *model.Task) bool {
+				return t.Status == model.TaskSkipped
+			})
 
-			if joinNode.Type == model.NodeGatewayParallel {
-				// 并行网关：必须全部分支的审批人都已满足该前置节点的流转规则 (或签需1人通过，会签需全部通过)
-				if !isPassed {
-					return false
-				}
-			} else if joinNode.Type == model.NodeGatewayInclusive {
-				// 包容网关：前置分支必须已定态 (节点满足流转通过条件 或 任务已被标记为跳过)
-				isResolved := isPassed || lo.SomeBy(srcTasks, func(t *model.Task) bool {
-					return t.Status == model.TaskSkipped
-				})
-				if !isResolved {
-					return false
-				}
-			}
+			states = append(states, BranchState{
+				NodeID:    node.ID,
+				NodeName:  node.Name,
+				HasTask:   true,
+				IsPassed:  isPassed,
+				IsSkipped: isSkipped,
+			})
 		}
 	}
+	return states
+}
 
-	// 安全防卫：包容汇聚网关如果所有前置分支 100% 全部都是 Skipped（没有任何一个真实节点通过）
-	// 则意味着本轮没有任何有效业务分支被激活，汇聚网关绝不能盲目开闸放行，必须阻断
-	if joinNode.Type == model.NodeGatewayInclusive && checkedNodeCount > 0 && passedNodeCount == 0 {
-		return false
+// IsJoinSatisfied 裁决汇聚网关（Join）的上游前置分支是否全部就绪
+// 支持递归穿透非任务型网关，并委托给强内聚的 IJoinStrategy 策略进行多路汇聚放行判定
+func (p *ExecutionPlan) IsJoinSatisfied(joinNode model.NodeSpec, allTasks []*model.Task) bool {
+	// 只有显式声明为并行 (PARALLEL) 或包容 (INCLUSIVE) 的网关，才执行多分支同步汇聚屏障
+	// 排他网关 (EXCLUSIVE) 或普通节点直接放行 (首到即走)
+	if joinNode.Type != model.NodeGatewayParallel && joinNode.Type != model.NodeGatewayInclusive {
+		return true
 	}
 
-	return true
+	inEdges := p.InEdges[joinNode.ID]
+	if len(inEdges) <= 1 {
+		return true // 非多路汇聚点，直接放行
+	}
+
+	strategy := GetJoinStrategy(joinNode.Type)
+	branchStates := p.extractBranchStates(joinNode, allTasks)
+	return strategy.IsSatisfied(branchStates)
 }
 
 // FindUpstreamApprovalNode 逆向查找上一个可驳回的人工审批节点

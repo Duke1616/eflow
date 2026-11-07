@@ -7,6 +7,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	repomocks "github.com/Duke1616/eflow/internal/repository/mocks"
 	"github.com/Duke1616/eflow/pkg/flowx"
+	"github.com/Duke1616/eflow/pkg/flowx/kernel"
 	flowxModel "github.com/Duke1616/eflow/pkg/flowx/model"
 	flowxMem "github.com/Duke1616/eflow/pkg/flowx/storage/memory"
 	"github.com/stretchr/testify/assert"
@@ -190,7 +191,8 @@ func TestCalculateFlowxTraversedEdges_ComplexTopology(t *testing.T) {
 		{NodeID: "algo", Status: flowxModel.TaskPending},
 	}
 
-	edges1 := calculateFlowxTraversedEdges(def, tasksCase1, nil)
+	plan := kernel.NewExecutionPlan(def)
+	edges1 := plan.CalculateTraversedEdges(tasksCase1, nil)
 
 	// 上游与到达待办分支正常点亮
 	assert.Contains(t, edges1["start"], "submitter")
@@ -215,7 +217,7 @@ func TestCalculateFlowxTraversedEdges_ComplexTopology(t *testing.T) {
 		{NodeID: "leader", Status: flowxModel.TaskPending},
 	}
 
-	edges2 := calculateFlowxTraversedEdges(def, tasksCase2, nil)
+	edges2 := plan.CalculateTraversedEdges(tasksCase2, nil)
 
 	// 后端、前端、算法流入汇聚网关全部点亮
 	assert.Contains(t, edges2["backend"], "join_gw")

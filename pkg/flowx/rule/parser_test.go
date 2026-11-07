@@ -53,6 +53,27 @@ func TestParseConditionText(t *testing.T) {
 			wantVal:   1000.5,
 		},
 		{
+			name:      "包含算子in单值",
+			input:     "environment in ('backend')",
+			wantField: "environment",
+			wantOp:    model.OpIn,
+			wantVal:   []string{"backend"},
+		},
+		{
+			name:      "包含算子in多值带美元符号",
+			input:     "$environment in ('ocr', 'frontend')",
+			wantField: "environment",
+			wantOp:    model.OpIn,
+			wantVal:   []string{"ocr", "frontend"},
+		},
+		{
+			name:      "不包含算子not in",
+			input:     "env not in ('test', 'dev')",
+			wantField: "env",
+			wantOp:    model.OpNotIn,
+			wantVal:   []string{"test", "dev"},
+		},
+		{
 			name:    "空字符串返回nil",
 			input:   "   ",
 			wantNil: true,

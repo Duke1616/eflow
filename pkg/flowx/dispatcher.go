@@ -3,6 +3,7 @@ package flowx
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Duke1616/eflow/pkg/flowx/kernel"
@@ -99,14 +100,31 @@ func (e *flowEngine) activateNodes(ctx context.Context, session *flowSession, no
 	return nil
 }
 
-// resolveAssignees 统一解析节点候选人列表（融合静态配置与同步Hook动态算人）
+// resolveAssignees 统一解析节点候选人列表（融合上下文内置占位符展开与同步Hook业务守卫）
 func (e *flowEngine) resolveAssignees(ctx context.Context, session *flowSession, node *model.NodeSpec, operator string) ([]string, error) {
-	assignees := lo.Uniq(append([]string{}, node.Assignees...))
+	inst := session.Instance()
+
+	// 1. 内置上下文占位符就地展开 (支持 starter / initiator 等自动映射为工单发起人)
+	rawAssignees := lo.Map(node.Assignees, func(assignee string, _ int) string {
+		trimmed := strings.TrimSpace(assignee)
+		switch trimmed {
+		case model.AssigneeStarter, model.AssigneeInitiator, "starter", "founder":
+			if inst != nil && inst.Starter != "" {
+				return inst.Starter
+			}
+		}
+		return trimmed
+	})
+
+	assignees := lo.Uniq(lo.Filter(rawAssignees, func(a string, _ int) bool {
+		return a != ""
+	}))
+
+	// 2. 触发节点声明的同步业务守卫 Hook (如有)
 	if len(node.Hooks) == 0 {
 		return assignees, nil
 	}
 
-	inst := session.Instance()
 	hookCtx := NewHookContext(inst, node, operator, assignees)
 	if err := e.hooks.Execute(ctx, node.Hooks, hookCtx); err != nil {
 		return nil, err

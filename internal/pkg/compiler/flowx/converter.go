@@ -24,6 +24,7 @@ func NewConverter() IConverter {
 	c.Register(&ParallelGatewayConverter{})
 	c.Register(&InclusionGatewayConverter{})
 	c.Register(&SelectiveGatewayConverter{})
+	c.Register(&ConditionGatewayConverter{})
 	c.Register(&AutomationNodeConverter{})
 	c.Register(&ChatGroupNodeConverter{})
 	return c
@@ -56,7 +57,7 @@ func (c *DefaultConverter) Convert(procKey, procName string, graph flowdsl.IGrap
 	for _, node := range orderedNodes {
 		handler, ok := c.handlers[node.Type]
 		if !ok && node.Type == flowdsl.NodeGateway {
-			// 若为未细分类型的网关，默认降级为排他网关
+			// 若为未细分具体类型的网关，默认对齐条件分支网关
 			handler = c.handlers[flowdsl.NodeGatewayExclusive]
 			ok = handler != nil
 		}

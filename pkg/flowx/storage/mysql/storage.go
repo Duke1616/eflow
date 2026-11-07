@@ -244,9 +244,9 @@ func (s *Storage) UpdateTasksStatus(ctx context.Context, taskIDs []string, statu
 	updates := map[string]any{
 		"status": uint8(status),
 	}
-	// 终态任务同步持久化完成时间，防止重新从 DB 加载时丢失审计完成时间戳
+	// 终态任务同步持久化完成时间，防止重新从 DB 加载时丢失审计完成时间戳 (毫秒时间戳)
 	if status != model.TaskPending {
-		updates["ftime"] = now
+		updates["ftime"] = now.UnixMilli()
 	}
 	return s.db.WithContext(ctx).Model(&FlowTaskPO{}).
 		Where("id IN ?", taskIDs).

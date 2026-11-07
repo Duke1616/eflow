@@ -26,7 +26,7 @@ func (c *flowxCompiler) EngineType() EngineType {
 }
 
 func (c *flowxCompiler) Compile(_ context.Context, wf domain.Workflow) (CompileResult, error) {
-	procKey := fmt.Sprintf("wf_%d", wf.Id)
+	procKey := domain.FormatFlowxProcessKey(wf.Id)
 	if wf.Id <= 0 {
 		procKey = fmt.Sprintf("wf_temp_%s", wf.Name)
 	}

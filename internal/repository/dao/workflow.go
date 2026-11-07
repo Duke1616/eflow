@@ -137,10 +137,14 @@ func (g *gormWorkflowDAO) UpdateWorkflow(ctx context.Context, w Workflow) (int64
 		"name":          w.Name,
 		"desc":          w.Desc,
 		"owner":         w.Owner,
+		"icon":          w.Icon,
 		"is_notify":     w.IsNotify,
 		"notify_method": w.NotifyMethod,
 		"flow_data":     w.FlowData,
 		"utime":         time.Now().UnixMilli(),
+	}
+	if w.EngineType != "" {
+		updates["engine_type"] = w.EngineType
 	}
 	result := g.db.WithContext(ctx).Model(&Workflow{}).Where("id = ?", w.Id).Updates(updates)
 	return result.RowsAffected, result.Error
