@@ -17,8 +17,26 @@ import (
 )
 
 func TestTicketService_Pass(t *testing.T) {
+	defaultEasyTicket := domain.Ticket{
+		Id:         1001,
+		WorkflowId: 10,
+		Process: domain.Process{
+			EngineType: domain.EngineTypeEasyFlow,
+			InstanceID: domain.NewID(1),
+		},
+	}
+	defaultFlowxTicket := domain.Ticket{
+		Id:         999,
+		WorkflowId: 20,
+		Process: domain.Process{
+			EngineType: domain.EngineTypeFlowx,
+			InstanceID: domain.NewID("inst_flowx_123"),
+		},
+	}
+
 	testCases := []struct {
 		name      string
+		ticketId  int64
 		taskId    string
 		operator  string
 		isAdmin   bool
@@ -29,6 +47,7 @@ func TestTicketService_Pass(t *testing.T) {
 	}{
 		{
 			name:      "任务已被处理防御性拦截",
+			ticketId:  1001,
 			taskId:    "101",
 			operator:  "auditor1",
 			isAdmin:   false,
@@ -39,7 +58,8 @@ func TestTicketService_Pass(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("101")).Return(domain.TaskContext{
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("101")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("101"),
 					ProcessInstanceID: domain.NewID(1),
@@ -53,6 +73,7 @@ func TestTicketService_Pass(t *testing.T) {
 		},
 		{
 			name:      "非指派人且非管理员拦截越权操作",
+			ticketId:  1001,
 			taskId:    "101",
 			operator:  "attacker",
 			isAdmin:   false,
@@ -63,7 +84,8 @@ func TestTicketService_Pass(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("101")).Return(domain.TaskContext{
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("101")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("101"),
 					ProcessInstanceID: domain.NewID(1),
@@ -77,6 +99,7 @@ func TestTicketService_Pass(t *testing.T) {
 		},
 		{
 			name:      "无表单字段时直接触发引擎通过",
+			ticketId:  1001,
 			taskId:    "102",
 			operator:  "auditor1",
 			isAdmin:   false,
@@ -87,7 +110,8 @@ func TestTicketService_Pass(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("102")).Return(domain.TaskContext{
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("102")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("102"),
 					ProcessInstanceID: domain.NewID(1),
@@ -125,6 +149,7 @@ func TestTicketService_Pass(t *testing.T) {
 		},
 		{
 			name:      "表单必填字段校验失败",
+			ticketId:  1001,
 			taskId:    "103",
 			operator:  "auditor1",
 			isAdmin:   false,
@@ -137,7 +162,8 @@ func TestTicketService_Pass(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("103")).Return(domain.TaskContext{
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("103")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("103"),
 					ProcessInstanceID: domain.NewID(1),
@@ -175,6 +201,7 @@ func TestTicketService_Pass(t *testing.T) {
 		},
 		{
 			name:      "包含表单字段时成功合并数据、归档快照并推进流程",
+			ticketId:  1001,
 			taskId:    "104",
 			operator:  "admin_user",
 			isAdmin:   true,
@@ -187,7 +214,16 @@ func TestTicketService_Pass(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("104")).Return(domain.TaskContext{
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(domain.Ticket{
+					Id:         888,
+					WorkflowId: 10,
+					Process: domain.Process{
+						EngineType: domain.EngineTypeEasyFlow,
+						InstanceID: domain.NewID(2),
+					},
+				}, nil).AnyTimes()
+
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("104")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("104"),
 					ProcessInstanceID: domain.NewID(2),
@@ -220,10 +256,6 @@ func TestTicketService_Pass(t *testing.T) {
 					},
 				}, nil)
 
-				repo.EXPECT().DetailByEngineInstance(gomock.Any(), gomock.Any(), domain.NewID(2)).Return(domain.Ticket{
-					Id: 888,
-				}, nil)
-
 				repo.EXPECT().MergeTicketData(gomock.Any(), int64(888), map[string]interface{}{
 					"审核意见": "审批通过，准予发布",
 				}).Return(nil)
@@ -251,6 +283,7 @@ func TestTicketService_Pass(t *testing.T) {
 		},
 		{
 			name:      "Flowx 引擎任务通过且根据 InstanceKey 寻址工单完成数据合并",
+			ticketId:  999,
 			taskId:    "task_flowx_999",
 			operator:  "flowx_auditor",
 			isAdmin:   false,
@@ -263,7 +296,9 @@ func TestTicketService_Pass(t *testing.T) {
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("task_flowx_999")).Return(domain.TaskContext{
+				repo.EXPECT().Detail(gomock.Any(), int64(999)).Return(defaultFlowxTicket, nil).AnyTimes()
+
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("task_flowx_999")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeFlowx,
 					TaskID:            domain.NewID("task_flowx_999"),
 					ProcessInstanceID: domain.NewID("inst_flowx_123"),
@@ -294,10 +329,6 @@ func TestTicketService_Pass(t *testing.T) {
 							},
 						},
 					},
-				}, nil)
-
-				repo.EXPECT().DetailByEngineInstance(gomock.Any(), gomock.Any(), domain.NewID("inst_flowx_123")).Return(domain.Ticket{
-					Id: 999,
 				}, nil)
 
 				repo.EXPECT().MergeTicketData(gomock.Any(), int64(999), map[string]interface{}{
@@ -335,7 +366,7 @@ func TestTicketService_Pass(t *testing.T) {
 			repo, dispatcherStub, wfStub := tc.mock(ctrl)
 			svc := NewService(repo, nil, dispatcherStub, wfStub, nil)
 
-			err := svc.Pass(context.Background(), domain.EngineTypeEasyFlow, tc.taskId, tc.operator, tc.isAdmin, tc.comment, tc.extraData)
+			err := svc.Pass(context.Background(), tc.ticketId, tc.taskId, tc.operator, tc.isAdmin, tc.comment, tc.extraData)
 			if tc.wantErr != nil {
 				require.Error(t, err)
 				assert.True(t, errors.Is(err, tc.wantErr))
@@ -347,13 +378,22 @@ func TestTicketService_Pass(t *testing.T) {
 }
 
 func TestTicketService_Reject(t *testing.T) {
+	defaultEasyTicket := domain.Ticket{
+		Id:         1001,
+		WorkflowId: 10,
+		Process: domain.Process{
+			EngineType: domain.EngineTypeEasyFlow,
+			InstanceID: domain.NewID(1),
+		},
+	}
+
 	testCases := []struct {
 		name     string
 		taskId   string
 		operator string
 		isAdmin  bool
 		comment  string
-		mock     func(ctrl *gomock.Controller) *enginemocks.MockIEngine
+		mock     func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine)
 		wantErr  error
 	}{
 		{
@@ -362,16 +402,18 @@ func TestTicketService_Reject(t *testing.T) {
 			operator: "auditor1",
 			isAdmin:  false,
 			comment:  "驳回",
-			mock: func(ctrl *gomock.Controller) *enginemocks.MockIEngine {
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("201")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("201")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("201"),
 					ProcessInstanceID: domain.NewID(1),
 					Assignee:          "auditor1",
 					IsFinished:        true,
 				}, nil)
-				return dispatcher
+				return repo, dispatcher
 			},
 			wantErr: ErrTaskAlreadyFinished,
 		},
@@ -381,9 +423,11 @@ func TestTicketService_Reject(t *testing.T) {
 			operator: "auditor1",
 			isAdmin:  false,
 			comment:  "材料不齐，驳回修改",
-			mock: func(ctrl *gomock.Controller) *enginemocks.MockIEngine {
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("202")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("202")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("202"),
 					ProcessInstanceID: domain.NewID(1),
@@ -396,7 +440,7 @@ func TestTicketService_Reject(t *testing.T) {
 					Operator:   "auditor1",
 					Comment:    "材料不齐，驳回修改",
 				}).Return(nil)
-				return dispatcher
+				return repo, dispatcher
 			},
 			wantErr: nil,
 		},
@@ -406,16 +450,18 @@ func TestTicketService_Reject(t *testing.T) {
 			operator: "someone_else",
 			isAdmin:  false,
 			comment:  "恶意驳回",
-			mock: func(ctrl *gomock.Controller) *enginemocks.MockIEngine {
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("203")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("203")).Return(domain.TaskContext{
 					EngineType:        domain.EngineTypeEasyFlow,
 					TaskID:            domain.NewID("203"),
 					ProcessInstanceID: domain.NewID(1),
 					Assignee:          "auditor1",
 					IsFinished:        false,
 				}, nil)
-				return dispatcher
+				return repo, dispatcher
 			},
 			wantErr: domain.ErrTaskUnauthorized,
 		},
@@ -426,10 +472,10 @@ func TestTicketService_Reject(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			dispatcherStub := tc.mock(ctrl)
-			svc := NewService(nil, nil, dispatcherStub, nil, nil)
+			repo, dispatcherStub := tc.mock(ctrl)
+			svc := NewService(repo, nil, dispatcherStub, nil, nil)
 
-			err := svc.Reject(context.Background(), domain.EngineTypeEasyFlow, tc.taskId, tc.operator, tc.isAdmin, tc.comment)
+			err := svc.Reject(context.Background(), 1001, tc.taskId, tc.operator, tc.isAdmin, tc.comment)
 			if tc.wantErr != nil {
 				require.Error(t, err)
 				assert.True(t, errors.Is(err, tc.wantErr))
@@ -441,13 +487,22 @@ func TestTicketService_Reject(t *testing.T) {
 }
 
 func TestTicketService_Transfer(t *testing.T) {
+	defaultEasyTicket := domain.Ticket{
+		Id:         1001,
+		WorkflowId: 10,
+		Process: domain.Process{
+			EngineType: domain.EngineTypeEasyFlow,
+			InstanceID: domain.NewID(1),
+		},
+	}
+
 	testCases := []struct {
 		name        string
 		taskId      string
 		operator    string
 		isAdmin     bool
 		targetUsers []string
-		mock        func(ctrl *gomock.Controller) *enginemocks.MockIEngine
+		mock        func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine)
 		wantErr     error
 	}{
 		{
@@ -456,8 +511,9 @@ func TestTicketService_Transfer(t *testing.T) {
 			operator:    "auditor1",
 			isAdmin:     false,
 			targetUsers: nil,
-			mock: func(ctrl *gomock.Controller) *enginemocks.MockIEngine {
-				return enginemocks.NewMockIEngine(ctrl)
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				return repo, enginemocks.NewMockIEngine(ctrl)
 			},
 			wantErr: domain.ErrInvalidParameter,
 		},
@@ -467,15 +523,17 @@ func TestTicketService_Transfer(t *testing.T) {
 			operator:    "intruder",
 			isAdmin:     false,
 			targetUsers: []string{"bob"},
-			mock: func(ctrl *gomock.Controller) *enginemocks.MockIEngine {
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("302")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("302")).Return(domain.TaskContext{
 					EngineType: domain.EngineTypeEasyFlow,
 					TaskID:     domain.NewID(302),
 					Assignee:   "auditor1",
 					IsFinished: false,
 				}, nil)
-				return dispatcher
+				return repo, dispatcher
 			},
 			wantErr: domain.ErrTaskUnauthorized,
 		},
@@ -485,9 +543,11 @@ func TestTicketService_Transfer(t *testing.T) {
 			operator:    "auditor1",
 			isAdmin:     false,
 			targetUsers: []string{"bob"},
-			mock: func(ctrl *gomock.Controller) *enginemocks.MockIEngine {
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("303")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("303")).Return(domain.TaskContext{
 					EngineType: domain.EngineTypeEasyFlow,
 					TaskID:     domain.NewID(303),
 					Assignee:   "auditor1",
@@ -498,7 +558,7 @@ func TestTicketService_Transfer(t *testing.T) {
 					TaskId:      domain.NewID("303"),
 					TargetUsers: []string{"bob"},
 				}).Return(nil)
-				return dispatcher
+				return repo, dispatcher
 			},
 			wantErr: nil,
 		},
@@ -509,10 +569,10 @@ func TestTicketService_Transfer(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			dispatcherStub := tc.mock(ctrl)
-			svc := NewService(nil, nil, dispatcherStub, nil, nil)
+			repo, dispatcherStub := tc.mock(ctrl)
+			svc := NewService(repo, nil, dispatcherStub, nil, nil)
 
-			err := svc.Transfer(context.Background(), domain.EngineTypeEasyFlow, tc.taskId, tc.operator, tc.isAdmin, tc.targetUsers)
+			err := svc.Transfer(context.Background(), 1001, tc.taskId, tc.operator, tc.isAdmin, tc.targetUsers)
 			if tc.wantErr != nil {
 				require.Error(t, err)
 				assert.True(t, errors.Is(err, tc.wantErr))
@@ -524,11 +584,20 @@ func TestTicketService_Transfer(t *testing.T) {
 }
 
 func TestTicketService_GetTaskFormConfig(t *testing.T) {
+	defaultEasyTicket := domain.Ticket{
+		Id:         1001,
+		WorkflowId: 10,
+		Process: domain.Process{
+			EngineType: domain.EngineTypeEasyFlow,
+			InstanceID: domain.NewID(1),
+		},
+	}
+
 	testCases := []struct {
 		name       string
 		taskId     string
 		workflowId int64
-		mock       func(ctrl *gomock.Controller) (*enginemocks.MockIEngine, *workflowmocks.MockService)
+		mock       func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine, *workflowmocks.MockService)
 		wantLen    int
 		wantErr    bool
 	}{
@@ -536,13 +605,14 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 			name:       "查询任务信息失败",
 			taskId:     "301",
 			workflowId: 10,
-			mock: func(ctrl *gomock.Controller) (*enginemocks.MockIEngine, *workflowmocks.MockService) {
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine, *workflowmocks.MockService) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				wfSvc.EXPECT().Find(gomock.Any(), int64(10)).Return(domain.Workflow{Id: 10, EngineType: domain.EngineTypeEasyFlow}, nil)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("301")).Return(domain.TaskContext{}, errors.New("task not found"))
-				return dispatcher, wfSvc
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("301")).Return(domain.TaskContext{}, errors.New("task not found"))
+				return repo, dispatcher, wfSvc
 			},
 			wantErr: true,
 		},
@@ -550,12 +620,13 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 			name:       "未匹配到节点返回空配置列表",
 			taskId:     "302",
 			workflowId: 10,
-			mock: func(ctrl *gomock.Controller) (*enginemocks.MockIEngine, *workflowmocks.MockService) {
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine, *workflowmocks.MockService) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				wfSvc.EXPECT().Find(gomock.Any(), int64(10)).Return(domain.Workflow{Id: 10, EngineType: domain.EngineTypeEasyFlow}, nil)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("302")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("302")).Return(domain.TaskContext{
 					TaskID:            domain.NewID("302"),
 					ProcessInstanceID: domain.NewID(3),
 					ProcessID:         10,
@@ -574,7 +645,7 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 					},
 				}, nil)
 
-				return dispatcher, wfSvc
+				return repo, dispatcher, wfSvc
 			},
 			wantLen: 0,
 			wantErr: false,
@@ -583,12 +654,13 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 			name:       "成功匹配节点并返回表单字段定义",
 			taskId:     "303",
 			workflowId: 10,
-			mock: func(ctrl *gomock.Controller) (*enginemocks.MockIEngine, *workflowmocks.MockService) {
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine, *workflowmocks.MockService) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
 				wfSvc := workflowmocks.NewMockService(ctrl)
 
-				wfSvc.EXPECT().Find(gomock.Any(), int64(10)).Return(domain.Workflow{Id: 10, EngineType: domain.EngineTypeEasyFlow}, nil)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), gomock.Any(), domain.NewID("303")).Return(domain.TaskContext{
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("303")).Return(domain.TaskContext{
 					TaskID:            domain.NewID("303"),
 					ProcessInstanceID: domain.NewID(4),
 					ProcessID:         10,
@@ -617,7 +689,7 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 					},
 				}, nil)
 
-				return dispatcher, wfSvc
+				return repo, dispatcher, wfSvc
 			},
 			wantLen: 1,
 			wantErr: false,
@@ -629,10 +701,10 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			dispatcherStub, wfStub := tc.mock(ctrl)
-			svc := NewService(nil, nil, dispatcherStub, wfStub, nil)
+			repo, dispatcherStub, wfStub := tc.mock(ctrl)
+			svc := NewService(repo, nil, dispatcherStub, wfStub, nil)
 
-			fields, err := svc.GetTaskFormConfig(context.Background(), tc.taskId, tc.workflowId)
+			fields, err := svc.GetTaskFormConfig(context.Background(), 1001, tc.taskId, tc.workflowId)
 			if tc.wantErr {
 				require.Error(t, err)
 			} else {

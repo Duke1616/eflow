@@ -37,14 +37,14 @@ type IEngine interface {
 	// Revoke 撤销/终止特定流程实例
 	Revoke(ctx context.Context, req domain.RevokeReq) error
 
-	// GetTaskContext 依据显式工作流引擎类型精准获取指定任务的轻量上下文快照（固定路由，杜绝盲目重试）
+	// GetTaskContext 获取指定流程引擎下特定任务的轻量上下文快照
 	GetTaskContext(ctx context.Context, engineType domain.EngineType, taskID domain.ID) (domain.TaskContext, error)
 
 	// GetTimeline 获取指定流程实例的时间线流转历史节点列表
 	GetTimeline(ctx context.Context, engineType domain.EngineType, instanceID domain.ID) ([]domain.TimelineNode, error)
 
 	// GetAutomationTask 获取流程实例在当前自动化节点下待执行的任务记录
-	GetAutomationTask(ctx context.Context, instanceID domain.ID, nodeID string) (domain.TaskRecord, error)
+	GetAutomationTask(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, nodeID string) (domain.TaskRecord, error)
 
 	// GetTasksByCurrentNode 获取指定流程实例在特定节点下当前挂起/未完成的任务记录集合
 	GetTasksByCurrentNode(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, nodeID string) ([]domain.TaskRecord, error)
@@ -55,8 +55,8 @@ type IEngine interface {
 	// ListTodoTasks 分页检索指派给当前用户的待办任务列表，由具体引擎适配实现，分发器支持跨引擎并发聚合
 	ListTodoTasks(ctx context.Context, req domain.TodoQueryReq) ([]domain.TodoTask, int64, error)
 
-	// ListPendingSteps 批量获取指定流程实例列表中当前挂起/待处理的步骤信息（供“我发起的工单”展开当前处理人与节点）
-	ListPendingSteps(ctx context.Context, instanceIDs []domain.ID) ([]domain.TodoTask, error)
+	// ListPendingSteps 定向批量获取指定流程实例列表中当前挂起/待处理的步骤信息（基于工单绑定的 EngineType 精准路由，避免全引擎盲查）
+	ListPendingSteps(ctx context.Context, processes []domain.Process) ([]domain.TodoTask, error)
 
 	// GetTaskRecords 分页获取指定流程实例的流转执行记录
 	GetTaskRecords(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error)

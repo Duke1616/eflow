@@ -74,8 +74,10 @@ func TestQueryService_ListUserInitiated(t *testing.T) {
 				repo.EXPECT().CountTicket(gomock.Any(), "alice", gomock.Any()).
 					Return(int64(2), nil)
 
-				engineSvc.EXPECT().ListPendingSteps(gomock.Any(), []domain.ID{domain.NewID(101), domain.NewID(102)}).
-					Return([]domain.TodoTask{
+				engineSvc.EXPECT().ListPendingSteps(gomock.Any(), []domain.Process{
+					{EngineType: domain.EngineTypeEasyFlow, InstanceID: domain.NewID(101)},
+					{EngineType: domain.EngineTypeEasyFlow, InstanceID: domain.NewID(102)},
+				}).Return([]domain.TodoTask{
 						{InstanceID: domain.NewID(101), NodeName: "组长审批", ApprovedBy: "bob", TaskID: domain.NewID(999)},
 					}, nil)
 
@@ -118,8 +120,9 @@ func TestQueryService_ListUserInitiated(t *testing.T) {
 					Return(int64(1), nil)
 
 				// 流程引擎返回两个处于等待审批中的并行节点：后端与前端
-				engineSvc.EXPECT().ListPendingSteps(gomock.Any(), []domain.ID{domain.NewID(2001)}).
-					Return([]domain.TodoTask{
+				engineSvc.EXPECT().ListPendingSteps(gomock.Any(), []domain.Process{
+					{EngineType: domain.EngineTypeEasyFlow, InstanceID: domain.NewID(2001)},
+				}).Return([]domain.TodoTask{
 						{InstanceID: domain.NewID(2001), NodeName: "后端", ApprovedBy: "peicy", TaskID: domain.NewID(5242)},
 						{InstanceID: domain.NewID(2001), NodeName: "前端", ApprovedBy: "zhangsan", TaskID: domain.NewID(5243)},
 					}, nil)
@@ -179,41 +182,51 @@ func TestQueryService_ListAllTodo(t *testing.T) {
 	mockEngine := enginemocks.NewMockIEngine(ctrl)
 	mockUser := usermocks.NewMockUserServiceClient(ctrl)
 
-	// 模拟首屏待办包含启动失败工单置顶
-	mockEngine.EXPECT().ListTodoTasks(gomock.Any(), domain.TodoQueryReq{
-		Username:    "",
-		ProcessName: "",
-		SortByAsc:   false,
-		Offset:      0,
-		Limit:       10,
-		IsAdmin:     true,
-	}).Return([]domain.TodoTask{
+	statuses := []int{
+		domain.START.ToInt(),
+		domain.PROCESS.ToInt(),
+		domain.WITHDRAWING.ToInt(),
+		domain.START_FAILED.ToInt(),
+	}
+
+	mockRepo.EXPECT().ListTicket(gomock.Any(), "", statuses, int64(0), int64(10)).
+		Return([]domain.Ticket{
+			{
+				Id:     99,
+				Status: domain.START_FAILED,
+			},
+			{
+				Id:     10,
+				Status: domain.PROCESS,
+				Process: domain.Process{
+					EngineType: domain.EngineTypeFlowx,
+					InstanceID: domain.NewID("inst_101"),
+				},
+			},
+		}, nil)
+
+	mockRepo.EXPECT().CountTicket(gomock.Any(), "", statuses).
+		Return(int64(2), nil)
+
+	mockEngine.EXPECT().ListPendingSteps(gomock.Any(), []domain.Process{
 		{
-			EngineType: domain.EngineTypeEasyFlow,
-			InstanceID: domain.NewID(201),
-			TaskID:     domain.NewID(888),
-			NodeName:   "财务复核",
-			ApprovedBy: "charlie",
+			EngineType: domain.EngineTypeFlowx,
+			InstanceID: domain.NewID("inst_101"),
 		},
-	}, int64(1), nil)
+	}).Return([]domain.TodoTask{
+			{
+				EngineType: domain.EngineTypeFlowx,
+				InstanceID: domain.NewID("inst_101"),
+				TaskID:     domain.NewID("task_888"),
+				NodeName:   "财务复核",
+				ApprovedBy: "charlie",
+			},
+		}, nil)
 
 	mockUser.EXPECT().QueryByUsernames(gomock.Any(), &userv1.QueryByUsernamesReq{Usernames: []string{"charlie"}}).
 		Return(&userv1.QueryUsersResp{
 			Users: []*userv1.User{{Username: "charlie", DisplayName: "查理"}},
 		}, nil)
-
-	mockRepo.EXPECT().ListTicketByProcessInstanceIds(gomock.Any(), []int{201}).
-		Return([]domain.Ticket{
-			{Id: 10, Process: domain.Process{EngineType: domain.EngineTypeEasyFlow, InstanceID: domain.NewID(201)}},
-		}, nil)
-
-	mockRepo.EXPECT().ListProcessStartFailed(gomock.Any(), "", int64(0), int64(10)).
-		Return([]domain.Ticket{
-			{Id: 99, Status: domain.START_FAILED},
-		}, nil)
-
-	mockRepo.EXPECT().CountProcessStartFailed(gomock.Any(), "").
-		Return(int64(1), nil)
 
 	svc := NewQueryService(mockRepo, mockEngine, mockUser, nil)
 	views, total, err := svc.ListAllTodo(context.Background(), "", "", false, 0, 10)
@@ -221,7 +234,7 @@ func TestQueryService_ListAllTodo(t *testing.T) {
 	assert.Equal(t, int64(2), total)
 	require.Len(t, views, 2)
 
-	// 首个应当是启动失败置顶
+	// 首个为流程启动失败工单展示
 	assert.Equal(t, int64(99), views[0].Ticket.Id)
 	assert.Equal(t, "流程启动失败", views[0].CurrentStep)
 
@@ -292,7 +305,7 @@ func TestQueryService_ListUserTodo_CrossEngine(t *testing.T) {
 	unifiedEngine := engine.NewEngineDispatcher(easyflowEngine, flowxEngine)
 
 	// Mock EasyFlow 产生一条待办
-	mockEngineRepo.EXPECT().TodoList(gomock.Any(), "alice", "", false, 0, 10).
+	mockEngineRepo.EXPECT().TodoList(gomock.Any(), "alice", "", false, 0, 500).
 		Return([]domain.Instance{
 			{ProcInstID: 101, CurrentNodeName: "组长初审", ApprovedBy: "alice", TaskID: 501},
 		}, nil)
@@ -337,4 +350,81 @@ func TestQueryService_ListUserTodo_CrossEngine(t *testing.T) {
 	assert.NotEmpty(t, flowxView.TaskID)
 	assert.Equal(t, "主管审批", flowxView.CurrentStep)
 	assert.Equal(t, "爱丽丝", flowxView.ApprovedBy)
+}
+
+func TestQueryService_TaskTimeline_MultiEngineResolution(t *testing.T) {
+	testCases := []struct {
+		name           string
+		instID         domain.ID
+		repoTicket     domain.Ticket
+		wantEngineType domain.EngineType
+	}{
+		{
+			name:   "根据工单绑定自动分发到 FlowX 引擎驱动",
+			instID: domain.NewID("flowx_inst_999"),
+			repoTicket: domain.Ticket{
+				Id: 10,
+				Process: domain.Process{
+					EngineType: domain.EngineTypeFlowx,
+					InstanceID: domain.NewID("flowx_inst_999"),
+				},
+			},
+			wantEngineType: domain.EngineTypeFlowx,
+		},
+		{
+			name:   "老数据未标记引擎类型时默认兜底 EasyFlow 引擎驱动",
+			instID: domain.NewID(888),
+			repoTicket: domain.Ticket{
+				Id: 11,
+				Process: domain.Process{
+					EngineType: "",
+					InstanceID: domain.NewID(888),
+				},
+			},
+			wantEngineType: domain.EngineTypeEasyFlow,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockRepo := repomocks.NewMockTicketRepository(ctrl)
+			mockEngine := enginemocks.NewMockIEngine(ctrl)
+			mockUser := usermocks.NewMockUserServiceClient(ctrl)
+
+			mockRepo.EXPECT().DetailByProcessInstance(gomock.Any(), tc.instID).
+				Return(tc.repoTicket, nil)
+			mockRepo.EXPECT().FindTaskFormsBatch(gomock.Any(), gomock.Any()).
+				Return(map[int][]domain.FormValue{}, nil).AnyTimes()
+
+			mockEngine.EXPECT().GetTaskTimeline(gomock.Any(), tc.wantEngineType, tc.instID, 0, 10).
+				Return([]domain.TaskTimelineGroup{
+					{
+						NodeID:      "node_1",
+						NodeName:    "初审",
+						OccurredAt:  "2026-11-08 10:00:00",
+						TaskCount:   1,
+						PassedCount: 1,
+						Members: []domain.TaskRecord{
+							{ApprovedBy: "alice", Status: 1, NodeName: "初审"},
+						},
+					},
+				}, int64(1), nil)
+
+			mockUser.EXPECT().QueryByUsernames(gomock.Any(), gomock.Any()).
+				Return(&userv1.QueryUsersResp{
+					Users: []*userv1.User{{Username: "alice", DisplayName: "爱丽丝"}},
+				}, nil)
+
+			svc := NewQueryService(mockRepo, mockEngine, mockUser, nil)
+			events, total, err := svc.TaskTimeline(context.Background(), tc.instID, 0, 10)
+			require.NoError(t, err)
+			assert.Equal(t, int64(1), total)
+			require.Len(t, events, 1)
+			assert.Equal(t, "node_1", events[0].NodeID)
+			assert.Contains(t, events[0].Actors, "爱丽丝")
+		})
+	}
 }

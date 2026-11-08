@@ -140,6 +140,28 @@ func (m *Storage) ListTasksByInstance(ctx context.Context, instID string) ([]*mo
 	return res, nil
 }
 
+func (m *Storage) ListPendingTasksByInstances(ctx context.Context, instIDs []string) ([]*model.Task, error) {
+	if len(instIDs) == 0 {
+		return []*model.Task{}, nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	idMap := make(map[string]struct{}, len(instIDs))
+	for _, id := range instIDs {
+		idMap[id] = struct{}{}
+	}
+
+	var result []*model.Task
+	for _, t := range m.tasks {
+		if _, ok := idMap[t.InstanceID]; ok && t.IsPending() {
+			cp := *t
+			result = append(result, &cp)
+		}
+	}
+	return result, nil
+}
+
 func (m *Storage) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

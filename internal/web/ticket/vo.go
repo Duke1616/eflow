@@ -59,26 +59,25 @@ type StartUserReq struct {
 }
 
 type PassOrderReq struct {
-	EngineType string                 `json:"engine_type"`
-	TaskId     TaskID                 `json:"task_id"`
-	Comment    string                 `json:"comment"`
-	ExtraData  map[string]interface{} `json:"extra_data"`
+	TicketId  int64                  `json:"ticket_id"`
+	TaskId    TaskID                 `json:"task_id"`
+	Comment   string                 `json:"comment"`
+	ExtraData map[string]interface{} `json:"extra_data"`
 }
 
 type RejectOrderReq struct {
-	EngineType string `json:"engine_type"`
-	TaskId     TaskID `json:"task_id"`
-	Comment    string `json:"comment"`
+	TicketId int64  `json:"ticket_id"`
+	TaskId   TaskID `json:"task_id"`
+	Comment  string `json:"comment"`
 }
 
 type TransferReq struct {
-	EngineType string   `json:"engine_type"`
-	TaskId     TaskID   `json:"task_id"`
-	Usernames  []string `json:"usernames"`
+	TicketId  int64    `json:"ticket_id"`
+	TaskId    TaskID   `json:"task_id"`
+	Usernames []string `json:"usernames"`
 }
 
 type RevokeOrderReq struct {
-	EngineType string `json:"engine_type"`
 	InstanceId idx.ID `json:"instance_id"`
 	Force      bool   `json:"force"`
 	Reason     string `json:"reason"`
@@ -91,6 +90,7 @@ type SubmitRatingReq struct {
 }
 
 type TaskFormConfigReq struct {
+	TicketId   int64  `json:"ticket_id"`
 	WorkflowId int64  `json:"workflow_id"`
 	TaskId     TaskID `json:"task_id"`
 }

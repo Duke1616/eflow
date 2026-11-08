@@ -376,7 +376,7 @@ func (s *service) automationOutput(ctx context.Context, instanceId int, nodes []
 }
 
 func (s *service) fetchResult(ctx context.Context, instanceID int, nodeID string) (map[string]interface{}, error) {
-	result, err := s.taskSvc.FindTaskByNodeID(ctx, instanceID, nodeID)
+	result, err := s.taskSvc.FindTaskByNodeID(ctx, int64(instanceID), nodeID)
 	if err != nil {
 		return nil, err
 	}

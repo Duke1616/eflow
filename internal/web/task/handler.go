@@ -156,8 +156,9 @@ func normalizePage(page *Page) error {
 func mapTasks(tasks []domain.Task) []Task {
 	return lo.Map(tasks, func(task domain.Task, _ int) Task {
 		return Task{
-			ID: task.ID, TicketID: task.TicketID, ProcessInstanceID: task.ProcessInstanceID,
-			NodeID: task.NodeID, NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
+			ID: task.ID, TicketID: task.TicketID,
+			ProcessInstanceID: task.InstanceID.Int64(),
+			NodeID:            task.NodeID, NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
 			Status: task.Status.ToUint8(), Phase: string(task.Phase),
 			ScheduledAt: task.ScheduledAt, OriginalScheduledAt: task.OriginalScheduledAt,
 			CompensationNodeID: task.CompensationNodeID,

@@ -102,6 +102,8 @@ type IProcessOperator interface {
 	Transfer(ctx context.Context, taskID string, targetUsers []string) error
 	// ListPendingTasks 分页查询指定处理人的未办结待办任务列表
 	ListPendingTasks(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error)
+	// ListPendingTasksByInstances 批量拉取多个流程实例当前挂起的未办结审批任务（单次 SQL 批量检索）
+	ListPendingTasksByInstances(ctx context.Context, instanceIDs []string) ([]*model.Task, error)
 	// ListTasksByInstance 获取指定流程实例下的全部流转与历史任务列表
 	ListTasksByInstance(ctx context.Context, instanceID string) ([]*model.Task, error)
 	// GetExecutionView 获取流程实例的运行态综合视图（包含节点状态映射、高亮已流转边、待处理人等）
@@ -648,6 +650,14 @@ func (e *flowEngine) GetTimeline(ctx context.Context, instanceID string) ([]mode
 // ListPendingTasks 分页查询指定处理人的未办结待办任务列表
 func (e *flowEngine) ListPendingTasks(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
 	return e.storage.ListPendingTasksByAssignee(ctx, assignee, offset, limit)
+}
+
+// ListPendingTasksByInstances 批量拉取多个流程实例当前挂起的未办结审批任务（单次 SQL 批量检索）
+func (e *flowEngine) ListPendingTasksByInstances(ctx context.Context, instanceIDs []string) ([]*model.Task, error) {
+	if len(instanceIDs) == 0 {
+		return []*model.Task{}, nil
+	}
+	return e.storage.ListPendingTasksByInstances(ctx, instanceIDs)
 }
 
 // ListTasksByInstance 获取指定流程实例下的全部流转与历史任务列表

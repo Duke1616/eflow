@@ -16,7 +16,7 @@ import (
 
 func TestCompensationPlannerBuildIsReadOnly(t *testing.T) {
 	taskRepo := &plannerTaskRepositoryStub{tasks: []domain.Task{{
-		ID: 1, TenantID: 7, TicketID: 42, ProcessInstanceID: 101,
+		ID: 1, TenantID: 7, TicketID: 42, InstanceID: domain.NewID(101),
 		Status: domain.TaskStatusSuccess, CompensationNodeID: "compensation",
 	}}}
 	tasks := &plannerTaskServiceStub{}
@@ -62,7 +62,7 @@ type plannerTaskRepositoryStub struct {
 }
 
 func (s *plannerTaskRepositoryStub) ListByInstanceID(_ context.Context, offset, _ int64,
-	_ int) ([]domain.Task, error) {
+	_ int64) ([]domain.Task, error) {
 	if offset > 0 {
 		return nil, nil
 	}
@@ -89,8 +89,8 @@ type plannerTaskServiceStub struct {
 	tenantID int64
 }
 
-func (s *plannerTaskServiceStub) CreateTask(ctx context.Context, _ int64, _ int,
-	nodeID, _ string) (domain.Task, error) {
+func (s *plannerTaskServiceStub) CreateTask(ctx context.Context, _ int64, _ domain.ID,
+	nodeID, _ string, _ ...int) (domain.Task, error) {
 	s.calls++
 	s.nodeID = nodeID
 	s.tenantID = ctxutil.GetTenantID(ctx).Int64()

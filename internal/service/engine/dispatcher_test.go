@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/service/engine"
@@ -313,4 +314,116 @@ func TestEngineDispatcher_PassAndReject(t *testing.T) {
 	)
 	err = dispatcher.Pass(context.Background(), legacyPassReq)
 	require.NoError(t, err)
+}
+
+func TestEngineDispatcher_GetTaskContext_DirectDispatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	easyMock := enginemocks.NewMockIEngine(ctrl)
+	easyMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
+
+	flowxMock := enginemocks.NewMockIEngine(ctrl)
+	flowxMock.EXPECT().EngineType().Return(domain.EngineTypeFlowx).AnyTimes()
+
+	dispatcher := engine.NewEngineDispatcher(easyMock, flowxMock)
+
+	// 1. 指定 FlowX 引擎直接分发命中
+	taskID1 := domain.NewID("flowx_task_1001")
+	flowxMock.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeFlowx, taskID1).Return(domain.TaskContext{
+		EngineType: domain.EngineTypeFlowx,
+		TaskID:     taskID1,
+		NodeID:     "node_approve",
+	}, nil)
+
+	ctx1, err := dispatcher.GetTaskContext(context.Background(), domain.EngineTypeFlowx, taskID1)
+	require.NoError(t, err)
+	assert.Equal(t, domain.EngineTypeFlowx, ctx1.EngineType)
+	assert.Equal(t, "node_approve", ctx1.NodeID)
+
+	// 2. 指定 EasyFlow 引擎直接分发命中
+	taskID2 := domain.NewID("2002")
+	easyMock.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, taskID2).Return(domain.TaskContext{
+		EngineType: domain.EngineTypeEasyFlow,
+		TaskID:     taskID2,
+		NodeID:     "node_easy",
+	}, nil)
+
+	ctx2, err := dispatcher.GetTaskContext(context.Background(), domain.EngineTypeEasyFlow, taskID2)
+	require.NoError(t, err)
+	assert.Equal(t, domain.EngineTypeEasyFlow, ctx2.EngineType)
+	assert.Equal(t, "node_easy", ctx2.NodeID)
+
+	// 3. 未知引擎直接返回未注册错误，绝不盲目试探
+	_, err = dispatcher.GetTaskContext(context.Background(), domain.EngineType("unknown"), taskID2)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "未注册对应的流程引擎驱动")
+}
+
+func TestEngineDispatcher_ListTodoTasks_GlobalSortAndPage(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	easyMock := enginemocks.NewMockIEngine(ctrl)
+	easyMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
+
+	flowxMock := enginemocks.NewMockIEngine(ctrl)
+	flowxMock.EXPECT().EngineType().Return(domain.EngineTypeFlowx).AnyTimes()
+
+	dispatcher := engine.NewEngineDispatcher(easyMock, flowxMock)
+
+	now := time.Now()
+	taskA := domain.TodoTask{
+		EngineType: domain.EngineTypeFlowx,
+		TaskID:     domain.NewID("task_flowx_1"),
+		CreateTime: now.Add(-30 * time.Minute), // 最早
+	}
+	taskB := domain.TodoTask{
+		EngineType: domain.EngineTypeEasyFlow,
+		TaskID:     domain.NewID("task_easy_2"),
+		CreateTime: now.Add(-15 * time.Minute), // 中间
+	}
+	taskC := domain.TodoTask{
+		EngineType: domain.EngineTypeFlowx,
+		TaskID:     domain.NewID("task_flowx_3"),
+		CreateTime: now, // 最新
+	}
+
+	// 模拟两个引擎返回各自待办（无需引擎层做分页偏移，全量拉取）
+	expectedReq := domain.TodoQueryReq{
+		Username: "alice",
+		Offset:   0,
+		Limit:    500,
+	}
+
+	flowxMock.EXPECT().ListTodoTasks(gomock.Any(), expectedReq).Return([]domain.TodoTask{taskA, taskC}, int64(2), nil)
+	easyMock.EXPECT().ListTodoTasks(gomock.Any(), expectedReq).Return([]domain.TodoTask{taskB}, int64(1), nil)
+
+	// 1. 请求第一页，Limit = 2
+	paged1, total, err := dispatcher.ListTodoTasks(context.Background(), domain.TodoQueryReq{
+		Username: "alice",
+		Offset:   0,
+		Limit:    2,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+	require.Len(t, paged1, 2)
+	// 验证严格全局时间倒序：最新(C) -> 中间(B)
+	assert.Equal(t, domain.NewID("task_flowx_3"), paged1[0].TaskID)
+	assert.Equal(t, domain.NewID("task_easy_2"), paged1[1].TaskID)
+
+	// 2. 模拟请求第二页（offset=2, limit=2）
+	flowxMock.EXPECT().ListTodoTasks(gomock.Any(), expectedReq).Return([]domain.TodoTask{taskA, taskC}, int64(2), nil)
+	easyMock.EXPECT().ListTodoTasks(gomock.Any(), expectedReq).Return([]domain.TodoTask{taskB}, int64(1), nil)
+
+	paged2, total2, err := dispatcher.ListTodoTasks(context.Background(), domain.TodoQueryReq{
+		Username: "alice",
+		Offset:   2,
+		Limit:    2,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total2)
+	require.Len(t, paged2, 1)
+	// 验证第二页命中最早的任务(A)
+	assert.Equal(t, domain.NewID("task_flowx_1"), paged2[0].TaskID)
 }

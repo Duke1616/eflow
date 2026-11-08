@@ -19,7 +19,7 @@ type TaskRepository interface {
 	// FindByID 根据主键查询任务。
 	FindByID(ctx context.Context, id int64) (domain.Task, error)
 	// FindByProcessNode 根据流程实例和节点查询任务。
-	FindByProcessNode(ctx context.Context, processInstanceID int, nodeID string) (domain.Task, error)
+	FindByProcessNode(ctx context.Context, processInstanceID int64, nodeID string) (domain.Task, error)
 	// Block 将任务置为需要人工处理的阻塞状态。
 	Block(ctx context.Context, id int64, reason string) error
 	// PrepareRetry 将失败或阻塞任务置为等待重试状态。
@@ -32,9 +32,9 @@ type TaskRepository interface {
 	// Count 统计任务总数。
 	Count(ctx context.Context) (int64, error)
 	// ListByInstanceID 查询流程实例下的任务。
-	ListByInstanceID(ctx context.Context, offset, limit int64, instanceID int) ([]domain.Task, error)
+	ListByInstanceID(ctx context.Context, offset, limit int64, instanceID int64) ([]domain.Task, error)
 	// CountByInstanceID 统计流程实例下的任务数量。
-	CountByInstanceID(ctx context.Context, instanceID int) (int64, error)
+	CountByInstanceID(ctx context.Context, instanceID int64) (int64, error)
 	// ListReady 查询已到计划时间的待提交任务。
 	ListReady(ctx context.Context, limit int64) ([]domain.Task, error)
 	// ListSucceededUnadvanced 按主键游标查询一批尚未推进流程的成功任务。
@@ -51,7 +51,7 @@ func NewTaskRepository(taskDAO dao.TaskDAO) TaskRepository {
 }
 
 func (r *taskRepository) FindOrCreate(ctx context.Context, task domain.Task) (domain.Task, bool, error) {
-	entity, err := r.dao.FindByProcessNode(ctx, task.ProcessInstanceID, task.NodeID)
+	entity, err := r.dao.FindByProcessNode(ctx, task.InstanceID.Int64(), task.NodeID)
 	if err == nil {
 		return toTaskDomain(entity), false, nil
 	}
@@ -63,7 +63,7 @@ func (r *taskRepository) FindOrCreate(ctx context.Context, task domain.Task) (do
 		return toTaskDomain(created), true, nil
 	}
 	// 唯一约束处理并发创建，失败方读取已存在记录。
-	entity, findErr := r.dao.FindByProcessNode(ctx, task.ProcessInstanceID, task.NodeID)
+	entity, findErr := r.dao.FindByProcessNode(ctx, task.InstanceID.Int64(), task.NodeID)
 	if findErr != nil {
 		return domain.Task{}, false, err
 	}
@@ -75,7 +75,7 @@ func (r *taskRepository) FindByID(ctx context.Context, id int64) (domain.Task, e
 	return toTaskDomain(entity), err
 }
 
-func (r *taskRepository) FindByProcessNode(ctx context.Context, processInstanceID int,
+func (r *taskRepository) FindByProcessNode(ctx context.Context, processInstanceID int64,
 	nodeID string) (domain.Task, error) {
 	entity, err := r.dao.FindByProcessNode(ctx, processInstanceID, nodeID)
 	return toTaskDomain(entity), err
@@ -105,12 +105,12 @@ func (r *taskRepository) Count(ctx context.Context) (int64, error) {
 }
 
 func (r *taskRepository) ListByInstanceID(ctx context.Context, offset, limit int64,
-	instanceID int) ([]domain.Task, error) {
+	instanceID int64) ([]domain.Task, error) {
 	entities, err := r.dao.ListByInstanceID(ctx, offset, limit, instanceID)
 	return mapTasks(entities), err
 }
 
-func (r *taskRepository) CountByInstanceID(ctx context.Context, instanceID int) (int64, error) {
+func (r *taskRepository) CountByInstanceID(ctx context.Context, instanceID int64) (int64, error) {
 	return r.dao.CountByInstanceID(ctx, instanceID)
 }
 
@@ -136,7 +136,7 @@ func mapTasks(entities []dao.Task) []domain.Task {
 func toTaskEntity(task domain.Task) dao.Task {
 	return dao.Task{
 		ID: task.ID, TenantID: task.TenantID, TicketID: task.TicketID,
-		ProcessInstanceID: task.ProcessInstanceID, NodeID: task.NodeID,
+		ProcessInstanceID: task.InstanceID.Int64(), NodeID: task.NodeID,
 		NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
 		Status: task.Status.ToUint8(), Phase: string(task.Phase), ScheduledAt: task.ScheduledAt,
 		OriginalScheduledAt: task.OriginalScheduledAt, ExecutionKind: string(task.ExecutionKind),
@@ -149,8 +149,9 @@ func toTaskEntity(task domain.Task) dao.Task {
 func toTaskDomain(task dao.Task) domain.Task {
 	return domain.Task{
 		ID: task.ID, TenantID: task.TenantID, TicketID: task.TicketID,
-		ProcessInstanceID: task.ProcessInstanceID, NodeID: task.NodeID,
-		NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
+		InstanceID:         domain.NewID(task.ProcessInstanceID),
+		NodeID:             task.NodeID,
+		NodeName:           task.NodeName, ProcessVersion: task.ProcessVersion,
 		Status: domain.TaskStatus(task.Status), Phase: domain.TaskPhase(task.Phase),
 		ScheduledAt: task.ScheduledAt, OriginalScheduledAt: task.OriginalScheduledAt,
 		ExecutionKind:      domain.TaskExecutionKind(task.ExecutionKind),

@@ -12,6 +12,7 @@ import (
 	flowxMem "github.com/Duke1616/eflow/pkg/flowx/storage/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/samber/lo"
 	"go.uber.org/mock/gomock"
 )
 
@@ -275,4 +276,66 @@ func TestFlowxAdapter_PrebindInstanceBeforeEngineEvents(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, boundInstanceID, launchRes.InstanceID)
+}
+
+func TestFlowxEngine_ListPendingSteps_BatchQuery(t *testing.T) {
+	ctx := context.Background()
+	store := flowxMem.NewStorage()
+	coreEngine := flowx.NewEngine(store)
+	adapter := NewEngine(coreEngine, nil)
+
+	// 部署流程
+	_, err := adapter.Deploy(ctx, domain.EngineTypeFlowx, flowxModel.ProcessDefinition{
+		Key:  "wf_99",
+		Name: "批量拉取测试流程",
+		Nodes: []flowxModel.NodeSpec{
+			{ID: "start", Type: flowxModel.NodeStart},
+			{ID: "audit", Name: "财务审核", Type: flowxModel.NodeApproval, Assignees: []string{"cfo"}},
+			{ID: "end", Type: flowxModel.NodeEnd},
+		},
+		Edges: []flowxModel.EdgeSpec{
+			{Source: "start", Target: "audit"},
+			{Source: "audit", Target: "end"},
+		},
+	})
+	require.NoError(t, err)
+
+	// 启动两个实例
+	instID1, err := coreEngine.Start(ctx, flowx.StartReq{
+		Key:     "wf_99",
+		Starter: "alice",
+	})
+	require.NoError(t, err)
+
+	instID2, err := coreEngine.Start(ctx, flowx.StartReq{
+		Key:     "wf_99",
+		Starter: "bob",
+	})
+	require.NoError(t, err)
+
+	// 调用 ListPendingSteps 批量拉取
+	processes := []domain.Process{
+		{
+			EngineType: domain.EngineTypeFlowx,
+			InstanceID: domain.NewID(instID1),
+		},
+		{
+			EngineType: domain.EngineTypeFlowx,
+			InstanceID: domain.NewID(instID2),
+		},
+	}
+
+	todos, err := adapter.ListPendingSteps(ctx, processes)
+	require.NoError(t, err)
+	assert.Len(t, todos, 2)
+
+	gotInstIDs := lo.Map(todos, func(item domain.TodoTask, _ int) string {
+		return item.InstanceID.String()
+	})
+	assert.ElementsMatch(t, []string{instID1, instID2}, gotInstIDs)
+	for _, todo := range todos {
+		assert.Equal(t, domain.EngineTypeFlowx, todo.EngineType)
+		assert.Equal(t, "财务审核", todo.NodeName)
+		assert.Equal(t, "cfo", todo.ApprovedBy)
+	}
 }

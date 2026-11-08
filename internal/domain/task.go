@@ -73,7 +73,7 @@ type Task struct {
 	ID                  int64
 	TenantID            int64
 	TicketID            int64
-	ProcessInstanceID   int
+	InstanceID          ID // 流程实例唯一标识，对齐全局多态标识规范 domain.ID
 	NodeID              string
 	NodeName            string
 	ProcessVersion      int

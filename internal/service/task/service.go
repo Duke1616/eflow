@@ -7,12 +7,11 @@ import (
 	"strings"
 	"time"
 
-	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
-	"github.com/Duke1616/eflow/internal/service/engine/easyflow"
+	"github.com/Duke1616/eflow/internal/service/engine"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	"github.com/Duke1616/eflow/internal/service/ticket"
 	"github.com/Duke1616/eflow/internal/service/workflow"
@@ -31,7 +30,7 @@ var (
 // Service 定义流程自动化任务的编排能力。
 type Service interface {
 	// CreateTask 创建任务，并固化触发时的节点名称与流程版本快照。
-	CreateTask(ctx context.Context, ticketID int64, processInstanceID int, nodeID, nodeName string) (domain.Task, error)
+	CreateTask(ctx context.Context, ticketID int64, instanceID domain.ID, nodeID, nodeName string, procVersion ...int) (domain.Task, error)
 	// StartTask 创建或恢复执行尝试并提交 etask。
 	StartTask(ctx context.Context, id int64) error
 	// RetryTask 创建一次人工执行尝试。
@@ -49,11 +48,11 @@ type Service interface {
 	// ListTask 分页查询全部任务。
 	ListTask(ctx context.Context, offset, limit int64) ([]domain.Task, int64, error)
 	// ListTaskByInstanceID 查询流程实例下的任务。
-	ListTaskByInstanceID(ctx context.Context, offset, limit int64, instanceID int) ([]domain.Task, int64, error)
+	ListTaskByInstanceID(ctx context.Context, offset, limit int64, instanceID int64) ([]domain.Task, int64, error)
 	// ListUnadvancedSuccessTasks 按主键游标查询一批尚未推进流程的成功任务。
 	ListUnadvancedSuccessTasks(ctx context.Context, limit, afterID int64) ([]domain.Task, error)
 	// FindTaskByNodeID 查询流程实例节点任务，并补充当前执行输出。
-	FindTaskByNodeID(ctx context.Context, instanceID int, nodeID string) (domain.Task, error)
+	FindTaskByNodeID(ctx context.Context, instanceID int64, nodeID string) (domain.Task, error)
 	// ListAttempts 查询任务全部执行尝试。
 	ListAttempts(ctx context.Context, taskID int64) ([]domain.TaskAttempt, error)
 	// Logs 根据执行尝试读取 etask 日志。
@@ -64,63 +63,69 @@ type Service interface {
 	MarkTaskAsAutoPassed(ctx context.Context, id int64) error
 	// ListReadyTasks 查询已经到计划时间的任务。
 	ListReadyTasks(ctx context.Context, limit int64) ([]domain.Task, error)
-	// ShouldAdvanceProcessTask 判断成功任务是否还需要推进活动流程。
-	ShouldAdvanceProcessTask(ctx context.Context, id int64) (bool, error)
+	// ShouldAdvanceProcessTask 判断成功任务是否还需要推进活动流程，并返回关联工单绑定的流程引擎类型。
+	ShouldAdvanceProcessTask(ctx context.Context, id int64) (bool, domain.EngineType, error)
 }
 
 type taskService struct {
 	tasks      repository.TaskRepository
 	attempts   repository.TaskAttemptRepository
-	withdrawal repository.WithdrawalRepository
-	engine     easyflow.Service
+	engine     engine.IEngine
 	workflows  workflow.Service
-	runners    etaskclient.RunnerCatalog
 	tickets    ticket.Service
 	dispatches dispatchSvc.Service
 	templates  templateSvc.Service
-	executions etaskclient.TaskDispatcher
-	reader     etaskclient.ExecutionReader
-	users      userv1.UserServiceClient
+	etask      etaskclient.Client
 	logger     *elog.Component
 }
 
 // NewTaskService 创建自动化任务编排服务。
 func NewTaskService(tasks repository.TaskRepository, attempts repository.TaskAttemptRepository,
-	withdrawal repository.WithdrawalRepository,
-	workflows workflow.Service, runners etaskclient.RunnerCatalog, engineService easyflow.Service,
-	tickets ticket.Service, dispatches dispatchSvc.Service, executions etaskclient.TaskDispatcher,
-	reader etaskclient.ExecutionReader, users userv1.UserServiceClient, templates templateSvc.Service) Service {
+	engine engine.IEngine, workflows workflow.Service, tickets ticket.Service,
+	dispatches dispatchSvc.Service, templates templateSvc.Service, etask etaskclient.Client) Service {
 	return &taskService{
-		tasks: tasks, attempts: attempts, withdrawal: withdrawal, workflows: workflows, runners: runners,
-		engine: engineService, tickets: tickets, dispatches: dispatches,
-		templates:  templates,
-		executions: executions, reader: reader, users: users,
+		tasks: tasks, attempts: attempts, engine: engine, workflows: workflows,
+		tickets: tickets, dispatches: dispatches, templates: templates, etask: etask,
 		logger: elog.DefaultLogger.With(elog.FieldComponentName("service.automation")),
 	}
 }
 
 func (s *taskService) CreateTask(ctx context.Context, ticketID int64,
-	processInstanceID int, nodeID, nodeName string) (domain.Task, error) {
+	instanceID domain.ID, nodeID, nodeName string, procVersion ...int) (domain.Task, error) {
 	ticket, err := s.tickets.GetByID(ctx, ticketID)
 	if err != nil {
 		return domain.Task{}, err
 	}
 	ctx = tenantContext(ctx, ticket.TenantID)
-	existing, err := s.tasks.FindByProcessNode(ctx, processInstanceID, nodeID)
+	existing, err := s.tasks.FindByProcessNode(ctx, instanceID.Int64(), nodeID)
 	if err == nil {
 		return existing, nil
 	}
 	if !errors.Is(err, repository.ErrTaskNotFound) {
 		return domain.Task{}, err
 	}
-	instance, err := s.engine.GetInstanceByID(ctx, processInstanceID)
-	if err != nil {
-		return domain.Task{}, fmt.Errorf("查询流程实例失败: %w", err)
+
+	// 优先使用触发调用方透传的流程快照版本；若未透传，统一通过 IEngine 防腐层拉取运行态视图
+	var version int
+	if len(procVersion) > 0 && procVersion[0] > 0 {
+		version = procVersion[0]
+	} else if s.engine != nil {
+		view, viewErr := s.engine.GetInstanceExecutionView(ctx, ticket.Process.ResolveEngineType(), instanceID, ticket.Status.ToUint8())
+		if viewErr != nil {
+			return domain.Task{}, fmt.Errorf("通过流程引擎获取实例快照版本失败: %w", viewErr)
+		}
+		version = view.ProcessVersion
 	}
+
+	if version <= 0 {
+		return domain.Task{}, fmt.Errorf("未能获取到流程实例 [%s] 的有效快照版本", instanceID)
+	}
+
 	draft := domain.Task{
 		TenantID: ticket.TenantID, TicketID: ticketID,
-		ProcessInstanceID: processInstanceID, NodeID: nodeID,
-		NodeName: nodeName, ProcessVersion: instance.ProcVersion,
+		InstanceID: instanceID,
+		NodeID:     nodeID,
+		NodeName:   nodeName, ProcessVersion: version,
 		Status: domain.TaskStatusWaiting, Phase: domain.TaskPhaseReady,
 		ExecutionKind: domain.TaskExecutionProcess,
 	}
@@ -193,7 +198,7 @@ func (s *taskService) StartTask(ctx context.Context, id int64) error {
 }
 
 func (s *taskService) submitAttempt(ctx context.Context, attempt domain.TaskAttempt) error {
-	executionID, err := s.executions.Dispatch(ctx, attempt)
+	executionID, err := s.etask.Dispatch(ctx, attempt)
 	if err != nil {
 		var stateErr error
 		if errors.Is(err, etaskclient.ErrRejected) {
@@ -246,7 +251,7 @@ func (s *taskService) TerminateTask(ctx context.Context, id int64, reason string
 		return nil
 	}
 	// etask 会持久化 request ID 取消意图；execution 尚未创建时无需重新 Dispatch。
-	return s.executions.TerminateExecution(ctx, attempt.ExecutionID, attempt.RequestID, reason)
+	return s.etask.TerminateExecution(ctx, attempt.ExecutionID, attempt.RequestID, reason)
 }
 
 func (s *taskService) retry(ctx context.Context, id int64, automatic bool) error {
@@ -300,7 +305,7 @@ func (s *taskService) confirmCancelledAttemptTerminated(ctx context.Context, tas
 	if reason == "" {
 		reason = "重新执行前确认旧执行已终止"
 	}
-	if err = s.executions.TerminateExecution(ctx, attempt.ExecutionID, attempt.RequestID, reason); err != nil {
+	if err = s.etask.TerminateExecution(ctx, attempt.ExecutionID, attempt.RequestID, reason); err != nil {
 		return fmt.Errorf("确认已取消任务的旧执行已终止失败: %w", err)
 	}
 	return nil
@@ -318,15 +323,7 @@ func (s *taskService) CompleteAttempt(ctx context.Context, requestID string,
 	if err != nil || attempt.Status != domain.AttemptStatusSuccess {
 		return attempt, err
 	}
-	task, err := s.tasks.FindByID(ctx, attempt.TaskID)
-	if err != nil {
-		return attempt, err
-	}
-	if task.ExecutionKind != domain.TaskExecutionCompensation {
-		return attempt, nil
-	}
-	_, err = s.withdrawal.TryFinalize(tenantContext(ctx, task.TenantID), domain.NewID(task.ProcessInstanceID))
-	return attempt, err
+	return attempt, nil
 }
 
 func (s *taskService) ListTasksByStatusAfterID(ctx context.Context, status domain.TaskStatus,
@@ -344,7 +341,7 @@ func (s *taskService) ListTask(ctx context.Context, offset, limit int64) ([]doma
 }
 
 func (s *taskService) ListTaskByInstanceID(ctx context.Context, offset, limit int64,
-	instanceID int) ([]domain.Task, int64, error) {
+	instanceID int64) ([]domain.Task, int64, error) {
 	tasks, err := s.tasks.ListByInstanceID(ctx, offset, limit, instanceID)
 	if err != nil {
 		return nil, 0, err
@@ -358,7 +355,7 @@ func (s *taskService) ListUnadvancedSuccessTasks(ctx context.Context, limit,
 	return s.tasks.ListSucceededUnadvanced(ctx, limit, afterID)
 }
 
-func (s *taskService) FindTaskByNodeID(ctx context.Context, instanceID int,
+func (s *taskService) FindTaskByNodeID(ctx context.Context, instanceID int64,
 	nodeID string) (domain.Task, error) {
 	task, err := s.tasks.FindByProcessNode(ctx, instanceID, nodeID)
 	if err != nil || task.CurrentAttemptID <= 0 {
@@ -385,7 +382,7 @@ func (s *taskService) Logs(ctx context.Context, attemptID, minID int64,
 	if attempt.ExecutionID <= 0 {
 		return nil, 0, fmt.Errorf("执行尝试尚未绑定 etask execution")
 	}
-	return s.reader.Logs(ctx, attempt.ExecutionID, minID, limit)
+	return s.etask.Logs(ctx, attempt.ExecutionID, minID, limit)
 }
 
 func (s *taskService) ReconcileTask(ctx context.Context, id int64) error {
@@ -404,7 +401,7 @@ func (s *taskService) ReconcileTask(ctx context.Context, id int64) error {
 	if attempt.ExecutionID <= 0 {
 		return nil
 	}
-	execution, err := s.reader.Find(ctx, attempt.ExecutionID)
+	execution, err := s.etask.Find(ctx, attempt.ExecutionID)
 	if err != nil {
 		return fmt.Errorf("查询 etask 执行状态失败: %w", err)
 	}
@@ -430,19 +427,20 @@ func (s *taskService) ListReadyTasks(ctx context.Context, limit int64) ([]domain
 	return s.tasks.ListReady(ctx, limit)
 }
 
-func (s *taskService) ShouldAdvanceProcessTask(ctx context.Context, id int64) (bool, error) {
+func (s *taskService) ShouldAdvanceProcessTask(ctx context.Context, id int64) (bool, domain.EngineType, error) {
 	task, err := s.tasks.FindByID(ctx, id)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	ticket, err := s.tickets.GetByID(tenantContext(ctx, task.TenantID), task.TicketID)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
+	engineType := ticket.Process.ResolveEngineType()
 	if ticket.Status == domain.WITHDRAWING {
-		return false, ErrWithdrawalInProgress
+		return false, engineType, ErrWithdrawalInProgress
 	}
-	return ticket.Status == domain.PROCESS, nil
+	return ticket.Status == domain.PROCESS, engineType, nil
 }
 
 func tenantContext(ctx context.Context, tenantID int64) context.Context {

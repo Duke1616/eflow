@@ -62,7 +62,7 @@ func (j *PassProcessTaskJob) run(ctx context.Context) error {
 			afterID = task.ID
 			taskCtx := tenantContext(ctx, task.TenantID)
 			j.logger.Info("任务开启自动通过逻辑", elog.Int64("id", task.ID))
-			shouldAdvance, checkErr := j.svc.ShouldAdvanceProcessTask(taskCtx, task.ID)
+			shouldAdvance, engineType, checkErr := j.svc.ShouldAdvanceProcessTask(taskCtx, task.ID)
 			if checkErr != nil {
 				if errors.Is(checkErr, ErrWithdrawalInProgress) {
 					continue
@@ -78,13 +78,16 @@ func (j *PassProcessTaskJob) run(ctx context.Context) error {
 				}
 				continue
 			}
-			mt, err1 := j.engine.GetAutomationTask(taskCtx, domain.NewID(task.ProcessInstanceID), task.NodeID)
+			if !engineType.IsValid() {
+				engineType = domain.EngineTypeEasyFlow
+			}
+			mt, err1 := j.engine.GetAutomationTask(taskCtx, engineType, task.InstanceID, task.NodeID)
 			if err1 != nil {
 				// 节点在流程引擎中已不存在未完成记录（可能已被网关自动跳过、兄弟分支竞争通过或提前完结），直接标记推进避免死循环
 				if errors.Is(err1, gorm.ErrRecordNotFound) {
 					j.logger.Info("流程引擎中该节点任务已完结或被跳过，直接标记自动化任务已推进",
 						elog.Int64("taskId", task.ID),
-						elog.Int("procInstId", task.ProcessInstanceID),
+						elog.String("procInstId", task.InstanceID.String()),
 						elog.String("nodeId", task.NodeID))
 					if markErr := j.svc.MarkTaskAsAutoPassed(taskCtx, task.ID); markErr != nil {
 						runErr = errors.Join(runErr,
@@ -99,7 +102,7 @@ func (j *PassProcessTaskJob) run(ctx context.Context) error {
 
 			if !mt.TaskID.IsZero() {
 				err = j.engine.Pass(taskCtx, domain.TaskPassReq{
-					EngineType: domain.EngineTypeEasyFlow,
+					EngineType: engineType,
 					TaskId:     mt.TaskID,
 					Operator:   "SYSTEM",
 					Comment:    "任务执行完成",

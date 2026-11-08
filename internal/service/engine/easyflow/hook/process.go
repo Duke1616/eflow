@@ -111,7 +111,7 @@ func (e *ProcessEvent) EventAutomation(instID int, node *model.Node, prevNode mo
 		return err
 	}
 
-	_, err = e.taskSvc.CreateTask(ctx, fCtx.Ticket.Id, instID, node.NodeID, node.NodeName)
+	_, err = e.taskSvc.CreateTask(ctx, fCtx.Ticket.Id, domain.NewID(instID), node.NodeID, node.NodeName, fCtx.Instance.ProcVersion)
 	if err != nil {
 		e.logger.Error("创建自动化任务失败", elog.Int("instID", instID), elog.FieldErr(err))
 	}

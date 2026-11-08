@@ -51,6 +51,9 @@ type ITaskStorage interface {
 	// ListTasksByInstance 查询指定流程实例下的所有历史与待办任务列表，用于会签仲裁与组装审计时间线
 	ListTasksByInstance(ctx context.Context, instID string) ([]*model.Task, error)
 
+	// ListPendingTasksByInstances 批量获取多个流程实例列表中当前处于待办状态的审批任务（一条 SQL 批量 IN 查询）
+	ListPendingTasksByInstances(ctx context.Context, instIDs []string) ([]*model.Task, error)
+
 	// ListPendingTasksByAssignee 分页查询指派给当前用户的待办任务列表，按创建时间倒序返回
 	ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error)
 

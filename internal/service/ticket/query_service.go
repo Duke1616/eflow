@@ -72,34 +72,7 @@ func (q *queryService) ListUserInitiated(ctx context.Context, username string, o
 	if err != nil {
 		return nil, 0, err
 	}
-	if len(tickets) == 0 {
-		return []domain.TicketTaskView{}, total, nil
-	}
-
-	// 2. 提取有效流程实例 ID，反查流程引擎挂起的待办步骤
-	procInstIds := lo.FilterMap(tickets, func(src domain.Ticket, _ int) (domain.ID, bool) {
-		id := src.Process.InstanceID
-		return id, !id.IsZero()
-	})
-
-	processTasks, err := q.engine.ListPendingSteps(ctx, procInstIds)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	tasksByProcInst := lo.GroupBy(processTasks, func(t domain.TodoTask) string {
-		return t.InstanceID.String()
-	})
-
-	// 3. 批量解析待办处理人真实姓名字典
-	displayNames := q.resolveDisplayNames(ctx, processTasks)
-
-	// 4. 以工单实体为基准展开待办视图，当存在并行多分支时展开为多条独立的视图记录供前端进行 Rowspan 合并
-	views := lo.FlatMap(tickets, func(ticket domain.Ticket, _ int) []domain.TicketTaskView {
-		return ticket.ResolveViews(tasksByProcInst[ticket.Process.InstanceID.String()], displayNames)
-	})
-
-	return views, total, nil
+	return q.assembleTicketViews(ctx, tickets, total)
 }
 
 // ListUserTodo 分页检索指派给当前用户的待办任务，委托统一流程引擎门面进行多态并发聚合
@@ -122,50 +95,57 @@ func (q *queryService) ListUserTodo(ctx context.Context, username, processName s
 	return views, total, nil
 }
 
-// ListAllTodo 分页检索全量待办任务，首屏自动置顶流程启动失败的异常单据并做溢出截断保护
-func (q *queryService) ListAllTodo(ctx context.Context, userID, processName string, sortByAsc bool, offset, limit int64) ([]domain.TicketTaskView, int64, error) {
-	todos, total, err := q.engine.ListTodoTasks(ctx, domain.TodoQueryReq{
-		Username:    userID,
-		ProcessName: processName,
-		SortByAsc:   sortByAsc,
-		Offset:      int(offset),
-		Limit:       int(limit),
-		IsAdmin:     true,
+// ListAllTodo 查询系统全量流转中的待办工单列表，以业务工单主表为权威事实源，天然实现全局时间倒序与精准分页
+func (q *queryService) ListAllTodo(ctx context.Context, _ string, _ string, _ bool, offset, limit int64) ([]domain.TicketTaskView, int64, error) {
+	statuses := []int{
+		domain.START.ToInt(),
+		domain.PROCESS.ToInt(),
+		domain.WITHDRAWING.ToInt(),
+		domain.START_FAILED.ToInt(),
+	}
+
+	// 1. 并发查询全量流转中工单主记录与总数，天然按 ctime 倒序排列，分页绝对精确
+	tickets, total, err := fetchPagedParallel(
+		func() ([]domain.Ticket, error) {
+			return q.repo.ListTicket(ctx, "", statuses, offset, limit)
+		},
+		func() (int64, error) {
+			return q.repo.CountTicket(ctx, "", statuses)
+		},
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	return q.assembleTicketViews(ctx, tickets, total)
+}
+
+func (q *queryService) assembleTicketViews(ctx context.Context, tickets []domain.Ticket, total int64) ([]domain.TicketTaskView, int64, error) {
+	if len(tickets) == 0 {
+		return []domain.TicketTaskView{}, total, nil
+	}
+
+	// 1. 提取有效绑定的流程实例（包含所属的 EngineType），定向反查待办步骤
+	processes := lo.Filter(
+		lo.Map(tickets, func(src domain.Ticket, _ int) domain.Process { return src.Process }),
+		func(p domain.Process, _ int) bool { return p.IsBound() },
+	)
+
+	processTasks, err := q.engine.ListPendingSteps(ctx, processes)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	tasksByProcInst := lo.GroupBy(processTasks, func(t domain.TodoTask) string {
+		return t.InstanceID.String()
 	})
-	if err != nil {
-		return nil, 0, err
-	}
 
-	views, err := q.assemblePendingTasks(ctx, todos)
-	if err != nil {
-		return nil, 0, err
-	}
+	// 2. 批量解析待办处理人真实姓名字典
+	displayNames := q.resolveDisplayNames(ctx, processTasks)
 
-	// NOTE: 流程启动失败的工单需要高优先级置顶提示，让运维或业务人员第一时间重试或排查
-	if offset == 0 {
-		failedTickets, failedErr := q.repo.ListProcessStartFailed(ctx, "", 0, limit)
-		if failedErr != nil {
-			return nil, 0, failedErr
-		}
-		failedCount, countErr := q.repo.CountProcessStartFailed(ctx, "")
-		if countErr == nil {
-			total += failedCount
-		}
-		failedViews := lo.Map(failedTickets, func(t domain.Ticket, _ int) domain.TicketTaskView {
-			return domain.TicketTaskView{Ticket: t, CurrentStep: "流程启动失败"}
-		})
-		views = append(failedViews, views...)
-	} else {
-		failedCount, countErr := q.repo.CountProcessStartFailed(ctx, "")
-		if countErr == nil {
-			total += failedCount
-		}
-	}
-
-	// 保护机制：追加置顶记录后严格截断，防止单页数量超出请求 limit 破坏前端分页
-	if limit > 0 && int64(len(views)) > limit {
-		views = views[:limit]
-	}
+	// 3. 以工单实体为基准展开待办视图，当存在并行多分支时展开为多条独立的视图记录供前端进行 Rowspan 合并
+	views := lo.FlatMap(tickets, func(ticket domain.Ticket, _ int) []domain.TicketTaskView {
+		return ticket.ResolveViews(tasksByProcInst[ticket.Process.InstanceID.String()], displayNames)
+	})
 
 	return views, total, nil
 }
@@ -324,7 +304,8 @@ func (q *queryService) getUserMap(ctx context.Context, usernames []string) map[s
 
 // TaskRecord 查询指定流程实例的流转执行记录，并聚合处理人真名与步骤表单
 func (q *queryService) TaskRecord(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error) {
-	ts, total, err := q.engine.GetTaskRecords(ctx, "", processInstID, offset, limit)
+	engineType := q.resolveEngineType(ctx, processInstID)
+	ts, total, err := q.engine.GetTaskRecords(ctx, engineType, processInstID, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -334,12 +315,22 @@ func (q *queryService) TaskRecord(ctx context.Context, processInstID domain.ID, 
 
 // TaskTimeline 以节点执行批次为单位返回流转历史时间线，聚合审批汇总与参与人真名
 func (q *queryService) TaskTimeline(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskTimelineEvent, int64, error) {
-	groups, total, err := q.engine.GetTaskTimeline(ctx, "", processInstID, offset, limit)
+	engineType := q.resolveEngineType(ctx, processInstID)
+	groups, total, err := q.engine.GetTaskTimeline(ctx, engineType, processInstID, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}
 	events := q.assembleTimelineEvents(ctx, groups)
 	return events, total, nil
+}
+
+// resolveEngineType 根据流程实例标识反查工单绑定的流程引擎驱动类型，未找到或老数据为空时兜底为 EasyFlow
+func (q *queryService) resolveEngineType(ctx context.Context, processInstID domain.ID) domain.EngineType {
+	ticket, err := q.repo.DetailByProcessInstance(ctx, processInstID)
+	if err == nil && ticket.Process.EngineType != "" {
+		return ticket.Process.EngineType
+	}
+	return domain.EngineTypeEasyFlow
 }
 
 func (q *queryService) assembleTimelineEvents(ctx context.Context, groups []domain.TaskTimelineGroup) []domain.TaskTimelineEvent {

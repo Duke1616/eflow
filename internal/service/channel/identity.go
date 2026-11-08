@@ -38,7 +38,7 @@ func (r *channelIdentityResolver) ResolveUser(ctx context.Context, channel domai
 
 	// 策略 1（核心高命中）：基于待审批任务上下文的指派人精准推导
 	// 审批卡片交互必然具备 taskID，通过直接核对该节点 Assignee 的三方绑定标识，能够以极低开销实现 100% 鉴权闭环
-	if !taskID.IsZero() && r.engine != nil && engineType != "" {
+	if !taskID.IsZero() && r.engine != nil {
 		if matchedUser, err := r.resolveByTaskAssignee(ctx, channel, trimmedID, engineType, taskID); err == nil && matchedUser != nil {
 			r.logger.Info("通过任务上下文指派人成功解析第三方身份",
 				elog.String("channel", string(channel)),

@@ -15,7 +15,7 @@ import (
 
 func TestCreateTaskDoesNotResetExistingTask(t *testing.T) {
 	existing := domain.Task{
-		ID: 1, TenantID: 2, TicketID: 3, ProcessInstanceID: 4,
+		ID: 1, TenantID: 2, TicketID: 3, InstanceID: domain.NewID(4),
 		NodeID: "automation", Status: domain.TaskStatusSuccess, Phase: domain.TaskPhaseSucceeded,
 	}
 	tasks := &taskRepositoryStub{findOrCreateTask: existing}
@@ -24,7 +24,7 @@ func TestCreateTaskDoesNotResetExistingTask(t *testing.T) {
 		tickets: &ticketServiceStub{ticket: domain.Ticket{Id: 3, TenantID: 2}},
 	}
 
-	actual, err := svc.CreateTask(context.Background(), 3, 4, "automation", "自动化")
+	actual, err := svc.CreateTask(context.Background(), 3, domain.NewID(4), "automation", "自动化")
 
 	require.NoError(t, err)
 	require.Equal(t, existing, actual)
@@ -37,14 +37,14 @@ func TestStartTaskResumesCurrentAttempt(t *testing.T) {
 		attempt     domain.TaskAttempt
 		dispatchID  int64
 		dispatchErr error
-		before      func(*taskRepositoryStub, *attemptRepositoryStub, *dispatcherStub)
-		after       func(*testing.T, *attemptRepositoryStub, *dispatcherStub)
+		before      func(*taskRepositoryStub, *attemptRepositoryStub, *etaskClientStub)
+		after       func(*testing.T, *attemptRepositoryStub, *etaskClientStub)
 		wantErr     string
 	}{
 		{
 			name: "提交中任务使用原 request ID 恢复", task: activeTask(domain.TaskStatusSubmitting),
 			attempt: currentAttempt(0), dispatchID: 9001,
-			after: func(t *testing.T, attempts *attemptRepositoryStub, dispatcher *dispatcherStub) {
+			after: func(t *testing.T, attempts *attemptRepositoryStub, dispatcher *etaskClientStub) {
 				require.Equal(t, int64(9001), attempts.boundExecutionID)
 				require.Equal(t, "eflow:1:1", dispatcher.received.RequestID)
 				require.Equal(t, int64(2), dispatcher.tenantID)
@@ -53,7 +53,7 @@ func TestStartTaskResumesCurrentAttempt(t *testing.T) {
 		{
 			name: "运行中任务不重复提交", task: activeTask(domain.TaskStatusRunning),
 			attempt: currentAttempt(9001),
-			after: func(t *testing.T, attempts *attemptRepositoryStub, dispatcher *dispatcherStub) {
+			after: func(t *testing.T, attempts *attemptRepositoryStub, dispatcher *etaskClientStub) {
 				require.Zero(t, dispatcher.calls)
 				require.Zero(t, attempts.boundExecutionID)
 			},
@@ -61,7 +61,7 @@ func TestStartTaskResumesCurrentAttempt(t *testing.T) {
 		{
 			name: "传输错误保留当前尝试", task: activeTask(domain.TaskStatusSubmitting),
 			attempt: currentAttempt(0), dispatchErr: errors.New("timeout"), wantErr: "timeout",
-			after: func(t *testing.T, attempts *attemptRepositoryStub, _ *dispatcherStub) {
+			after: func(t *testing.T, attempts *attemptRepositoryStub, _ *etaskClientStub) {
 				require.Equal(t, int64(11), attempts.recordedAttemptID)
 				require.Zero(t, attempts.rejectedAttemptID)
 			},
@@ -69,7 +69,7 @@ func TestStartTaskResumesCurrentAttempt(t *testing.T) {
 		{
 			name: "明确拒绝结束当前尝试", task: activeTask(domain.TaskStatusSubmitting),
 			attempt: currentAttempt(0), dispatchErr: etaskclient.ErrRejected, wantErr: "拒绝",
-			after: func(t *testing.T, attempts *attemptRepositoryStub, _ *dispatcherStub) {
+			after: func(t *testing.T, attempts *attemptRepositoryStub, _ *etaskClientStub) {
 				require.Equal(t, int64(11), attempts.rejectedAttemptID)
 				require.Zero(t, attempts.recordedAttemptID)
 			},
@@ -80,11 +80,11 @@ func TestStartTaskResumesCurrentAttempt(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			tasks := &taskRepositoryStub{task: testCase.task}
 			attempts := &attemptRepositoryStub{attempt: testCase.attempt}
-			dispatcher := &dispatcherStub{executionID: testCase.dispatchID, err: testCase.dispatchErr}
+			dispatcher := &etaskClientStub{executionID: testCase.dispatchID, err: testCase.dispatchErr}
 			if testCase.before != nil {
 				testCase.before(tasks, attempts, dispatcher)
 			}
-			svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+			svc := &taskService{tasks: tasks, attempts: attempts, etask: dispatcher}
 
 			err := svc.StartTask(context.Background(), testCase.task.ID)
 			if testCase.wantErr == "" {
@@ -102,8 +102,8 @@ func TestStartTaskResumesCurrentAttempt(t *testing.T) {
 func TestRetryTaskResumesSubmittingAttempt(t *testing.T) {
 	tasks := &taskRepositoryStub{task: activeTask(domain.TaskStatusSubmitting)}
 	attempts := &attemptRepositoryStub{attempt: currentAttempt(0)}
-	dispatcher := &dispatcherStub{executionID: 9001}
-	svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+	dispatcher := &etaskClientStub{executionID: 9001}
+	svc := &taskService{tasks: tasks, attempts: attempts, etask: dispatcher}
 
 	err := svc.RetryTask(context.Background(), 1)
 
@@ -121,8 +121,8 @@ func TestRetryCancelledTaskConfirmsPreviousExecutionTermination(t *testing.T) {
 	attempt.Error = "管理员强制结束"
 	tasks := &taskRepositoryStub{task: task, prepareRetryErr: stopAfterConfirmation}
 	attempts := &attemptRepositoryStub{attempt: attempt}
-	dispatcher := &dispatcherStub{}
-	svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+	dispatcher := &etaskClientStub{}
+	svc := &taskService{tasks: tasks, attempts: attempts, etask: dispatcher}
 
 	err := svc.RetryTask(context.Background(), task.ID)
 
@@ -140,8 +140,8 @@ func TestRetryCancelledTaskStopsWhenTerminationCannotBeConfirmed(t *testing.T) {
 	attempt.Status = domain.AttemptStatusCancelled
 	tasks := &taskRepositoryStub{task: task}
 	attempts := &attemptRepositoryStub{attempt: attempt}
-	dispatcher := &dispatcherStub{terminateErr: errors.New("scheduler unavailable")}
-	svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+	dispatcher := &etaskClientStub{terminateErr: errors.New("scheduler unavailable")}
+	svc := &taskService{tasks: tasks, attempts: attempts, etask: dispatcher}
 
 	err := svc.RetryTask(context.Background(), task.ID)
 
@@ -152,8 +152,8 @@ func TestRetryCancelledTaskStopsWhenTerminationCannotBeConfirmed(t *testing.T) {
 func TestAutoRetryDoesNotRestartCancelledTask(t *testing.T) {
 	task := activeTask(domain.TaskStatusCancelled)
 	tasks := &taskRepositoryStub{task: task}
-	dispatcher := &dispatcherStub{}
-	svc := &taskService{tasks: tasks, attempts: &attemptRepositoryStub{}, executions: dispatcher}
+	dispatcher := &etaskClientStub{}
+	svc := &taskService{tasks: tasks, attempts: &attemptRepositoryStub{}, etask: dispatcher}
 
 	err := svc.AutoRetryTask(context.Background(), task.ID)
 
@@ -210,8 +210,8 @@ func TestTerminateTaskStopsRemoteExecution(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			tasks := &taskRepositoryStub{task: testCase.task}
 			attempts := &attemptRepositoryStub{attempt: testCase.attempt}
-			dispatcher := &dispatcherStub{executionID: 9001}
-			svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+			dispatcher := &etaskClientStub{executionID: 9001}
+			svc := &taskService{tasks: tasks, attempts: attempts, etask: dispatcher}
 
 			err := svc.TerminateTask(context.Background(), 1, "管理员强制结束")
 			if testCase.wantErr == "" {
@@ -233,8 +233,8 @@ func TestTerminateTaskStopsRemoteExecution(t *testing.T) {
 func TestSubmitAttemptOnlyBindsExecutionAfterDurableCancellationIntent(t *testing.T) {
 	tasks := &taskRepositoryStub{}
 	attempts := &attemptRepositoryStub{}
-	dispatcher := &dispatcherStub{executionID: 9001}
-	svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+	dispatcher := &etaskClientStub{executionID: 9001}
+	svc := &taskService{tasks: tasks, attempts: attempts, etask: dispatcher}
 
 	err := svc.submitAttempt(tenantContext(context.Background(), 2), currentAttempt(0))
 
@@ -252,8 +252,8 @@ func TestTerminateTaskUsesAttemptReturnedByTerminationTransaction(t *testing.T) 
 		attempt.Status = domain.AttemptStatusCancelled
 		return attempt
 	}()}
-	dispatcher := &dispatcherStub{}
-	svc := &taskService{tasks: tasks, attempts: attempts, executions: dispatcher}
+	dispatcher := &etaskClientStub{}
+	svc := &taskService{tasks: tasks, attempts: attempts, etask: dispatcher}
 
 	err := svc.TerminateTask(context.Background(), 1, "管理员强制结束")
 
@@ -297,20 +297,18 @@ func TestCompleteAttemptValidatesTerminalIdentity(t *testing.T) {
 
 func TestCompleteAttemptFinalizesSuccessfulCompensation(t *testing.T) {
 	tasks := &taskRepositoryStub{task: domain.Task{
-		ID: 1, TenantID: 7, ProcessInstanceID: 101, ExecutionKind: domain.TaskExecutionCompensation,
+		ID: 1, TenantID: 7, InstanceID: domain.NewID(101), ExecutionKind: domain.TaskExecutionCompensation,
 	}}
 	attempts := &attemptRepositoryStub{completedAttempt: domain.TaskAttempt{
 		ID: 11, TaskID: 1, Status: domain.AttemptStatusSuccess,
 	}}
-	withdrawals := &taskWithdrawalRepositoryStub{}
-	svc := &taskService{tasks: tasks, attempts: attempts, withdrawal: withdrawals}
+	svc := &taskService{tasks: tasks, attempts: attempts}
 
-	_, err := svc.CompleteAttempt(context.Background(), "eflow:1:1",
+	attempt, err := svc.CompleteAttempt(context.Background(), "eflow:1:1",
 		domain.AttemptStatusSuccess, "", "")
 
 	require.NoError(t, err)
-	require.Equal(t, domain.NewID(101), withdrawals.processInstanceID)
-	require.Equal(t, int64(7), withdrawals.tenantID)
+	require.Equal(t, domain.AttemptStatusSuccess, attempt.Status)
 }
 
 func TestReconcileTaskUsesPersistedExecutionState(t *testing.T) {
@@ -333,7 +331,7 @@ func TestReconcileTaskUsesPersistedExecutionState(t *testing.T) {
 			attempts := &attemptRepositoryStub{attempt: currentAttempt(9)}
 			svc := &taskService{
 				tasks: tasks, attempts: attempts,
-				reader: &executionReaderStub{execution: testCase.execution},
+				etask: &etaskClientStub{execution: testCase.execution},
 			}
 
 			err := svc.ReconcileTask(context.Background(), 1)
@@ -382,7 +380,7 @@ func (s *taskRepositoryStub) FindByID(context.Context, int64) (domain.Task, erro
 	return s.task, nil
 }
 
-func (s *taskRepositoryStub) FindByProcessNode(context.Context, int, string) (domain.Task, error) {
+func (s *taskRepositoryStub) FindByProcessNode(context.Context, int64, string) (domain.Task, error) {
 	if s.findOrCreateTask.ID > 0 {
 		return s.findOrCreateTask, nil
 	}
@@ -433,39 +431,8 @@ func (s *attemptRepositoryStub) Complete(_ context.Context, _ string, status dom
 	return s.completedAttempt, nil
 }
 
-type taskWithdrawalRepositoryStub struct {
-	repository.WithdrawalRepository
-	processInstanceID domain.ID
-	tenantID          int64
-}
-
-func (s *taskWithdrawalRepositoryStub) TryFinalize(ctx context.Context,
-	processInstanceID domain.ID) (bool, error) {
-	s.processInstanceID = processInstanceID
-	s.tenantID = ctxutil.GetTenantID(ctx).Int64()
-	return true, nil
-}
-
-type executionReaderStub struct {
-	etaskclient.ExecutionReader
-	execution etaskclient.Execution
-}
-
-func (s *executionReaderStub) Find(context.Context, int64) (etaskclient.Execution, error) {
-	return s.execution, nil
-}
-
-type ticketServiceStub struct {
-	ticketSvc.Service
-	ticket domain.Ticket
-}
-
-func (s *ticketServiceStub) GetByID(context.Context, int64) (domain.Ticket, error) {
-	return s.ticket, nil
-}
-
-type dispatcherStub struct {
-	etaskclient.TaskDispatcher
+type etaskClientStub struct {
+	etaskclient.Client
 	executionID           int64
 	err                   error
 	calls                 int
@@ -476,9 +443,12 @@ type dispatcherStub struct {
 	terminatedRequestID   string
 	terminatedReason      string
 	terminateErr          error
+	execution             etaskclient.Execution
+	logs                  []etaskclient.ExecutionLog
+	maxID                 int64
 }
 
-func (s *dispatcherStub) TerminateExecution(ctx context.Context, executionID int64,
+func (s *etaskClientStub) TerminateExecution(ctx context.Context, executionID int64,
 	requestID, reason string) error {
 	s.terminateCalls++
 	s.terminatedExecutionID = executionID
@@ -488,9 +458,26 @@ func (s *dispatcherStub) TerminateExecution(ctx context.Context, executionID int
 	return s.terminateErr
 }
 
-func (s *dispatcherStub) Dispatch(ctx context.Context, attempt domain.TaskAttempt) (int64, error) {
+func (s *etaskClientStub) Dispatch(ctx context.Context, attempt domain.TaskAttempt) (int64, error) {
 	s.calls++
 	s.received = attempt
 	s.tenantID = ctxutil.GetTenantID(ctx).Int64()
 	return s.executionID, s.err
+}
+
+func (s *etaskClientStub) Find(context.Context, int64) (etaskclient.Execution, error) {
+	return s.execution, nil
+}
+
+func (s *etaskClientStub) Logs(context.Context, int64, int64, int) ([]etaskclient.ExecutionLog, int64, error) {
+	return s.logs, s.maxID, nil
+}
+
+type ticketServiceStub struct {
+	ticketSvc.Service
+	ticket domain.Ticket
+}
+
+func (s *ticketServiceStub) GetByID(context.Context, int64) (domain.Ticket, error) {
+	return s.ticket, nil
 }

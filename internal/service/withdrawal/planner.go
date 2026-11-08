@@ -114,7 +114,7 @@ func (p *compensationPlanner) Apply(ctx context.Context, processInstanceID int, 
 	ctx = withdrawalTenantContext(ctx, plan.TenantID)
 	nodeIDs := make([]string, 0, len(plan.Targets))
 	for _, target := range plan.Targets {
-		if _, err := p.tasks.CreateTask(ctx, plan.TicketID, processInstanceID,
+		if _, err := p.tasks.CreateTask(ctx, plan.TicketID, domain.NewID(processInstanceID),
 			target.NodeID, target.NodeName); err != nil {
 			return fmt.Errorf("补建补偿任务 %s 失败: %w", target.NodeID, err)
 		}
@@ -130,7 +130,7 @@ func (p *compensationPlanner) listTasks(ctx context.Context, processInstanceID i
 	const pageSize int64 = 100
 	var result []domain.Task
 	for offset := int64(0); ; offset += pageSize {
-		page, err := p.taskRepo.ListByInstanceID(ctx, offset, pageSize, processInstanceID)
+		page, err := p.taskRepo.ListByInstanceID(ctx, offset, pageSize, int64(processInstanceID))
 		if err != nil {
 			return nil, err
 		}

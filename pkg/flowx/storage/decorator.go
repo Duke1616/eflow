@@ -60,6 +60,10 @@ func (d *Decorator) ListTasksByInstance(ctx context.Context, instID string) ([]*
 	return d.target.ListTasksByInstance(ctx, instID)
 }
 
+func (d *Decorator) ListPendingTasksByInstances(ctx context.Context, instIDs []string) ([]*model.Task, error) {
+	return d.target.ListPendingTasksByInstances(ctx, instIDs)
+}
+
 func (d *Decorator) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
 	return d.target.ListPendingTasksByAssignee(ctx, assignee, offset, limit)
 }

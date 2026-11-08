@@ -44,8 +44,17 @@ func TestHandler_Transfer_Security(t *testing.T) {
 		wantErrMsg string
 	}{
 		{
+			name:   "非法工单ID",
+			req:    TransferReq{TicketId: 0, TaskId: "10", Usernames: []string{"bob"}},
+			userID: 1,
+			mockSetup: func(ctrl *gomock.Controller, mockUser *usermocks.MockUserServiceClient, mockTicket *ticketmocks.MockService) {
+			},
+			wantCode:   400,
+			wantErrMsg: "工单 ID 非法",
+		},
+		{
 			name:   "非法任务ID",
-			req:    TransferReq{TaskId: "", Usernames: []string{"bob"}},
+			req:    TransferReq{TicketId: 1001, TaskId: "", Usernames: []string{"bob"}},
 			userID: 1,
 			mockSetup: func(ctrl *gomock.Controller, mockUser *usermocks.MockUserServiceClient, mockTicket *ticketmocks.MockService) {
 			},
@@ -54,7 +63,7 @@ func TestHandler_Transfer_Security(t *testing.T) {
 		},
 		{
 			name:   "转签目标人为空",
-			req:    TransferReq{TaskId: "10", Usernames: []string{}},
+			req:    TransferReq{TicketId: 1001, TaskId: "10", Usernames: []string{}},
 			userID: 1,
 			mockSetup: func(ctrl *gomock.Controller, mockUser *usermocks.MockUserServiceClient, mockTicket *ticketmocks.MockService) {
 			},
@@ -63,12 +72,12 @@ func TestHandler_Transfer_Security(t *testing.T) {
 		},
 		{
 			name:   "非当前指派人且非管理员被越权拦截",
-			req:    TransferReq{TaskId: "10", Usernames: []string{"charlie"}},
+			req:    TransferReq{TicketId: 1001, TaskId: "10", Usernames: []string{"charlie"}},
 			userID: 1,
 			mockSetup: func(ctrl *gomock.Controller, mockUser *usermocks.MockUserServiceClient, mockTicket *ticketmocks.MockService) {
 				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice", IsAdmin: false}}, nil)
-				mockTicket.EXPECT().Transfer(gomock.Any(), gomock.Any(), "10", "alice", false, []string{"charlie"}).
+				mockTicket.EXPECT().Transfer(gomock.Any(), int64(1001), "10", "alice", false, []string{"charlie"}).
 					Return(domain.ErrTaskUnauthorized)
 			},
 			wantCode:   403,
@@ -76,12 +85,12 @@ func TestHandler_Transfer_Security(t *testing.T) {
 		},
 		{
 			name:   "当前指派人允许转签",
-			req:    TransferReq{TaskId: "10", Usernames: []string{"charlie"}},
+			req:    TransferReq{TicketId: 1001, TaskId: "10", Usernames: []string{"charlie"}},
 			userID: 1,
 			mockSetup: func(ctrl *gomock.Controller, mockUser *usermocks.MockUserServiceClient, mockTicket *ticketmocks.MockService) {
 				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice", IsAdmin: false}}, nil)
-				mockTicket.EXPECT().Transfer(gomock.Any(), gomock.Any(), "10", "alice", false, []string{"charlie"}).
+				mockTicket.EXPECT().Transfer(gomock.Any(), int64(1001), "10", "alice", false, []string{"charlie"}).
 					Return(nil)
 			},
 			wantCode:   200,
@@ -89,12 +98,12 @@ func TestHandler_Transfer_Security(t *testing.T) {
 		},
 		{
 			name:   "管理员允许代办转签他人任务",
-			req:    TransferReq{TaskId: "10", Usernames: []string{"charlie"}},
+			req:    TransferReq{TicketId: 1001, TaskId: "10", Usernames: []string{"charlie"}},
 			userID: 99,
 			mockSetup: func(ctrl *gomock.Controller, mockUser *usermocks.MockUserServiceClient, mockTicket *ticketmocks.MockService) {
 				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 99}).
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 99, Username: "admin", IsAdmin: true}}, nil)
-				mockTicket.EXPECT().Transfer(gomock.Any(), gomock.Any(), "10", "admin", true, []string{"charlie"}).
+				mockTicket.EXPECT().Transfer(gomock.Any(), int64(1001), "10", "admin", true, []string{"charlie"}).
 					Return(nil)
 			},
 			wantCode:   200,

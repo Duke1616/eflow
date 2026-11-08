@@ -84,6 +84,11 @@ func (s Status) CanRevoke() bool {
 	return s == START || s == PROCESS
 }
 
+// ActiveStatuses 获取工单流转中的活跃状态列表（用于防重、流转中检索）
+func ActiveStatuses() []Status {
+	return []Status{START, PROCESS, WITHDRAWING, START_FAILED}
+}
+
 // DefaultStepName 返回工单在没有挂起人工待办步骤时的语义化展示文本
 func (s Status) DefaultStepName() string {
 	switch s {
@@ -200,6 +205,11 @@ func (t *Ticket) CanRestartProcess() bool {
 	return !t.Process.IsBound() && t.Status.AllowsProcessRestart()
 }
 
+// SupportsDeduplication 判断当前工单是否满足基于外部业务实体及业务 Key 的告警防重合并条件
+func (t *Ticket) SupportsDeduplication() bool {
+	return t.Provide.IsAlert() && t.Key != "" && t.BizID > 0
+}
+
 // Process 承载流程引擎对于该工单底层流转的实例映射信息
 // 采用 EngineType + ID 唯一事实来源 (SSOT) 规范，彻底消除具体引擎实现的差异侵入
 type Process struct {
@@ -215,6 +225,14 @@ func (p Process) IsBound() bool {
 // DisplayID 返回面向底层 engineDispatcher 统一路由寻址的实例标识字符串
 func (p Process) DisplayID() string {
 	return p.InstanceID.String()
+}
+
+// ResolveEngineType 获取有效引擎类型（为空或未指定时默认兜底为 EngineTypeEasyFlow）
+func (p Process) ResolveEngineType() EngineType {
+	if p.EngineType.IsValid() {
+		return p.EngineType
+	}
+	return EngineTypeEasyFlow
 }
 
 // NotificationParams 发送消息通知携带的特定业务参数字典。

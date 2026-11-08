@@ -10,14 +10,15 @@ import (
 	"github.com/Duke1616/eflow/internal/client/eiam"
 	"github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/event"
-	"github.com/Duke1616/eflow/internal/pkg/compiler"
 	"github.com/Duke1616/eflow/internal/grpc"
+	"github.com/Duke1616/eflow/internal/pkg/compiler"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
-	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	channelSvc "github.com/Duke1616/eflow/internal/service/channel"
+	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	easyflowDrv "github.com/Duke1616/eflow/internal/service/engine/easyflow"
 	"github.com/Duke1616/eflow/internal/service/engine/easyflow/hook"
+	flowxHook "github.com/Duke1616/eflow/internal/service/engine/flowx/hook"
 	"github.com/Duke1616/eflow/internal/service/notification"
 	"github.com/Duke1616/eflow/internal/service/notification/strategy"
 	"github.com/Duke1616/eflow/internal/service/notification/strategy/automation"
@@ -85,7 +86,6 @@ var (
 		repository.NewTaskAttemptRepository,
 		taskSvc.NewTaskService,
 		task.NewHandler,
-		etask.NewTaskDispatcher,
 	)
 
 	WithdrawalSet = wire.NewSet(
@@ -160,8 +160,7 @@ var (
 		eiam.NewEIAMClient,
 		ealert.NewEALERTClient,
 		etask.NewETASKClient,
-		etask.NewExecutionReader,
-		etask.NewRunnerCatalog,
+		etask.NewClient,
 
 		// 导出具体的 Client，直接满足底层 Service 的注入需求！
 		wire.FieldsOf(new(*eiam.EIAMClient), "UserClient", "DepartmentClient"),
@@ -203,7 +202,7 @@ var engineOnce = sync.Once{}
 func InitWorkflowEngineOnce(db *gorm.DB, engineSvc easyflowDrv.Service, flowxEngine flowx.Engine, ticketRepo repository.TicketRepository, repo repository.IEngineRepository, producer mqx.Producer[event.TicketStatusModifyEvent],
 	taskSvc taskSvc.Service, ticketSvc ticketSvc.Service, workflowSvc workflowSvc.Service,
 	sendStrategy strategy.SendStrategy) *hook.ProcessEvent {
-	event := hook.NewProcessEvent(producer, engineSvc, taskSvc, ticketSvc, workflowSvc, sendStrategy, repo)
+	hookEvent := hook.NewProcessEvent(producer, engineSvc, taskSvc, ticketSvc, workflowSvc, sendStrategy, repo)
 
 	engineOnce.Do(func() {
 		easyEngine.DB = db
@@ -214,12 +213,15 @@ func InitWorkflowEngineOnce(db *gorm.DB, engineSvc easyflowDrv.Service, flowxEng
 		easyEngine.IgnoreEventError = false
 
 		// 挂载 flowx 专属飞书通知监听器，实现与 easyflow 等价的消息广播与生命周期协同
-		if dispatcher, ok := sendStrategy.(*strategy.Dispatcher); ok && flowxEngine != nil {
+		if dispatcher, ok := sendStrategy.(*strategy.Dispatcher); ok {
 			flowxEngine.AddListener(notification.NewFlowxNotificationListener(ticketRepo, workflowSvc, dispatcher))
 		}
+
+		// 挂载 flowx 自动化任务执行器，将 flowx 引擎触发的自动化节点对接到统一自动化任务编排服务
+		flowxHook.RegisterAutomationWorker(flowxEngine, taskSvc)
 	})
 
-	return event
+	return hookEvent
 }
 
 // InitSendStrategy 包装并实例化节点消息发送分发器

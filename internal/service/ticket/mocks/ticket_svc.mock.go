@@ -130,18 +130,18 @@ func (mr *MockServiceMockRecorder) GetByProcessInstance(ctx, instanceID any) *go
 }
 
 // GetTaskFormConfig mocks base method.
-func (m *MockService) GetTaskFormConfig(ctx context.Context, taskId string, workflowId int64) ([]flowdsl.Field, error) {
+func (m *MockService) GetTaskFormConfig(ctx context.Context, ticketId int64, taskId string, workflowId int64) ([]flowdsl.Field, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetTaskFormConfig", ctx, taskId, workflowId)
+	ret := m.ctrl.Call(m, "GetTaskFormConfig", ctx, ticketId, taskId, workflowId)
 	ret0, _ := ret[0].([]flowdsl.Field)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetTaskFormConfig indicates an expected call of GetTaskFormConfig.
-func (mr *MockServiceMockRecorder) GetTaskFormConfig(ctx, taskId, workflowId any) *gomock.Call {
+func (mr *MockServiceMockRecorder) GetTaskFormConfig(ctx, ticketId, taskId, workflowId any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTaskFormConfig", reflect.TypeOf((*MockService)(nil).GetTaskFormConfig), ctx, taskId, workflowId)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTaskFormConfig", reflect.TypeOf((*MockService)(nil).GetTaskFormConfig), ctx, ticketId, taskId, workflowId)
 }
 
 // ListTaskFormsByTaskIDs mocks base method.
@@ -203,31 +203,31 @@ func (mr *MockServiceMockRecorder) MergeData(ctx, ticketId, data any) *gomock.Ca
 }
 
 // Pass mocks base method.
-func (m *MockService) Pass(ctx context.Context, engineType domain.EngineType, taskId, operator string, isAdmin bool, comment string, extraData map[string]any) error {
+func (m *MockService) Pass(ctx context.Context, ticketId int64, taskId, operator string, isAdmin bool, comment string, extraData map[string]any) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Pass", ctx, engineType, taskId, operator, isAdmin, comment, extraData)
+	ret := m.ctrl.Call(m, "Pass", ctx, ticketId, taskId, operator, isAdmin, comment, extraData)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Pass indicates an expected call of Pass.
-func (mr *MockServiceMockRecorder) Pass(ctx, engineType, taskId, operator, isAdmin, comment, extraData any) *gomock.Call {
+func (mr *MockServiceMockRecorder) Pass(ctx, ticketId, taskId, operator, isAdmin, comment, extraData any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Pass", reflect.TypeOf((*MockService)(nil).Pass), ctx, engineType, taskId, operator, isAdmin, comment, extraData)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Pass", reflect.TypeOf((*MockService)(nil).Pass), ctx, ticketId, taskId, operator, isAdmin, comment, extraData)
 }
 
 // Reject mocks base method.
-func (m *MockService) Reject(ctx context.Context, engineType domain.EngineType, taskId, operator string, isAdmin bool, comment string) error {
+func (m *MockService) Reject(ctx context.Context, ticketId int64, taskId, operator string, isAdmin bool, comment string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Reject", ctx, engineType, taskId, operator, isAdmin, comment)
+	ret := m.ctrl.Call(m, "Reject", ctx, ticketId, taskId, operator, isAdmin, comment)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Reject indicates an expected call of Reject.
-func (mr *MockServiceMockRecorder) Reject(ctx, engineType, taskId, operator, isAdmin, comment any) *gomock.Call {
+func (mr *MockServiceMockRecorder) Reject(ctx, ticketId, taskId, operator, isAdmin, comment any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Reject", reflect.TypeOf((*MockService)(nil).Reject), ctx, engineType, taskId, operator, isAdmin, comment)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Reject", reflect.TypeOf((*MockService)(nil).Reject), ctx, ticketId, taskId, operator, isAdmin, comment)
 }
 
 // RestartProcess mocks base method.
@@ -245,17 +245,17 @@ func (mr *MockServiceMockRecorder) RestartProcess(ctx, id any) *gomock.Call {
 }
 
 // Transfer mocks base method.
-func (m *MockService) Transfer(ctx context.Context, engineType domain.EngineType, taskId, operator string, isAdmin bool, targetUsers []string) error {
+func (m *MockService) Transfer(ctx context.Context, ticketId int64, taskId, operator string, isAdmin bool, targetUsers []string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Transfer", ctx, engineType, taskId, operator, isAdmin, targetUsers)
+	ret := m.ctrl.Call(m, "Transfer", ctx, ticketId, taskId, operator, isAdmin, targetUsers)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Transfer indicates an expected call of Transfer.
-func (mr *MockServiceMockRecorder) Transfer(ctx, engineType, taskId, operator, isAdmin, targetUsers any) *gomock.Call {
+func (mr *MockServiceMockRecorder) Transfer(ctx, ticketId, taskId, operator, isAdmin, targetUsers any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Transfer", reflect.TypeOf((*MockService)(nil).Transfer), ctx, engineType, taskId, operator, isAdmin, targetUsers)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Transfer", reflect.TypeOf((*MockService)(nil).Transfer), ctx, ticketId, taskId, operator, isAdmin, targetUsers)
 }
 
 // UpdateStatusByProcessInstance mocks base method.

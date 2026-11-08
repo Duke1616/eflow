@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -107,6 +108,7 @@ func (d *engineDispatcher) GetTaskContext(ctx context.Context, engineType domain
 	if err != nil {
 		return domain.TaskContext{}, err
 	}
+
 	return eng.GetTaskContext(ctx, engineType, taskID)
 }
 
@@ -182,12 +184,12 @@ func (d *engineDispatcher) GetInstanceExecutionView(ctx context.Context, engineT
 	return eng.GetInstanceExecutionView(ctx, engineType, instanceID, status)
 }
 
-func (d *engineDispatcher) GetAutomationTask(ctx context.Context, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
-	eng, err := d.getEngine(domain.EngineTypeEasyFlow)
+func (d *engineDispatcher) GetAutomationTask(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
+	eng, err := d.getEngine(engineType)
 	if err != nil {
 		return domain.TaskRecord{}, err
 	}
-	return eng.GetAutomationTask(ctx, instanceID, nodeID)
+	return eng.GetAutomationTask(ctx, engineType, instanceID, nodeID)
 }
 
 // GetTasksByCurrentNode 获取指定流程实例在特定节点下当前挂起/未完成的任务记录集合
@@ -199,7 +201,13 @@ func (d *engineDispatcher) GetTasksByCurrentNode(ctx context.Context, engineType
 	return eng.GetTasksByCurrentNode(ctx, engineType, instanceID, nodeID)
 }
 
-// ListTodoTasks 并发聚合所有已注册底层引擎的待办任务，向业务层屏蔽底层异构细节（多态聚合）
+// maxPerEngineTodoLimit 单引擎待办任务拉取上限保护（防止异常批量数据撑爆内存）
+const maxPerEngineTodoLimit = 500
+
+// ListTodoTasks 并发拉取所有已注册底层引擎的待办任务，并在分发器层完成全局时间排序与精确内存分页
+// 解释设计原因：跨异构引擎（如 FlowX 与 EasyFlow）下推各自的分页 offset 会导致分布式伪分页与时间交错乱序。
+// 由于个人待办数据体量天然较小（单人处于 Pending 状态的任务通常在几十条以内），
+// 采用“带防爆上限的各引擎活跃待办拉取 + 分发器全局时间归并排序 + 内存切片”是业界最优且最稳固的实践。
 func (d *engineDispatcher) ListTodoTasks(ctx context.Context, req domain.TodoQueryReq) ([]domain.TodoTask, int64, error) {
 	d.mu.RLock()
 	engines := lo.Values(d.engines)
@@ -209,19 +217,27 @@ func (d *engineDispatcher) ListTodoTasks(ctx context.Context, req domain.TodoQue
 		eg       errgroup.Group
 		mu       sync.Mutex
 		allTasks []domain.TodoTask
-		total    int64
 	)
+
+	// 1. 构造面向底层引擎的无偏移行全量拉取请求，附加防爆熔断上限
+	engineReq := domain.TodoQueryReq{
+		Username:    req.Username,
+		ProcessName: req.ProcessName,
+		SortByAsc:   req.SortByAsc,
+		Offset:      0,
+		Limit:       maxPerEngineTodoLimit,
+		IsAdmin:     req.IsAdmin,
+	}
 
 	for _, eng := range engines {
 		e := eng
 		eg.Go(func() error {
-			tasks, count, err := e.ListTodoTasks(ctx, req)
+			tasks, _, err := e.ListTodoTasks(ctx, engineReq)
 			if err != nil {
 				return err
 			}
 			mu.Lock()
 			allTasks = append(allTasks, tasks...)
-			total += count
 			mu.Unlock()
 			return nil
 		})
@@ -231,18 +247,39 @@ func (d *engineDispatcher) ListTodoTasks(ctx context.Context, req domain.TodoQue
 		return nil, 0, err
 	}
 
-	return allTasks, total, nil
+	// 2. 全局严格按任务创建时间进行跨引擎归并排序（保证绝对时间线性）
+	sort.SliceStable(allTasks, func(i, j int) bool {
+		if req.SortByAsc {
+			return allTasks[i].CreateTime.Before(allTasks[j].CreateTime)
+		}
+		return allTasks[i].CreateTime.After(allTasks[j].CreateTime)
+	})
+
+	total := int64(len(allTasks))
+
+	// 3. 内存安全切片，保证前端标准分页不重不漏
+	if req.Offset < 0 || req.Offset >= len(allTasks) {
+		return []domain.TodoTask{}, total, nil
+	}
+
+	end := req.Offset + req.Limit
+	if req.Limit <= 0 || end > len(allTasks) {
+		end = len(allTasks)
+	}
+
+	return allTasks[req.Offset:end], total, nil
 }
 
-// ListPendingSteps 跨引擎批量检索指定流程实例列表中当前挂起的待办步骤
-func (d *engineDispatcher) ListPendingSteps(ctx context.Context, instanceIDs []domain.ID) ([]domain.TodoTask, error) {
-	if len(instanceIDs) == 0 {
+// ListPendingSteps 基于工单绑定的流程引擎类型精准定向检索当前挂起的待办步骤，绝不向未涉及的引擎盲广播
+func (d *engineDispatcher) ListPendingSteps(ctx context.Context, processes []domain.Process) ([]domain.TodoTask, error) {
+	if len(processes) == 0 {
 		return nil, nil
 	}
 
-	d.mu.RLock()
-	engines := lo.Values(d.engines)
-	d.mu.RUnlock()
+	// 1. 按工单绑定的引擎类型对流程实例进行精确分组
+	procByEngine := lo.GroupBy(processes, func(p domain.Process) domain.EngineType {
+		return p.ResolveEngineType()
+	})
 
 	var (
 		eg       errgroup.Group
@@ -250,10 +287,15 @@ func (d *engineDispatcher) ListPendingSteps(ctx context.Context, instanceIDs []d
 		allSteps []domain.TodoTask
 	)
 
-	for _, eng := range engines {
-		e := eng
+	// 2. 仅对实际包含实例的引擎定向并发调用，未涉及的引擎 0 开销
+	for engType, procs := range procByEngine {
+		targetEngine, err := d.getEngine(engType)
+		if err != nil {
+			return nil, err
+		}
+		targetProcs := procs
 		eg.Go(func() error {
-			steps, err := e.ListPendingSteps(ctx, instanceIDs)
+			steps, err := targetEngine.ListPendingSteps(ctx, targetProcs)
 			if err != nil {
 				return err
 			}

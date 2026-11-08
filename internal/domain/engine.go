@@ -182,6 +182,11 @@ type TaskContext struct {
 	Comment           string     // 审批批注
 }
 
+// ValidateOperable 断言当前任务是否允许指定操作人执行流转（已办结拦截与操作人权限隔离）
+func (t TaskContext) ValidateOperable(operator string, isAdmin bool) error {
+	return ValidateTaskOperable(t.Assignee, t.IsFinished, operator, isAdmin)
+}
+
 // InstanceExecutionView 流程实例运行时轨迹与点亮视图
 type InstanceExecutionView struct {
 	WorkflowID     int64               // 关联的工作流定义主键 ID

@@ -15,7 +15,7 @@ type Task struct {
 	ID                  int64  `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'自动化任务主键'"`
 	TenantID            int64  `gorm:"column:tenant_id;type:bigint;not null;uniqueIndex:uk_automation_node,priority:1;index;comment:'租户 ID'"`
 	TicketID            int64  `gorm:"column:ticket_id;type:bigint;not null;index;comment:'关联工单 ID'"`
-	ProcessInstanceID   int    `gorm:"column:process_instance_id;type:int;not null;uniqueIndex:uk_automation_node,priority:2;index;comment:'流程实例 ID'"`
+	ProcessInstanceID   int64  `gorm:"column:process_instance_id;type:bigint;not null;uniqueIndex:uk_automation_node,priority:2;index;comment:'流程实例 ID'"`
 	NodeID              string `gorm:"column:node_id;type:varchar(128);not null;uniqueIndex:uk_automation_node,priority:3;comment:'自动化节点 ID'"`
 	NodeName            string `gorm:"column:node_name;type:varchar(250);not null;comment:'自动化节点名称快照'"`
 	ProcessVersion      int    `gorm:"column:process_version;type:int;not null;comment:'流程实例版本快照'"`
@@ -41,7 +41,7 @@ type TaskDAO interface {
 	// Create 创建自动化任务。
 	Create(ctx context.Context, task Task) (Task, error)
 	// FindByProcessNode 根据流程实例和节点查询任务。
-	FindByProcessNode(ctx context.Context, processInstanceID int, nodeID string) (Task, error)
+	FindByProcessNode(ctx context.Context, processInstanceID int64, nodeID string) (Task, error)
 	// FindByID 根据主键查询任务。
 	FindByID(ctx context.Context, id int64) (Task, error)
 	// Block 将任务置为需要人工处理的阻塞状态。
@@ -55,9 +55,9 @@ type TaskDAO interface {
 	// Count 统计任务总数。
 	Count(ctx context.Context) (int64, error)
 	// ListByInstanceID 查询流程实例下的任务。
-	ListByInstanceID(ctx context.Context, offset, limit int64, instanceID int) ([]Task, error)
+	ListByInstanceID(ctx context.Context, offset, limit int64, instanceID int64) ([]Task, error)
 	// CountByInstanceID 统计流程实例下的任务数量。
-	CountByInstanceID(ctx context.Context, instanceID int) (int64, error)
+	CountByInstanceID(ctx context.Context, instanceID int64) (int64, error)
 	// ListReady 查询已到计划时间的待提交任务。
 	ListReady(ctx context.Context, limit int64) ([]Task, error)
 	// ListSucceededUnadvanced 按主键游标查询一批尚未推进流程的成功任务。
@@ -81,7 +81,7 @@ func (g *gormTaskDAO) Create(ctx context.Context, task Task) (Task, error) {
 	return task, err
 }
 
-func (g *gormTaskDAO) FindByProcessNode(ctx context.Context, processInstanceID int, nodeID string) (Task, error) {
+func (g *gormTaskDAO) FindByProcessNode(ctx context.Context, processInstanceID int64, nodeID string) (Task, error) {
 	var task Task
 	err := g.db.WithContext(ctx).
 		Where("process_instance_id = ? AND node_id = ?", processInstanceID, nodeID).
@@ -145,14 +145,14 @@ func (g *gormTaskDAO) Count(ctx context.Context) (int64, error) {
 	return count, err
 }
 
-func (g *gormTaskDAO) ListByInstanceID(ctx context.Context, offset, limit int64, instanceID int) ([]Task, error) {
+func (g *gormTaskDAO) ListByInstanceID(ctx context.Context, offset, limit int64, instanceID int64) ([]Task, error) {
 	var tasks []Task
 	err := g.db.WithContext(ctx).Where("process_instance_id = ?", instanceID).
 		Order("ctime DESC").Offset(int(offset)).Limit(int(limit)).Find(&tasks).Error
 	return tasks, err
 }
 
-func (g *gormTaskDAO) CountByInstanceID(ctx context.Context, instanceID int) (int64, error) {
+func (g *gormTaskDAO) CountByInstanceID(ctx context.Context, instanceID int64) (int64, error) {
 	var count int64
 	err := g.db.WithContext(ctx).Model(&Task{}).Where("process_instance_id = ?", instanceID).Count(&count).Error
 	return count, err

@@ -315,7 +315,7 @@ func (a *adapter) Transfer(ctx context.Context, req domain.TaskTransferReq) erro
 	return err
 }
 
-func (a *adapter) GetAutomationTask(ctx context.Context, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
+func (a *adapter) GetAutomationTask(ctx context.Context, _ domain.EngineType, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
 	procInstID := instanceID.Int()
 	if procInstID <= 0 {
 		return domain.TaskRecord{}, fmt.Errorf("easyflow 流程实例 ID 非法: %s", instanceID)
@@ -419,9 +419,9 @@ func (a *adapter) ListTodoTasks(ctx context.Context, req domain.TodoQueryReq) ([
 	return tasks, total, nil
 }
 
-func (a *adapter) ListPendingSteps(ctx context.Context, instanceIDs []domain.ID) ([]domain.TodoTask, error) {
-	procInstIDs := lo.FilterMap(instanceIDs, func(id domain.ID, _ int) (int, bool) {
-		val := id.Int()
+func (a *adapter) ListPendingSteps(ctx context.Context, processes []domain.Process) ([]domain.TodoTask, error) {
+	procInstIDs := lo.FilterMap(processes, func(p domain.Process, _ int) (int, bool) {
+		val := p.InstanceID.Int()
 		return val, val > 0
 	})
 	if len(procInstIDs) == 0 {

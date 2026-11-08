@@ -15,7 +15,7 @@ func TestTaskSnapshotMapping(t *testing.T) {
 		{
 			name: "保留自动化节点历史快照",
 			task: domain.Task{
-				ID: 1, TenantID: 2, TicketID: 3, ProcessInstanceID: 4,
+				ID: 1, TenantID: 2, TicketID: 3, InstanceID: domain.NewID(4),
 				NodeID: "automation-node", NodeName: "部署生产环境", ProcessVersion: 7,
 				ScheduledAt: 100, OriginalScheduledAt: 100,
 				ExecutionKind: domain.TaskExecutionCompensation, CompensationNodeID: "compensation-node",

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
@@ -14,7 +13,6 @@ import (
 	"github.com/Duke1616/eflow/pkg/flowx"
 	flowxModel "github.com/Duke1616/eflow/pkg/flowx/model"
 	"github.com/samber/lo"
-	"golang.org/x/sync/errgroup"
 )
 
 // flowxEngine flowx 现代工作流引擎实现
@@ -236,8 +234,34 @@ func (a *flowxEngine) Transfer(ctx context.Context, req domain.TaskTransferReq) 
 	return a.engine.Transfer(ctx, req.TaskId.String(), req.TargetUsers)
 }
 
-func (a *flowxEngine) GetAutomationTask(ctx context.Context, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
-	return domain.TaskRecord{}, fmt.Errorf("flowx 暂未直接支持根据 nodeID 获取自动化任务")
+func (a *flowxEngine) GetAutomationTask(ctx context.Context, _ domain.EngineType, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
+	if a.engine == nil {
+		return domain.TaskRecord{}, errors.New("flowx 流程引擎未初始化")
+	}
+	instID := instanceID.String()
+	if instID == "" {
+		return domain.TaskRecord{}, fmt.Errorf("%w: 流程实例 ID 不能为空", engine.ErrInvalidParameter)
+	}
+
+	tasks, err := a.engine.ListTasksByInstance(ctx, instID)
+	if err != nil {
+		return domain.TaskRecord{}, err
+	}
+
+	task, ok := lo.Find(tasks, func(t *flowxModel.Task) bool {
+		return t.NodeID == nodeID && t.IsPending()
+	})
+	if !ok {
+		return domain.TaskRecord{}, fmt.Errorf("未找到对应的自动化节点任务 [node_id=%s]", nodeID)
+	}
+
+	return domain.TaskRecord{
+		TaskID:     domain.NewID(task.ID),
+		NodeID:     task.NodeID,
+		NodeName:   task.NodeName,
+		BatchCode:  strconv.Itoa(task.BatchCode),
+		Status:     int(task.Status),
+	}, nil
 }
 
 func (a *flowxEngine) GetTasksByCurrentNode(ctx context.Context, _ domain.EngineType, instanceID domain.ID, nodeID string) ([]domain.TaskRecord, error) {
@@ -296,56 +320,35 @@ func (a *flowxEngine) ListTodoTasks(ctx context.Context, req domain.TodoQueryReq
 	return todoTasks, total, nil
 }
 
-func (a *flowxEngine) ListPendingSteps(ctx context.Context, instanceIDs []domain.ID) ([]domain.TodoTask, error) {
+func (a *flowxEngine) ListPendingSteps(ctx context.Context, processes []domain.Process) ([]domain.TodoTask, error) {
 	if a.engine == nil {
 		return nil, errors.New("flowx 流程引擎未初始化")
 	}
 
-	validIDs := lo.Filter(instanceIDs, func(id domain.ID, _ int) bool {
-		return !id.IsZero()
+	instIDs := lo.FilterMap(processes, func(p domain.Process, _ int) (string, bool) {
+		idStr := p.InstanceID.String()
+		return idStr, idStr != ""
 	})
-	if len(validIDs) == 0 {
+	if len(instIDs) == 0 {
 		return nil, nil
 	}
 
-	var (
-		mu              sync.Mutex
-		allPendingTasks []domain.TodoTask
-		eg              errgroup.Group
-	)
-
-	for _, instID := range validIDs {
-		targetID := instID
-		eg.Go(func() error {
-			tasks, err := a.engine.ListTasksByInstance(ctx, targetID.String())
-			if err != nil {
-				return nil
-			}
-			var pending []domain.TodoTask
-			for _, t := range tasks {
-				if t.IsPending() {
-					pending = append(pending, domain.TodoTask{
-						EngineType: domain.EngineTypeFlowx,
-						TaskID:     domain.NewID(t.ID),
-						InstanceID: domain.NewID(t.InstanceID),
-						NodeID:     t.NodeID,
-						NodeName:   t.NodeName,
-						ApprovedBy: t.Assignee,
-						CreateTime: t.CreateTime,
-					})
-				}
-			}
-			if len(pending) > 0 {
-				mu.Lock()
-				allPendingTasks = append(allPendingTasks, pending...)
-				mu.Unlock()
-			}
-			return nil
-		})
+	tasks, err := a.engine.ListPendingTasksByInstances(ctx, instIDs)
+	if err != nil {
+		return nil, fmt.Errorf("flowx 批量检索待办步骤失败: %w", err)
 	}
 
-	_ = eg.Wait()
-	return allPendingTasks, nil
+	return lo.Map(tasks, func(t *flowxModel.Task, _ int) domain.TodoTask {
+		return domain.TodoTask{
+			EngineType: domain.EngineTypeFlowx,
+			TaskID:     domain.NewID(t.ID),
+			InstanceID: domain.NewID(t.InstanceID),
+			NodeID:     t.NodeID,
+			NodeName:   t.NodeName,
+			ApprovedBy: t.Assignee,
+			CreateTime: t.CreateTime,
+		}
+	}), nil
 }
 
 func (a *flowxEngine) GetTaskRecords(ctx context.Context, _ domain.EngineType, instanceID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error) {

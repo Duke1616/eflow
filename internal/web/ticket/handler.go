@@ -128,7 +128,14 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 }
 
 func (h *Handler) GetTaskFormConfig(ctx *ginx.Context, req TaskFormConfigReq) (ginx.Result, error) {
-	fields, err := h.svc.GetTaskFormConfig(ctx.Context, req.TaskId.String(), req.WorkflowId)
+	if req.TicketId <= 0 {
+		return ginx.Result{Code: 400, Msg: "工单 ID 非法"}, nil
+	}
+	if req.TaskId.IsZero() {
+		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
+	}
+
+	fields, err := h.svc.GetTaskFormConfig(ctx.Context, req.TicketId, req.TaskId.String(), req.WorkflowId)
 	if err != nil {
 		return systemErrorResult, err
 	}
@@ -201,6 +208,9 @@ func (h *Handler) TodoByUser(ctx *ginx.Context, req Todo) (ginx.Result, error) {
 }
 
 func (h *Handler) Transfer(ctx *ginx.Context, req TransferReq) (ginx.Result, error) {
+	if req.TicketId <= 0 {
+		return ginx.Result{Code: 400, Msg: "工单 ID 非法"}, nil
+	}
 	if req.TaskId.IsZero() {
 		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
 	}
@@ -213,7 +223,7 @@ func (h *Handler) Transfer(ctx *ginx.Context, req TransferReq) (ginx.Result, err
 		return systemErrorResult, err
 	}
 
-	err = h.svc.Transfer(ctx.Context, domain.EngineType(req.EngineType), req.TaskId.String(), user.Username, user.IsAdmin, req.Usernames)
+	err = h.svc.Transfer(ctx.Context, req.TicketId, req.TaskId.String(), user.Username, user.IsAdmin, req.Usernames)
 	if err != nil {
 		if errors.Is(err, domain.ErrTaskUnauthorized) {
 			return ginx.Result{Code: 403, Msg: err.Error()}, nil
@@ -259,12 +269,7 @@ func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, er
 		return ginx.Result{Code: 400, Msg: err.Error()}, nil
 	}
 
-	engineType := domain.EngineType(req.EngineType)
-	if engineType == "" {
-		engineType = ticket.Process.EngineType
-	}
-
-	err = h.withdrawalSvc.Revoke(ctx.Context, engineType, req.InstanceId, req.Force, user.Username, req.Reason)
+	err = h.withdrawalSvc.Revoke(ctx.Context, ticket.Process.ResolveEngineType(), req.InstanceId, req.Force, user.Username, req.Reason)
 	if err != nil {
 		if errors.Is(err, withdrawalSvc.ErrInvalidRevokeReason) {
 			return ginx.Result{Code: 400, Msg: err.Error()}, nil
@@ -304,6 +309,9 @@ func (h *Handler) SubmitRating(ctx *ginx.Context, req SubmitRatingReq) (ginx.Res
 }
 
 func (h *Handler) Pass(ctx *ginx.Context, req PassOrderReq) (ginx.Result, error) {
+	if req.TicketId <= 0 {
+		return ginx.Result{Code: 400, Msg: "工单 ID 非法"}, nil
+	}
 	if req.TaskId.IsZero() {
 		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
 	}
@@ -312,7 +320,7 @@ func (h *Handler) Pass(ctx *ginx.Context, req PassOrderReq) (ginx.Result, error)
 	if err != nil {
 		return systemErrorResult, err
 	}
-	if err = h.svc.Pass(ctx.Context, domain.EngineType(req.EngineType), req.TaskId.String(), user.Username, user.IsAdmin, req.Comment, req.ExtraData); err != nil {
+	if err = h.svc.Pass(ctx.Context, req.TicketId, req.TaskId.String(), user.Username, user.IsAdmin, req.Comment, req.ExtraData); err != nil {
 		if errors.Is(err, domain.ErrTaskUnauthorized) {
 			return ginx.Result{Code: 403, Msg: err.Error()}, nil
 		}
@@ -329,6 +337,9 @@ func (h *Handler) Pass(ctx *ginx.Context, req PassOrderReq) (ginx.Result, error)
 }
 
 func (h *Handler) Reject(ctx *ginx.Context, req RejectOrderReq) (ginx.Result, error) {
+	if req.TicketId <= 0 {
+		return ginx.Result{Code: 400, Msg: "工单 ID 非法"}, nil
+	}
 	if req.TaskId.IsZero() {
 		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
 	}
@@ -338,7 +349,7 @@ func (h *Handler) Reject(ctx *ginx.Context, req RejectOrderReq) (ginx.Result, er
 		return systemErrorResult, err
 	}
 
-	err = h.svc.Reject(ctx.Context, domain.EngineType(req.EngineType), req.TaskId.String(), user.Username, user.IsAdmin, req.Comment)
+	err = h.svc.Reject(ctx.Context, req.TicketId, req.TaskId.String(), user.Username, user.IsAdmin, req.Comment)
 	if err != nil {
 		if errors.Is(err, domain.ErrTaskUnauthorized) {
 			return ginx.Result{Code: 403, Msg: err.Error()}, nil

@@ -51,7 +51,7 @@ func TestResolveRunnerByDispatch(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			svc := &taskService{
 				dispatches: &dispatchServiceStub{dispatches: testCase.dispatches, err: testCase.listErr},
-				runners:    &runnerCatalogStub{runners: testCase.runners},
+				etask:      &runnerCatalogStub{runners: testCase.runners},
 			}
 			runner, ruleID, err := svc.resolveRunnerByDispatch(context.Background(), 1, "node-1",
 				20, domain.TaskArgs{"environment": "test"})
@@ -75,7 +75,7 @@ func TestResolveRunnerUsesDefaultRunner(t *testing.T) {
 		dispatches: &dispatchServiceStub{dispatches: []domain.Dispatch{{
 			AutomationNodeID: "node-1", Field: "environment", Value: "test", RunnerId: 10,
 		}}},
-		runners: runners,
+		etask: runners,
 	}
 
 	decision, err := svc.resolveRunner(context.Background(), 1, "node-1",
@@ -93,7 +93,7 @@ func TestResolveRunnerUsesDynamicRouteWithoutDefaultRunner(t *testing.T) {
 		dispatches: &dispatchServiceStub{dispatches: []domain.Dispatch{{
 			Id: 21, AutomationNodeID: "node-1", Field: "environment", Value: "test", RunnerId: 10,
 		}}},
-		runners: &runnerCatalogStub{runners: map[int64]etaskclient.Runner{
+		etask: &runnerCatalogStub{runners: map[int64]etaskclient.Runner{
 			10: {ID: 10, CodebookID: 20},
 		}},
 	}
@@ -110,7 +110,7 @@ func TestResolveRunnerDoesNotLoadDefaultWhenDynamicRouteMatches(t *testing.T) {
 		dispatches: &dispatchServiceStub{dispatches: []domain.Dispatch{{
 			Id: 21, AutomationNodeID: "node-1", Field: "environment", Value: "test", RunnerId: 10,
 		}}},
-		runners: &runnerCatalogStub{runners: map[int64]etaskclient.Runner{
+		etask: &runnerCatalogStub{runners: map[int64]etaskclient.Runner{
 			10: {ID: 10, CodebookID: 20},
 		}},
 	}
@@ -127,7 +127,7 @@ func TestResolveRunnerDoesNotLoadDefaultWhenDynamicRouteMatches(t *testing.T) {
 func TestResolveRunnerRequiresFallbackWhenNoRuleMatches(t *testing.T) {
 	svc := &taskService{
 		dispatches: &dispatchServiceStub{},
-		runners:    &runnerCatalogStub{},
+		etask:      &runnerCatalogStub{},
 	}
 
 	_, err := svc.resolveRunner(context.Background(), 1, "node-1",
@@ -137,7 +137,7 @@ func TestResolveRunnerRequiresFallbackWhenNoRuleMatches(t *testing.T) {
 }
 
 func TestResolveRunnerRejectsDifferentCodebook(t *testing.T) {
-	svc := &taskService{runners: &runnerCatalogStub{
+	svc := &taskService{etask: &runnerCatalogStub{
 		runner: etaskclient.Runner{ID: 20, CodebookID: 99},
 	}}
 
@@ -407,7 +407,7 @@ func (s *dispatchServiceStub) ListByTemplateNode(_ context.Context, _ int64,
 }
 
 type runnerCatalogStub struct {
-	etaskclient.RunnerCatalog
+	etaskclient.Client
 	runner  etaskclient.Runner
 	runners map[int64]etaskclient.Runner
 }

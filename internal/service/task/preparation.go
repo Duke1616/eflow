@@ -2,10 +2,8 @@ package task
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
-	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
@@ -58,17 +56,13 @@ func (s *taskService) prepareAttempt(ctx context.Context,
 		return domain.RunnerRouteDecision{}, nil, s.taskError(task.ID, taskPreparationOperation, err)
 	}
 	prepared.input["ticket_id"] = task.TicketID
-	prepared.input["process_inst_id"] = task.ProcessInstanceID
+	prepared.input["process_inst_id"] = task.InstanceID.String()
 	return decision, prepared.input, nil
 }
 
 func (s *taskService) resolvePreparation(ctx context.Context, task domain.Task,
 	ticket domain.Ticket) (preparation, error) {
-	instance, err := s.engine.GetInstanceByID(ctx, task.ProcessInstanceID)
-	if err != nil {
-		return preparation{}, s.taskError(task.ID, taskPreparationOperation, err)
-	}
-	flow, err := s.workflows.FindInstanceFlow(ctx, ticket.WorkflowId, instance.ProcID, instance.ProcVersion)
+	flow, err := s.workflows.FindInstanceFlow(ctx, ticket.WorkflowId, 0, task.ProcessVersion)
 	if err != nil {
 		return preparation{}, s.taskError(task.ID, taskPreparationOperation, err)
 	}
@@ -106,7 +100,7 @@ func (s *taskService) resolveRunner(ctx context.Context, templateID int64, nodeI
 	if automation.RunnerID <= 0 {
 		return domain.RunnerRouteDecision{}, fmt.Errorf("未命中动态路由，且自动化节点未配置默认执行单元")
 	}
-	defaultRunner, err := s.runners.FindByID(ctx, automation.RunnerID)
+	defaultRunner, err := s.etask.FindByID(ctx, automation.RunnerID)
 	if err != nil {
 		return domain.RunnerRouteDecision{}, fmt.Errorf("查询默认执行单元失败: %w", err)
 	}
@@ -132,7 +126,7 @@ func (s *taskService) resolveRunnerByDispatch(ctx context.Context, templateID in
 		if dispatch.RunnerId <= 0 {
 			return etaskclient.Runner{}, 0, fmt.Errorf("路由规则 %d 缺少有效执行单元", dispatch.Id)
 		}
-		runner, findErr := s.runners.FindByID(ctx, dispatch.RunnerId)
+		runner, findErr := s.etask.FindByID(ctx, dispatch.RunnerId)
 		if findErr != nil {
 			return etaskclient.Runner{}, 0, fmt.Errorf("查询路由规则执行单元失败: %w", findErr)
 		}
@@ -156,13 +150,6 @@ func (s *taskService) assembleRuntimeArgs(ctx context.Context, ticket domain.Tic
 	}
 	for _, value := range forms {
 		input[value.Key] = value.Value
-	}
-	response, err := s.users.QueryByUsername(ctx, &userv1.QueryByUsernameReq{Username: ticket.CreateBy})
-	if err == nil && response.User != nil {
-		data, marshalErr := json.Marshal(response.User)
-		if marshalErr == nil {
-			input["user_info"] = string(data)
-		}
 	}
 	return input, nil
 }

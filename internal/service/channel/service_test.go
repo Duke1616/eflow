@@ -39,7 +39,7 @@ func TestChannelActionService_DispatchAction(t *testing.T) {
 				}, nil).AnyTimes()
 				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelFeishu, "bcegag66", domain.EngineTypeFlowx, domain.NewID(5242)).
 					Return(&userv1.User{Username: "zhangsan", IsAdmin: false}, nil)
-				mockTicket.EXPECT().Pass(gomock.Any(), domain.EngineTypeFlowx, "5242", "zhangsan", false, "准予发布", gomock.Any()).Return(nil)
+				mockTicket.EXPECT().Pass(gomock.Any(), gomock.Any(), "5242", "zhangsan", false, "准予发布", gomock.Any()).Return(nil)
 			},
 			wantSuccess: true,
 			wantRemark:  "你已同意该申请, 批注：准予发布",
@@ -70,7 +70,7 @@ func TestChannelActionService_DispatchAction(t *testing.T) {
 			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
 				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelFeishu, "bcegag66", domain.EngineType(""), domain.NewID(5242)).
 					Return(&userv1.User{Username: "zhangsan", IsAdmin: false}, nil)
-				mockTicket.EXPECT().Pass(gomock.Any(), domain.EngineType(""), "5242", "zhangsan", false, "无", gomock.Any()).
+				mockTicket.EXPECT().Pass(gomock.Any(), gomock.Any(), "5242", "zhangsan", false, "无", gomock.Any()).
 					Return(errors.New("模拟网关无法计算条件"))
 			},
 			wantSuccess: false,
@@ -87,7 +87,7 @@ func TestChannelActionService_DispatchAction(t *testing.T) {
 			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
 				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelWechat, "ZhangSan", domain.EngineType(""), domain.NewID(5243)).
 					Return(&userv1.User{Username: "zhangsan", IsAdmin: false}, nil)
-				mockTicket.EXPECT().Reject(gomock.Any(), domain.EngineType(""), "5243", "zhangsan", false, "不符合发版要求").Return(nil)
+				mockTicket.EXPECT().Reject(gomock.Any(), gomock.Any(), "5243", "zhangsan", false, "不符合发版要求").Return(nil)
 			},
 			wantSuccess: true,
 			wantRemark:  "你已驳回该申请, 批注：不符合发版要求",
@@ -108,7 +108,7 @@ func TestChannelActionService_DispatchAction(t *testing.T) {
 				}, nil).AnyTimes()
 				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelFeishu, "bcegag66", domain.EngineTypeFlowx, domain.NewID("flowx_node_alice_1")).
 					Return(&userv1.User{Username: "zhangsan", IsAdmin: false}, nil)
-				mockTicket.EXPECT().Pass(gomock.Any(), domain.EngineTypeFlowx, "flowx_node_alice_1", "zhangsan", false, "FlowX准予发布", gomock.Any()).Return(nil)
+				mockTicket.EXPECT().Pass(gomock.Any(), gomock.Any(), "flowx_node_alice_1", "zhangsan", false, "FlowX准予发布", gomock.Any()).Return(nil)
 			},
 			wantSuccess: true,
 			wantRemark:  "你已同意该申请, 批注：FlowX准予发布",

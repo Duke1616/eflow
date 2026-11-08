@@ -184,6 +184,24 @@ func (s *Storage) ListTasksByInstance(ctx context.Context, instID string) ([]*mo
 	}), nil
 }
 
+func (s *Storage) ListPendingTasksByInstances(ctx context.Context, instIDs []string) ([]*model.Task, error) {
+	if len(instIDs) == 0 {
+		return []*model.Task{}, nil
+	}
+
+	var pos []FlowTaskPO
+	err := s.db.WithContext(ctx).
+		Where("status = ? AND instance_id IN ?", uint8(model.TaskPending), instIDs).
+		Order("batch_code ASC, ctime ASC").
+		Find(&pos).Error
+	if err != nil {
+		return nil, err
+	}
+	return lo.Map(pos, func(po FlowTaskPO, _ int) *model.Task {
+		return toTaskDO(po)
+	}), nil
+}
+
 func (s *Storage) buildListPendingTasksQuery(tx *gorm.DB, assignee string) *gorm.DB {
 	query := tx.Model(&FlowTaskPO{}).Where("status = ?", uint8(model.TaskPending))
 	if assignee != "" {
