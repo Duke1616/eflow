@@ -17,7 +17,7 @@ func (s *taskService) applyTemplateScheduleOverride(ctx context.Context, nodeID 
 	if err != nil {
 		return err
 	}
-	if fallback.Type == flowdsl.ScheduleImmediate || s.templates == nil || templateID <= 0 {
+	if fallback.Type == flowdsl.ScheduleImmediate || templateID <= 0 {
 		return nil
 	}
 

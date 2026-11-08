@@ -26,21 +26,17 @@ type taskDefinition struct {
 func (s *taskService) prepareTaskDefinition(ctx context.Context, task domain.Task,
 	ticket domain.Ticket) (taskDefinition, error) {
 	prepared, err := s.resolvePreparation(ctx, task, ticket)
-	definition := taskDefinition{
-		compensationNodeID: prepared.automation.CompensationNodeID,
-	}
 	if err != nil {
-		return definition, err
+		return taskDefinition{compensationNodeID: prepared.automation.CompensationNodeID}, err
 	}
 	if err = s.applyTemplateScheduleOverride(ctx, task.NodeID, ticket.TemplateId, &prepared.automation); err != nil {
-		return definition, s.taskError(task.ID, taskPreparationOperation, err)
+		return taskDefinition{compensationNodeID: prepared.automation.CompensationNodeID}, s.taskError(task.ID, taskPreparationOperation, err)
 	}
 	scheduledAt, err := s.calculateScheduledAt(prepared.automation, prepared.input, ticket.TemplateId)
 	if err != nil {
-		return definition, err
+		return taskDefinition{compensationNodeID: prepared.automation.CompensationNodeID}, err
 	}
-	definition.scheduledAt = scheduledAt
-	return definition, nil
+	return taskDefinition{scheduledAt: scheduledAt, compensationNodeID: prepared.automation.CompensationNodeID}, nil
 }
 
 func (s *taskService) prepareAttempt(ctx context.Context,
@@ -88,7 +84,7 @@ func (s *taskService) resolvePreparation(ctx context.Context, task domain.Task,
 func (s *taskService) resolveRunner(ctx context.Context, templateID int64, nodeID string,
 	automation flowdsl.AutoTaskConfig, input domain.TaskArgs) (domain.RunnerRouteDecision, error) {
 	decision := domain.RunnerRouteDecision{DefaultRunnerID: automation.RunnerID}
-	if templateID > 0 && s.dispatches != nil {
+	if templateID > 0 {
 		runner, ruleID, err := s.resolveRunnerByDispatch(ctx, templateID, nodeID, automation.CodebookID, input)
 		if err != nil {
 			return domain.RunnerRouteDecision{}, err

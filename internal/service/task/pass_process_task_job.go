@@ -62,62 +62,8 @@ func (j *PassProcessTaskJob) run(ctx context.Context) error {
 			afterID = task.ID
 			taskCtx := tenantContext(ctx, task.TenantID)
 			j.logger.Info("任务开启自动通过逻辑", elog.Int64("id", task.ID))
-			shouldAdvance, engineType, checkErr := j.svc.ShouldAdvanceProcessTask(taskCtx, task.ID)
-			if checkErr != nil {
-				if errors.Is(checkErr, ErrWithdrawalInProgress) {
-					continue
-				}
-				runErr = errors.Join(runErr,
-					fmt.Errorf("检查自动化任务流程状态失败: task_id=%d: %w", task.ID, checkErr))
-				continue
-			}
-			if !shouldAdvance {
-				if err = j.svc.MarkTaskAsAutoPassed(taskCtx, task.ID); err != nil {
-					runErr = errors.Join(runErr,
-						fmt.Errorf("标记已归档流程任务无需推进失败: task_id=%d: %w", task.ID, err))
-				}
-				continue
-			}
-			if !engineType.IsValid() {
-				engineType = domain.EngineTypeEasyFlow
-			}
-			mt, err1 := j.engine.GetAutomationTask(taskCtx, engineType, task.InstanceID, task.NodeID)
-			if err1 != nil {
-				// 节点在流程引擎中已不存在未完成记录（可能已被网关自动跳过、兄弟分支竞争通过或提前完结），直接标记推进避免死循环
-				if errors.Is(err1, gorm.ErrRecordNotFound) {
-					j.logger.Info("流程引擎中该节点任务已完结或被跳过，直接标记自动化任务已推进",
-						elog.Int64("taskId", task.ID),
-						elog.String("procInstId", task.InstanceID.String()),
-						elog.String("nodeId", task.NodeID))
-					if markErr := j.svc.MarkTaskAsAutoPassed(taskCtx, task.ID); markErr != nil {
-						runErr = errors.Join(runErr,
-							fmt.Errorf("标记无需推进任务失败: task_id=%d: %w", task.ID, markErr))
-					}
-					continue
-				}
-				runErr = errors.Join(runErr,
-					fmt.Errorf("查询流程自动化节点任务失败: task_id=%d: %w", task.ID, err1))
-				continue
-			}
-
-			if !mt.TaskID.IsZero() {
-				err = j.engine.Pass(taskCtx, domain.TaskPassReq{
-					EngineType: engineType,
-					TaskId:     mt.TaskID,
-					Operator:   "SYSTEM",
-					Comment:    "任务执行完成",
-				})
-				if err != nil {
-					runErr = errors.Join(runErr,
-						fmt.Errorf("通过自动化节点失败: task_id=%d: %w", task.ID, err))
-					continue
-				}
-			}
-
-			err = j.svc.MarkTaskAsAutoPassed(taskCtx, task.ID)
-			if err != nil {
-				runErr = errors.Join(runErr,
-					fmt.Errorf("标记自动化任务已推进失败: task_id=%d: %w", task.ID, err))
+			if err = j.advanceTask(taskCtx, task); err != nil {
+				runErr = errors.Join(runErr, err)
 			}
 		}
 
@@ -126,4 +72,55 @@ func (j *PassProcessTaskJob) run(ctx context.Context) error {
 		}
 	}
 	return runErr
+}
+
+func (j *PassProcessTaskJob) advanceTask(ctx context.Context, task domain.Task) error {
+	shouldAdvance, engineType, checkErr := j.svc.ShouldAdvanceProcessTask(ctx, task.ID)
+	if checkErr != nil {
+		if errors.Is(checkErr, ErrWithdrawalInProgress) {
+			return nil
+		}
+		return fmt.Errorf("检查自动化任务流程状态失败: task_id=%d: %w", task.ID, checkErr)
+	}
+	if !shouldAdvance {
+		if err := j.svc.MarkTaskAsAutoPassed(ctx, task.ID); err != nil {
+			return fmt.Errorf("标记已归档流程任务无需推进失败: task_id=%d: %w", task.ID, err)
+		}
+		return nil
+	}
+	if !engineType.IsValid() {
+		engineType = domain.EngineTypeEasyFlow
+	}
+	mt, err := j.engine.GetAutomationTask(ctx, engineType, task.InstanceID, task.NodeID)
+	if err != nil {
+		// 节点在流程引擎中已不存在未完成记录（可能已被网关自动跳过、兄弟分支竞争通过或提前完结），直接标记推进避免死循环
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			j.logger.Info("流程引擎中该节点任务已完结或被跳过，直接标记自动化任务已推进",
+				elog.Int64("taskId", task.ID),
+				elog.String("procInstId", task.InstanceID.String()),
+				elog.String("nodeId", task.NodeID))
+			if markErr := j.svc.MarkTaskAsAutoPassed(ctx, task.ID); markErr != nil {
+				return fmt.Errorf("标记无需推进任务失败: task_id=%d: %w", task.ID, markErr)
+			}
+			return nil
+		}
+		return fmt.Errorf("查询流程自动化节点任务失败: task_id=%d: %w", task.ID, err)
+	}
+
+	if !mt.TaskID.IsZero() {
+		err = j.engine.Pass(ctx, domain.TaskPassReq{
+			EngineType: engineType,
+			TaskId:     mt.TaskID,
+			Operator:   "SYSTEM",
+			Comment:    "任务执行完成",
+		})
+		if err != nil {
+			return fmt.Errorf("通过自动化节点失败: task_id=%d: %w", task.ID, err)
+		}
+	}
+
+	if err = j.svc.MarkTaskAsAutoPassed(ctx, task.ID); err != nil {
+		return fmt.Errorf("标记自动化任务已推进失败: task_id=%d: %w", task.ID, err)
+	}
+	return nil
 }

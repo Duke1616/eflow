@@ -413,11 +413,8 @@ func (s *taskService) ReconcileTask(ctx context.Context, id int64) error {
 	}
 	ctx = tenantContext(ctx, task.TenantID)
 	attempt, err := s.attempts.FindByID(ctx, task.CurrentAttemptID)
-	if err != nil {
+	if err != nil || !attempt.HasExecution() {
 		return err
-	}
-	if attempt.ExecutionID <= 0 {
-		return nil
 	}
 	execution, err := s.etask.Find(ctx, attempt.ExecutionID)
 	if err != nil {
