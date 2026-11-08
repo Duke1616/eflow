@@ -125,43 +125,31 @@ func (s *taskService) CreateTask(ctx context.Context, ticketID int64,
 		return domain.Task{}, fmt.Errorf("未能获取到流程实例 [%s] 的有效快照版本", instanceID)
 	}
 
-	draft := domain.Task{
-		TenantID: ticket.TenantID, TicketID: ticketID,
-		InstanceID:     instanceID,
-		NodeID:         nodeID,
-		NodeName:       nodeName,
-		ProcessVersion: version,
-		Status:         domain.TaskStatusWaiting,
-		ExecutionKind:  domain.TaskExecutionProcess,
-	}
-	definition, err := s.prepareTaskDefinition(ctx, draft, ticket)
-	draft.CompensationNodeID = definition.compensationNodeID
+	task := domain.NewProcessTask(ticket.TenantID, ticketID, instanceID, nodeID, nodeName, version)
+	definition, err := s.prepareTaskDefinition(ctx, task, ticket)
+	task.Schedule(definition.scheduledAt, definition.compensationNodeID)
 	if err != nil {
-		draft.Status = domain.TaskStatusBlocked
-		draft.LastError = err.Error()
-		blocked, _, persistErr := s.tasks.FindOrCreate(ctx, draft)
+		task.Block(err.Error())
+		blocked, _, persistErr := s.tasks.FindOrCreate(ctx, task)
 		if persistErr != nil {
 			return domain.Task{}, errors.Join(err,
 				fmt.Errorf("保存自动化任务阻塞状态失败: %w", persistErr))
 		}
 		return blocked, err
 	}
-	draft.ScheduledAt = definition.scheduledAt
-	task, created, err := s.tasks.FindOrCreate(ctx, draft)
-	if err != nil {
-		return domain.Task{}, err
+
+	saved, created, err := s.tasks.FindOrCreate(ctx, task)
+	if err != nil || !created {
+		return saved, err
 	}
-	if !created {
-		return task, nil
-	}
-	if definition.scheduledAt <= time.Now().UnixMilli() && ticket.Status == domain.PROCESS {
-		if startErr := s.StartTask(ctx, task.ID); startErr != nil {
-			s.logger.Error("即时自动化任务启动失败", elog.Int64("taskID", task.ID), elog.FieldErr(startErr))
-			return task, startErr
+	if saved.ShouldStartImmediately(time.Now().UnixMilli(), ticket.Status) {
+		if startErr := s.StartTask(ctx, saved.ID); startErr != nil {
+			s.logger.Error("即时自动化任务启动失败", elog.Int64("taskID", saved.ID), elog.FieldErr(startErr))
+			return saved, startErr
 		}
-		return s.tasks.FindByID(ctx, task.ID)
+		return s.tasks.FindByID(ctx, saved.ID)
 	}
-	return task, nil
+	return saved, nil
 }
 
 func (s *taskService) StartTask(ctx context.Context, id int64) error {
@@ -171,21 +159,27 @@ func (s *taskService) StartTask(ctx context.Context, id int64) error {
 	}
 	ctx = tenantContext(ctx, task.TenantID)
 
-	if task.CurrentAttemptID > 0 &&
-		(task.Status == domain.TaskStatusSubmitting || task.Status == domain.TaskStatusRunning) {
-		attempt, findErr := s.attempts.FindByID(ctx, task.CurrentAttemptID)
-		if findErr != nil {
-			return findErr
-		}
-		if attempt.ExecutionID > 0 {
-			return nil
-		}
-		return s.submitAttempt(ctx, attempt)
+	// 1. 若当前尝试仍处于提交恢复窗口，幂等补发
+	if task.IsPendingSubmission() {
+		return s.resumeSubmission(ctx, task.CurrentAttemptID)
 	}
-	if task.Status != domain.TaskStatusWaiting {
+	// 2. 非等待中任务无需调度
+	if !task.IsWaiting() {
 		return nil
 	}
+	// 3. 准备并开启新执行尝试
+	return s.startNewAttempt(ctx, task)
+}
 
+func (s *taskService) resumeSubmission(ctx context.Context, attemptID int64) error {
+	attempt, err := s.attempts.FindByID(ctx, attemptID)
+	if err != nil || attempt.HasExecution() {
+		return err
+	}
+	return s.submitAttempt(ctx, attempt)
+}
+
+func (s *taskService) startNewAttempt(ctx context.Context, task domain.Task) error {
 	decision, input, err := s.prepareAttempt(ctx, task)
 	if err != nil {
 		return s.blockTask(ctx, task.ID, err)
@@ -235,23 +229,14 @@ func (s *taskService) TerminateTask(ctx context.Context, id int64, reason string
 	if err != nil {
 		return err
 	}
+	if err = task.ValidateTerminable(); err != nil {
+		return fmt.Errorf("%w: %w", ErrTaskNotTerminable, err)
+	}
+
 	ctx = tenantContext(ctx, task.TenantID)
-	if task.ExecutionKind == domain.TaskExecutionCompensation {
-		return fmt.Errorf("%w: 撤回补偿任务必须成功才能完成撤回", ErrTaskNotTerminable)
-	}
-	if task.Status == domain.TaskStatusSuccess {
-		return fmt.Errorf("%w: 任务已经成功", ErrTaskNotTerminable)
-	}
 	attempt, err := s.attempts.TerminateTask(ctx, id, reason)
-	if err != nil {
+	if err != nil || !attempt.NeedsRemoteTermination() {
 		return err
-	}
-	if attempt.ID <= 0 {
-		return nil
-	}
-	// 本地终止会先把 Attempt 原子落为 CANCELLED，仍需向 etask 补发物理取消信号。
-	if attempt.Status.IsTerminal() && attempt.Status != domain.AttemptStatusCancelled {
-		return nil
 	}
 	// etask 会持久化 request ID 取消意图；execution 尚未创建时无需重新 Dispatch。
 	return s.etask.TerminateExecution(ctx, attempt.ExecutionID, attempt.RequestID, reason)
@@ -263,34 +248,42 @@ func (s *taskService) retry(ctx context.Context, id int64, automatic bool) error
 		return err
 	}
 	ctx = tenantContext(ctx, task.TenantID)
+
+	// 1. 提交中任务使用 request ID 幂等恢复当前尝试，不创建新的 attempt
 	if task.Status == domain.TaskStatusSubmitting {
-		// 提交阶段使用 request ID 幂等恢复当前尝试，不创建新的 attempt。
 		return s.StartTask(ctx, id)
 	}
-	if !task.Status.CanRetry() {
-		return fmt.Errorf("只有失败、阻塞或已取消的自动化任务可以重试")
+	// 2. 领域规则校验（状态约束、自动重试限制）
+	if err = task.ValidateRetry(automatic); err != nil {
+		return err
 	}
+	// 3. 已取消任务重新执行前确认旧执行已彻底终结
 	if task.Status == domain.TaskStatusCancelled {
-		if automatic {
-			return fmt.Errorf("已取消的自动化任务只支持人工重试")
-		}
 		if err = s.confirmCancelledAttemptTerminated(ctx, task); err != nil {
 			return err
 		}
 	}
+	// 4. 自动重试防雪崩频次控制
 	if automatic {
-		attempts, listErr := s.attempts.ListByTaskID(ctx, id)
-		if listErr != nil {
-			return listErr
-		}
-		if len(attempts) >= maxTaskAttempts {
-			return s.tasks.Block(ctx, id, "超过最大执行尝试次数")
+		if overLimit, limitErr := s.isMaxAttemptsReached(ctx, id); limitErr != nil || overLimit {
+			return limitErr
 		}
 	}
 	if err = s.tasks.PrepareRetry(ctx, id); err != nil {
 		return err
 	}
 	return s.StartTask(ctx, id)
+}
+
+func (s *taskService) isMaxAttemptsReached(ctx context.Context, taskID int64) (bool, error) {
+	attempts, err := s.attempts.ListByTaskID(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if len(attempts) >= maxTaskAttempts {
+		return true, s.tasks.Block(ctx, taskID, domain.ErrTaskMaxAttemptsExceeded.Error())
+	}
+	return false, nil
 }
 
 func (s *taskService) confirmCancelledAttemptTerminated(ctx context.Context, task domain.Task) error {
@@ -301,7 +294,7 @@ func (s *taskService) confirmCancelledAttemptTerminated(ctx context.Context, tas
 	if err != nil {
 		return fmt.Errorf("查询已取消任务的执行尝试失败: %w", err)
 	}
-	if attempt.ExecutionID <= 0 && strings.TrimSpace(attempt.RequestID) == "" {
+	if !attempt.HasIdentifiableRequest() {
 		return nil
 	}
 	reason := strings.TrimSpace(attempt.Error)
