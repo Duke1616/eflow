@@ -17,7 +17,8 @@ func (p *ExecutionPlan) CalculateTraversedEdges(tasks []*model.Task, inst *model
 	tracer := newExecutionTracer(p)
 	tracer.markTerminalNodes(inst)
 	tracer.markTaskNodes(tasks)
-	tracer.resolveGatewayStatuses()
+	tracer.resolveThroughGateways()
+	tracer.resolveWaitingGateways()
 
 	return tracer.collectTraversedEdges()
 }
@@ -65,8 +66,8 @@ func (t *executionTracer) markTaskNodes(tasks []*model.Task) {
 	}
 }
 
-// resolveGatewayStatuses 递归推导网关穿透状态（上游存在已完成 且 下游存在已激活）
-func (t *executionTracer) resolveGatewayStatuses() {
+// resolveThroughGateways 识别已完整穿透流转的网关 (上游存在已完成分支 且 下游已激活推进)
+func (t *executionTracer) resolveThroughGateways() {
 	for _, n := range t.plan.Def.Nodes {
 		if !n.IsGateway() {
 			continue
@@ -75,6 +76,29 @@ func (t *executionTracer) resolveGatewayStatuses() {
 		downActivated := t.canReach(n.ID, true, func(id string) bool { return t.activated[id] }, make(map[string]bool))
 		if upCompleted && downActivated {
 			t.completed[n.ID] = true
+			t.activated[n.ID] = true
+		}
+	}
+}
+
+// resolveWaitingGateways 识别处于汇聚等待态的网关 (入边上游分支已到达，但下游因多分支未完全齐备仍在等待)
+// NOTE: 保证单分支审批通过时，流向汇聚网关的入边能够准确点亮至网关入口，而网关出边保持严格阻断
+func (t *executionTracer) resolveWaitingGateways() {
+	for _, n := range t.plan.Def.Nodes {
+		if !n.IsGateway() || t.activated[n.ID] {
+			continue
+		}
+
+		// 若存在已完成的前驱分支（排除排他网关的未选分支），说明流转确已流经到达该网关
+		hasCompletedInflow := lo.SomeBy(t.plan.InEdges[n.ID], func(edge model.EdgeSpec) bool {
+			if !t.completed[edge.Source] {
+				return false
+			}
+			srcNode, ok := t.plan.NodesMap[edge.Source]
+			return ok && (!srcNode.IsGateway() || srcNode.Type != model.NodeGatewayExclusive)
+		})
+
+		if hasCompletedInflow {
 			t.activated[n.ID] = true
 		}
 	}
