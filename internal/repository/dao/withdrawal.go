@@ -65,22 +65,20 @@ func (g *gormWithdrawalDAO) Prepare(ctx context.Context, instanceID domain.ID, r
 
 		// 只有成功动作所关联的补偿节点可以在撤回时继续运行。
 		var active int64
-		if ticket.Id > 0 {
-			if err := tx.Model(&Task{}).
-				Where(`ticket_id = ? AND status IN (?, ?) AND NOT EXISTS (
-					SELECT 1 FROM automation_tasks AS source
-					WHERE source.ticket_id = automation_tasks.ticket_id
-						AND source.status = ?
-						AND source.compensation_node_id = automation_tasks.node_id
-				)`,
-					ticket.Id, domain.TaskStatusSubmitting.ToUint8(),
-					domain.TaskStatusRunning.ToUint8(), domain.TaskStatusSuccess.ToUint8()).
-				Count(&active).Error; err != nil {
-				return err
-			}
-			if active > 0 {
-				return ErrAutomationRunning
-			}
+		if err := tx.Model(&Task{}).
+			Where(`ticket_id = ? AND status IN (?, ?) AND NOT EXISTS (
+				SELECT 1 FROM automation_tasks AS source
+				WHERE source.ticket_id = automation_tasks.ticket_id
+					AND source.status = ?
+					AND source.compensation_node_id = automation_tasks.node_id
+			)`,
+				ticket.Id, domain.TaskStatusSubmitting.ToUint8(),
+				domain.TaskStatusRunning.ToUint8(), domain.TaskStatusSuccess.ToUint8()).
+			Count(&active).Error; err != nil {
+			return err
+		}
+		if active > 0 {
+			return ErrAutomationRunning
 		}
 
 		if err := tx.Model(&Ticket{}).Where("id = ? AND status = ?", ticket.Id, domain.PROCESS.ToUint8()).
@@ -90,11 +88,8 @@ func (g *gormWithdrawalDAO) Prepare(ctx context.Context, instanceID domain.ID, r
 			return err
 		}
 		// 冻结阶段不允许任何待执行任务穿过撤回边界；补偿计划在引擎撤回后重新激活。
-		if ticket.Id > 0 {
-			return tx.Model(&Task{}).Where("ticket_id = ?", ticket.Id).
-				Update("execution_kind", domain.TaskExecutionProcess).Error
-		}
-		return nil
+		return tx.Model(&Task{}).Where("ticket_id = ?", ticket.Id).
+			Update("execution_kind", domain.TaskExecutionProcess).Error
 	})
 }
 
@@ -111,10 +106,6 @@ func (g *gormWithdrawalDAO) ActivateCompensations(ctx context.Context,
 		}
 		if domain.Status(ticket.Status) != domain.WITHDRAWING {
 			return fmt.Errorf("%w: status=%d", ErrTicketNotProcessing, ticket.Status)
-		}
-
-		if ticket.Id <= 0 {
-			return nil
 		}
 
 		pending := withdrawalPendingStatuses()
@@ -172,17 +163,15 @@ func (g *gormWithdrawalDAO) TryFinalize(ctx context.Context, instanceID domain.I
 			return fmt.Errorf("%w: status=%d", ErrTicketNotProcessing, ticket.Status)
 		}
 
-		if ticket.Id > 0 {
-			var unfinished int64
-			if err := tx.Model(&Task{}).
-				Where("ticket_id = ? AND execution_kind = ? AND status <> ?",
-					ticket.Id, domain.TaskExecutionCompensation, domain.TaskStatusSuccess.ToUint8()).
-				Count(&unfinished).Error; err != nil {
-				return err
-			}
-			if unfinished > 0 {
-				return nil
-			}
+		var unfinished int64
+		if err := tx.Model(&Task{}).
+			Where("ticket_id = ? AND execution_kind = ? AND status <> ?",
+				ticket.Id, domain.TaskExecutionCompensation, domain.TaskStatusSuccess.ToUint8()).
+			Count(&unfinished).Error; err != nil {
+			return err
+		}
+		if unfinished > 0 {
+			return nil
 		}
 		now := time.Now().UnixMilli()
 		result := tx.Model(&Ticket{}).
