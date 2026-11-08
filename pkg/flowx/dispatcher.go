@@ -45,7 +45,20 @@ func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession
 		}
 	}
 
-	// 2. 若汇聚网关尚未全部就绪，流程实例保存当前流转上下文，等待其他兄弟分支推进
+	// 2. 联动更新排他汇聚竞争胜出后被跳过的兄弟分支未决待办
+	if len(dec.SkippedTaskIDs) > 0 {
+		if err := session.UpdateTasksStatus(ctx, dec.SkippedTaskIDs, model.TaskSkipped); err != nil {
+			return fmt.Errorf("批量更新排他汇聚竞争跳过任务失败: %w", err)
+		}
+		for _, taskID := range dec.SkippedTaskIDs {
+			if t, ok := session.GetTask(taskID); ok {
+				node := session.Plan().NodesMap[t.NodeID]
+				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, &node, t, "system", "排他分支竞争胜出，系统自动跳过"))
+			}
+		}
+	}
+
+	// 3. 若汇聚网关尚未全部就绪，流程实例保存当前流转上下文，等待其他兄弟分支推进
 	if dec.IsBlocked {
 		return session.SaveInstance(ctx)
 	}
@@ -55,7 +68,7 @@ func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession
 		return ErrNoAvailablePath
 	}
 
-	// 3. 统一激活就绪节点（按节点类型多态分发：办结、自动执行或派发待办任务）
+	// 4. 统一激活就绪节点（按节点类型多态分发：办结、自动执行或派发待办任务）
 	if err := e.activateNodes(ctx, session, dec.ReadyNodes, batchCode, operator); err != nil {
 		return err
 	}
@@ -81,6 +94,19 @@ func (e *flowEngine) activateNodes(ctx context.Context, session *flowSession, no
 		// 若当前节点为 End 且当前流转中已无任何等待态节点，全单圆满办结
 		if node.Type == model.NodeEnd {
 			if !hasActiveNodes {
+				// 终态防卫清理：流程全单办结时，确保所有残留的在途 Pending 任务全部置为 TaskSkipped
+				pendingTasks := lo.Filter(session.AllTasks(), func(t *model.Task, _ int) bool {
+					return t.IsPending()
+				})
+				if len(pendingTasks) > 0 {
+					pendingIDs := lo.Map(pendingTasks, func(t *model.Task, _ int) string { return t.ID })
+					_ = session.UpdateTasksStatus(ctx, pendingIDs, model.TaskSkipped)
+					for _, pt := range pendingTasks {
+						nodeSpec := session.Plan().NodesMap[pt.NodeID]
+						e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, &nodeSpec, pt, "system", "流程办结，系统自动跳过"))
+					}
+				}
+
 				inst.Finish(node.ID)
 				e.eventBus.Publish(ctx, NewNodeEvent(EventProcessFinished, inst, &node, operator, ""))
 			}

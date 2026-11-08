@@ -138,32 +138,44 @@ func (c *InclusionGatewayConverter) Convert(_ *ConvertContext, node *flowdsl.Nod
 	}, nil
 }
 
-// SelectiveGatewayConverter 排他/条件并行网关转换器
-// NOTE: 对齐 EasyFlow 条件并行分流机制，将其映射为 FlowX 的 NodeGatewayInclusive（包容网关），
-// 使得满足条件的多路分支可并发激活，未命中条件的分支自动标记为 SkippedTargets 以便汇聚。
+// SelectiveGatewayConverter 排他/条件网关转换器
+// NOTE: 当作为多路汇聚点（入边 > 1）时，编译为 FlowX 的 NodeGatewayExclusive（排他汇聚网关），
+// 启用首到即放行的直通策略，实现分支间的“或（竞争汇聚）”；
+// 当作为分流点（出边 > 1 且入边 <= 1）时，映射为 NodeGatewayInclusive（包容网关），
+// 以便满足条件的多路分支可并发激活，未命中条件的分支自动标记为 SkippedTargets 以便汇聚。
 type SelectiveGatewayConverter struct{}
 
 func (c *SelectiveGatewayConverter) Type() flowdsl.NodeType { return flowdsl.NodeGatewayExclusive }
 
-func (c *SelectiveGatewayConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
+func (c *SelectiveGatewayConverter) Convert(ctx *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
+	gwType := model.NodeGatewayInclusive
+	if ctx != nil && ctx.Graph != nil && len(ctx.Graph.GetInEdges(node.ID)) > 1 {
+		gwType = model.NodeGatewayExclusive
+	}
+
 	return model.NodeSpec{
 		ID:   node.ID,
 		Name: node.DisplayName(),
-		Type: model.NodeGatewayInclusive,
+		Type: gwType,
 	}, nil
 }
 
-// ConditionGatewayConverter 兼容 LogicFlow 画布中的条件网关 (condition)，将其映射为包容条件网关
+// ConditionGatewayConverter 兼容 LogicFlow 画布中的条件网关 (condition)
 type ConditionGatewayConverter struct{}
 
 func (c *ConditionGatewayConverter) Type() flowdsl.NodeType { return flowdsl.NodeGatewayCondition }
 
-func (c *ConditionGatewayConverter) Convert(_ *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
+func (c *ConditionGatewayConverter) Convert(ctx *ConvertContext, node *flowdsl.Node) (model.NodeSpec, error) {
 	name := lo.Ternary(strings.TrimSpace(node.Name) != "", node.Name, "条件分支")
+	gwType := model.NodeGatewayInclusive
+	if ctx != nil && ctx.Graph != nil && len(ctx.Graph.GetInEdges(node.ID)) > 1 {
+		gwType = model.NodeGatewayExclusive
+	}
+
 	return model.NodeSpec{
 		ID:   node.ID,
 		Name: name,
-		Type: model.NodeGatewayInclusive,
+		Type: gwType,
 	}, nil
 }
 

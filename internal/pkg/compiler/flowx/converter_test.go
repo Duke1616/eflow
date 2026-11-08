@@ -749,4 +749,250 @@ func TestFlowxConverter_MultiBranchInclusiveExecution(t *testing.T) {
 	assert.True(t, inst.IsFinished(), "流程应当最终顺利办结")
 }
 
+// TestFlowxConverter_CompetitiveJoinSelectiveGateway 验证排他汇聚网关 (selective) 首到即走与兄弟分支待办自动取消
+func TestFlowxConverter_CompetitiveJoinSelectiveGateway(t *testing.T) {
+	testCases := []struct {
+		name          string
+		firstPassUser string // 率先通过的用户
+		skippedUser   string // 期望被系统联动跳过的用户
+	}{
+		{
+			name:          "技术人员率先审批通过，流程直接办结且人事待办自动跳过",
+			firstPassUser: "tech_user",
+			skippedUser:   "hr_user",
+		},
+		{
+			name:          "人事人员率先审批通过，流程直接办结且技术待办自动跳过",
+			firstPassUser: "hr_user",
+			skippedUser:   "tech_user",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			flow := map[string]any{
+				"nodes": []any{
+					map[string]any{"id": "start_1", "type": "start", "properties": map[string]any{"name": "开始"}},
+					map[string]any{"id": "gw_fork", "type": "inclusion", "properties": map[string]any{"name": "包容分流"}},
+					map[string]any{
+						"id":   "user_tech",
+						"type": "user",
+						"properties": map[string]any{
+							"name": "技术",
+							"assignees": []map[string]any{
+								{"rule": "appoint", "values": []string{"tech_user"}},
+							},
+						},
+					},
+					map[string]any{
+						"id":   "user_hr",
+						"type": "user",
+						"properties": map[string]any{
+							"name": "人事",
+							"assignees": []map[string]any{
+								{"rule": "appoint", "values": []string{"hr_user"}},
+							},
+						},
+					},
+					map[string]any{"id": "gw_join", "type": "selective", "properties": map[string]any{"name": "分支合并"}},
+					map[string]any{"id": "end_1", "type": "end", "properties": map[string]any{"name": "办结"}},
+				},
+				"edges": []any{
+					map[string]any{"id": "e1", "sourceNodeId": "start_1", "targetNodeId": "gw_fork"},
+					map[string]any{"id": "e2", "sourceNodeId": "gw_fork", "targetNodeId": "user_tech"},
+					map[string]any{"id": "e3", "sourceNodeId": "gw_fork", "targetNodeId": "user_hr"},
+					map[string]any{"id": "e4", "sourceNodeId": "user_tech", "targetNodeId": "gw_join"},
+					map[string]any{"id": "e5", "sourceNodeId": "user_hr", "targetNodeId": "gw_join"},
+					map[string]any{"id": "e6", "sourceNodeId": "gw_join", "targetNodeId": "end_1"},
+				},
+			}
+
+			graph, err := flowdsl.Parse(flow)
+			require.NoError(t, err)
+
+			converter := NewConverter()
+			def, err := converter.Convert("competitive_join_proc", "竞争汇聚测试", graph)
+			require.NoError(t, err)
+
+			// 1. 断言作为多路汇聚点的 selective 节点被正确编译为 NodeGatewayExclusive (排他直通网关)
+			joinNode, found := lo.Find(def.Nodes, func(n model.NodeSpec) bool { return n.ID == "gw_join" })
+			require.True(t, found)
+			assert.Equal(t, model.NodeGatewayExclusive, joinNode.Type, "作为汇聚点的 selective 网关必须编译为排他汇聚")
+
+			// 2. 部署并启动 FlowX 流程实例
+			engine := flowx.NewEngine(memory.NewStorage())
+			_, err = engine.Deploy(context.Background(), def)
+			require.NoError(t, err)
+
+			instID, err := engine.Start(context.Background(), flowx.StartReq{
+				Def:     def,
+				Starter: "starter_user",
+			})
+			require.NoError(t, err)
+
+			tasks, err := engine.ListTasksByInstance(context.Background(), instID)
+			require.NoError(t, err)
+			assert.Len(t, tasks, 2, "分流网关应同时激活技术和人事两个待办任务")
+
+			firstTask, foundFirst := lo.Find(tasks, func(t *model.Task) bool { return t.Assignee == tc.firstPassUser })
+			require.True(t, foundFirst)
+			assert.True(t, firstTask.IsPending())
+
+			// 3. 率先审批通过
+			err = engine.Pass(context.Background(), flowx.PassReq{TaskID: firstTask.ID, Operator: tc.firstPassUser})
+			require.NoError(t, err)
+
+			// 4. 验证流程实例直接圆满办结
+			inst, err := engine.GetInstance(context.Background(), instID)
+			require.NoError(t, err)
+			assert.True(t, inst.IsFinished(), "排他汇聚首到即走，流程应当直接办结")
+
+			// 5. 验证竞争失败的兄弟分支任务被自动标记为 TaskSkipped
+			allTasks, err := engine.ListTasksByInstance(context.Background(), instID)
+			require.NoError(t, err)
+
+			skippedTask, foundSkipped := lo.Find(allTasks, func(t *model.Task) bool { return t.Assignee == tc.skippedUser })
+			require.True(t, foundSkipped)
+			assert.Equal(t, model.TaskSkipped, skippedTask.Status, "兄弟未决分支任务应当被联动跳过")
+
+			// 6. 验证已跳过任务禁止重复审批
+			err = engine.Pass(context.Background(), flowx.PassReq{TaskID: skippedTask.ID, Operator: tc.skippedUser})
+			assert.ErrorIs(t, err, flowx.ErrTaskNotPending, "已被跳过的任务不允许再次审批")
+		})
+	}
+}
+
+// TestFlowxConverter_BossOrProductsCosigned 验证进阶场景：老板 1 人通过 OR 两个产品会签全部通过
+func TestFlowxConverter_BossOrProductsCosigned(t *testing.T) {
+	// 拓扑图：开始 -> 包容分流 -> [老板审批(单人)] & [产品审批(产品A+B会签)] -> 排他汇聚 -> 结束
+	flow := map[string]any{
+		"nodes": []any{
+			map[string]any{"id": "start_1", "type": "start", "properties": map[string]any{"name": "开始"}},
+			map[string]any{"id": "gw_fork", "type": "inclusion", "properties": map[string]any{"name": "分流"}},
+			map[string]any{
+				"id":   "user_boss",
+				"type": "user",
+				"properties": map[string]any{
+					"name": "老板审批",
+					"assignees": []map[string]any{
+						{"rule": "appoint", "values": []string{"boss"}},
+					},
+				},
+			},
+			map[string]any{
+				"id":   "user_pm",
+				"type": "user",
+				"properties": map[string]any{
+					"name": "产品会签",
+					"assignees": []map[string]any{
+						{"rule": "appoint", "values": []string{"pm_a", "pm_b"}},
+					},
+					"is_cosigned": true, // 会签：产品 A 和 B 必须全部通过才算产品分支完成
+				},
+			},
+			map[string]any{"id": "gw_join", "type": "selective", "properties": map[string]any{"name": "合并网关"}},
+			map[string]any{"id": "end_1", "type": "end", "properties": map[string]any{"name": "办结"}},
+		},
+		"edges": []any{
+			map[string]any{"id": "e1", "sourceNodeId": "start_1", "targetNodeId": "gw_fork"},
+			map[string]any{"id": "e2", "sourceNodeId": "gw_fork", "targetNodeId": "user_boss"},
+			map[string]any{"id": "e3", "sourceNodeId": "gw_fork", "targetNodeId": "user_pm"},
+			map[string]any{"id": "e4", "sourceNodeId": "user_boss", "targetNodeId": "gw_join"},
+			map[string]any{"id": "e5", "sourceNodeId": "user_pm", "targetNodeId": "gw_join"},
+			map[string]any{"id": "e6", "sourceNodeId": "gw_join", "targetNodeId": "end_1"},
+		},
+	}
+
+	graph, err := flowdsl.Parse(flow)
+	require.NoError(t, err)
+
+	converter := NewConverter()
+	def, err := converter.Convert("boss_or_pm_proc", "老板与产品竞争测试", graph)
+	require.NoError(t, err)
+
+	t.Run("场景 1：老板直接通过，两个产品的会签待办全部自动跳过，工单办结", func(t *testing.T) {
+		engine := flowx.NewEngine(memory.NewStorage())
+		_, err := engine.Deploy(context.Background(), def)
+		require.NoError(t, err)
+
+		instID, err := engine.Start(context.Background(), flowx.StartReq{Def: def, Starter: "alice"})
+		require.NoError(t, err)
+
+		tasks, _ := engine.ListTasksByInstance(context.Background(), instID)
+		bossTask, _ := lo.Find(tasks, func(t *model.Task) bool { return t.Assignee == "boss" })
+
+		// 老板审批
+		err = engine.Pass(context.Background(), flowx.PassReq{TaskID: bossTask.ID, Operator: "boss"})
+		require.NoError(t, err)
+
+		inst, _ := engine.GetInstance(context.Background(), instID)
+		assert.True(t, inst.IsFinished(), "老板通过，流程立即办结")
+
+		allTasks, _ := engine.ListTasksByInstance(context.Background(), instID)
+		pmTasks := lo.Filter(allTasks, func(t *model.Task, _ int) bool { return t.NodeID == "user_pm" })
+		assert.Len(t, pmTasks, 2)
+		for _, pt := range pmTasks {
+			assert.Equal(t, model.TaskSkipped, pt.Status, "两个产品的待办必须全被跳过")
+		}
+	})
+
+	t.Run("场景 2：产品 A 先通过但产品 B 未通过时保持等待；老板随后通过，产品 B 自动跳过并办结", func(t *testing.T) {
+		engine := flowx.NewEngine(memory.NewStorage())
+		_, err := engine.Deploy(context.Background(), def)
+		require.NoError(t, err)
+
+		instID, err := engine.Start(context.Background(), flowx.StartReq{Def: def, Starter: "alice"})
+		require.NoError(t, err)
+
+		tasks, _ := engine.ListTasksByInstance(context.Background(), instID)
+		pmATask, _ := lo.Find(tasks, func(t *model.Task) bool { return t.Assignee == "pm_a" })
+		bossTask, _ := lo.Find(tasks, func(t *model.Task) bool { return t.Assignee == "boss" })
+
+		// 产品 A 审批通过
+		err = engine.Pass(context.Background(), flowx.PassReq{TaskID: pmATask.ID, Operator: "pm_a"})
+		require.NoError(t, err)
+
+		// 此时产品会签尚未全部完成，流程保持在运行中
+		inst, _ := engine.GetInstance(context.Background(), instID)
+		assert.Equal(t, model.InstanceRunning, inst.Status)
+
+		// 老板随后通过
+		err = engine.Pass(context.Background(), flowx.PassReq{TaskID: bossTask.ID, Operator: "boss"})
+		require.NoError(t, err)
+
+		inst, _ = engine.GetInstance(context.Background(), instID)
+		assert.True(t, inst.IsFinished(), "老板通过后，流程直接办结")
+
+		allTasks, _ := engine.ListTasksByInstance(context.Background(), instID)
+		pmBTask, _ := lo.Find(allTasks, func(t *model.Task) bool { return t.Assignee == "pm_b" })
+		assert.Equal(t, model.TaskSkipped, pmBTask.Status, "产品 B 待办必须被自动跳过")
+	})
+
+	t.Run("场景 3：老板没审，产品 A 和产品 B 均通过，达成条件顺利办结，老板待办自动跳过", func(t *testing.T) {
+		engine := flowx.NewEngine(memory.NewStorage())
+		_, err := engine.Deploy(context.Background(), def)
+		require.NoError(t, err)
+
+		instID, err := engine.Start(context.Background(), flowx.StartReq{Def: def, Starter: "alice"})
+		require.NoError(t, err)
+
+		tasks, _ := engine.ListTasksByInstance(context.Background(), instID)
+		pmATask, _ := lo.Find(tasks, func(t *model.Task) bool { return t.Assignee == "pm_a" })
+		pmBTask, _ := lo.Find(tasks, func(t *model.Task) bool { return t.Assignee == "pm_b" })
+
+		// 产品 A 和 B 均通过
+		_ = engine.Pass(context.Background(), flowx.PassReq{TaskID: pmATask.ID, Operator: "pm_a"})
+		err = engine.Pass(context.Background(), flowx.PassReq{TaskID: pmBTask.ID, Operator: "pm_b"})
+		require.NoError(t, err)
+
+		inst, _ := engine.GetInstance(context.Background(), instID)
+		assert.True(t, inst.IsFinished(), "产品会签全过，流程办结")
+
+		allTasks, _ := engine.ListTasksByInstance(context.Background(), instID)
+		bossTask, _ := lo.Find(allTasks, func(t *model.Task) bool { return t.Assignee == "boss" })
+		assert.Equal(t, model.TaskSkipped, bossTask.Status, "老板的待办必须被自动跳过")
+	})
+}
+
+
 

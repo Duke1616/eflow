@@ -16,9 +16,10 @@ type TransitionResult struct {
 
 // StepDecision 步骤转移综合决策（包含汇聚屏障裁决与跨网关穿透）
 type StepDecision struct {
-	ReadyNodes   []model.NodeSpec // 本轮最终就绪、需派发生成待办的目标节点列表
-	SkippedNodes []model.NodeSpec // 条件未满足、需标记为 TaskSkipped 的节点列表
-	IsBlocked    bool             // 是否存在汇聚网关屏障未全部就绪而需保持等待
+	ReadyNodes     []model.NodeSpec // 本轮最终就绪、需派发生成待办的目标节点列表
+	SkippedNodes   []model.NodeSpec // 条件未满足、需标记为 TaskSkipped 的节点列表
+	SkippedTaskIDs []string         // 因排他汇聚竞争放行需联动跳过/作废的未决前置任务 ID 列表
+	IsBlocked      bool             // 是否存在汇聚网关屏障未全部就绪而需保持等待
 }
 
 // ResolveNextStep 综合求解下一步流转决策：网关分流 + 自动Skip识别 + 汇聚屏障过滤 + 跨汇聚网关下游递归穿透 (支持多层级联网关)
@@ -29,8 +30,9 @@ func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables model.Va
 	}
 
 	decision := StepDecision{
-		ReadyNodes:   make([]model.NodeSpec, 0, len(transRes.Targets)),
-		SkippedNodes: transRes.SkippedTargets,
+		ReadyNodes:     make([]model.NodeSpec, 0, len(transRes.Targets)),
+		SkippedNodes:   transRes.SkippedTargets,
+		SkippedTaskIDs: make([]string, 0),
 	}
 
 	if len(transRes.Targets) == 0 {
@@ -60,13 +62,34 @@ func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables model.Va
 			continue // 该网关前置尚未全部就绪，保持阻断等待
 		}
 
-		// 3. 防环检查，避免网关循环互连导致死循环
+		// 3. 排他汇聚网关 (NodeGatewayExclusive 且入边 > 1)：首到即放行，自动收集其他竞争失败分支上的未决待办任务
+		if nextNode.Type == model.NodeGatewayExclusive && len(p.InEdges[nextNode.ID]) > 1 {
+			branchStates := p.extractBranchStates(nextNode, allTasks)
+			hasPassedBranch := lo.SomeBy(branchStates, func(b BranchState) bool { return b.IsPassed })
+			if hasPassedBranch {
+				unpassedNodeIDs := lo.FilterMap(branchStates, func(b BranchState, _ int) (string, bool) {
+					return b.NodeID, !b.IsPassed && !b.IsSkipped && b.HasTask
+				})
+				if len(unpassedNodeIDs) > 0 {
+					unpassedSet := lo.SliceToMap(unpassedNodeIDs, func(id string) (string, struct{}) {
+						return id, struct{}{}
+					})
+					for _, t := range allTasks {
+						if _, ok := unpassedSet[t.NodeID]; ok && t.IsPending() {
+							decision.SkippedTaskIDs = append(decision.SkippedTaskIDs, t.ID)
+						}
+					}
+				}
+			}
+		}
+
+		// 4. 防环检查，避免网关循环互连导致死循环
 		if _, visited := visitedGateways[nextNode.ID]; visited {
 			continue
 		}
 		visitedGateways[nextNode.ID] = struct{}{}
 
-		// 4. 网关满足流转条件，递归穿透获取下游目标
+		// 5. 网关满足流转条件，递归穿透获取下游目标
 		subRes, err := p.CalculateTransition(nextNode.ID, variables)
 		if err != nil {
 			return StepDecision{}, err
@@ -75,6 +98,7 @@ func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables model.Va
 		queue = append(queue, subRes.Targets...)
 	}
 
+	decision.SkippedTaskIDs = lo.Uniq(decision.SkippedTaskIDs)
 	return decision, nil
 }
 
