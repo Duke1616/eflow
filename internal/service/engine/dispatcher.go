@@ -169,7 +169,18 @@ func (d *engineDispatcher) GetTimeline(ctx context.Context, engineType domain.En
 	if err != nil {
 		return nil, err
 	}
-	return eng.GetTimeline(ctx, engineType, instanceID)
+
+	timeline, err := eng.GetTimeline(ctx, engineType, instanceID)
+	if err != nil {
+		// 跨引擎自适应容错：历史工单在跨引擎切换后，尝试使用备用引擎寻址
+		fallbackType := lo.Ternary(engineType.String() == domain.EngineTypeFlowx.String(), domain.EngineTypeEasyFlow, domain.EngineTypeFlowx)
+		if fallbackEng, fErr := d.getEngine(fallbackType); fErr == nil {
+			if fallbackTimeline, fbErr := fallbackEng.GetTimeline(ctx, fallbackType, instanceID); fbErr == nil {
+				return fallbackTimeline, nil
+			}
+		}
+	}
+	return timeline, err
 }
 
 func (d *engineDispatcher) GetInstanceExecutionView(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, status uint8) (domain.InstanceExecutionView, error) {
@@ -181,7 +192,18 @@ func (d *engineDispatcher) GetInstanceExecutionView(ctx context.Context, engineT
 	if err != nil {
 		return domain.InstanceExecutionView{}, err
 	}
-	return eng.GetInstanceExecutionView(ctx, engineType, instanceID, status)
+
+	view, err := eng.GetInstanceExecutionView(ctx, engineType, instanceID, status)
+	if err != nil {
+		// 跨引擎自适应容错：当指定引擎未找到实例时（如工作流后来切换了引擎），自动尝试备选引擎
+		fallbackType := lo.Ternary(engineType.String() == domain.EngineTypeFlowx.String(), domain.EngineTypeEasyFlow, domain.EngineTypeFlowx)
+		if fallbackEng, fErr := d.getEngine(fallbackType); fErr == nil {
+			if fallbackView, fbErr := fallbackEng.GetInstanceExecutionView(ctx, fallbackType, instanceID, status); fbErr == nil {
+				return fallbackView, nil
+			}
+		}
+	}
+	return view, err
 }
 
 func (d *engineDispatcher) GetAutomationTask(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {

@@ -42,8 +42,8 @@ type ISnapshotRepository interface {
 	FindSnapshot(ctx context.Context, processID, processVersion int) (domain.Workflow, error)
 	// FindSnapshotByWorkflowVersion 根据工作流 ID、引擎类型及版本精确加载物理快照
 	FindSnapshotByWorkflowVersion(ctx context.Context, workflowID int64, engineType domain.EngineType, version int) (domain.Workflow, error)
-	// GetMaxSnapshotVersion 获取指定工作流当前最大的快照发布版本号
-	GetMaxSnapshotVersion(ctx context.Context, workflowID int64) (int, error)
+	// GetMaxSnapshotVersion 获取指定工作流在特定引擎类型下当前最大的快照发布版本号
+	GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...domain.EngineType) (int, error)
 }
 
 // IWorkflowRepository 工作流仓储层大组合接口 (采用接口隔离原则拆分，再经由嵌入优雅组合，兼具内聚与拓展特性)
@@ -173,7 +173,10 @@ func (repo *workflowRepository) FindSnapshotByWorkflowVersion(ctx context.Contex
 	}, nil
 }
 
-func (repo *workflowRepository) GetMaxSnapshotVersion(ctx context.Context, workflowID int64) (int, error) {
+func (repo *workflowRepository) GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...domain.EngineType) (int, error) {
+	if len(engineType) > 0 && engineType[0] != "" {
+		return repo.dao.GetMaxSnapshotVersion(ctx, workflowID, engineType[0].String())
+	}
 	return repo.dao.GetMaxSnapshotVersion(ctx, workflowID)
 }
 

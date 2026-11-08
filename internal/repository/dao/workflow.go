@@ -83,8 +83,8 @@ type ISnapshotDAO interface {
 	FindSnapshotByProcess(ctx context.Context, processID, version int) (Snapshot, error)
 	// FindSnapshotByWorkflowVersion 精确依据工作流 ID、引擎类型与版本号定位快照，避免跨引擎版本冲突
 	FindSnapshotByWorkflowVersion(ctx context.Context, workflowID int64, engineType string, version int) (Snapshot, error)
-	// GetMaxSnapshotVersion 获取指定工作流当前已发布的最大快照版本号
-	GetMaxSnapshotVersion(ctx context.Context, workflowID int64) (int, error)
+	// GetMaxSnapshotVersion 获取指定工作流在特定引擎类型下当前已发布的最大快照版本号（engineType 为空则不限制引擎）
+	GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...string) (int, error)
 }
 
 // IWorkflowDAO 工作流数据层大组合接口 (遵循 ISP 接口隔离原则拆分再优雅嵌入组合)
@@ -234,11 +234,12 @@ func (g *gormWorkflowDAO) FindSnapshotByWorkflowVersion(ctx context.Context, wor
 	return s, err
 }
 
-func (g *gormWorkflowDAO) GetMaxSnapshotVersion(ctx context.Context, workflowID int64) (int, error) {
+func (g *gormWorkflowDAO) GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...string) (int, error) {
 	var maxVer int
-	err := g.db.WithContext(ctx).Model(&Snapshot{}).
-		Where("workflow_id = ?", workflowID).
-		Select("COALESCE(MAX(process_version), 0)").
-		Scan(&maxVer).Error
+	query := g.db.WithContext(ctx).Model(&Snapshot{}).Where("workflow_id = ?", workflowID)
+	if len(engineType) > 0 && engineType[0] != "" {
+		query = query.Where("engine_type = ?", engineType[0])
+	}
+	err := query.Select("COALESCE(MAX(process_version), 0)").Scan(&maxVer).Error
 	return maxVer, err
 }

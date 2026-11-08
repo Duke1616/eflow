@@ -32,14 +32,12 @@ type IWorkflowCoreService interface {
 	FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Workflow, int64, error)
 	// GetAutomationNodes 获取工作流画布中的自动化节点及默认执行单元。
 	GetAutomationNodes(ctx context.Context, workflowId int64) ([]domain.AutomationNodeRef, error)
-	// GetWorkflowSnapshot 依据引擎流程 ID 和发布版本号获取精确锁定的快照图结构详情
-	GetWorkflowSnapshot(ctx context.Context, processID, version int) (domain.Workflow, error)
 	// FindInstanceFlow 获取流程实例运行时所绑定版本的流程定义，提供特定历史快照回溯与降级解析
 	FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error)
 	// GetHighlightedGraph 根据审批轨迹流转情况计算并点亮画布图
 	GetHighlightedGraph(ctx context.Context, workflowId int64, instanceID domain.ID, status domain.Status) (domain.Workflow, error)
-	// GetMaxSnapshotVersion 获取指定工作流当前已发布的最大快照版本号（未发布过时返回 0）
-	GetMaxSnapshotVersion(ctx context.Context, workflowID int64) (int, error)
+	// GetMaxSnapshotVersion 获取指定工作流当前已发布的最大快照版本号（未发布过时返回 0，支持按引擎类型精确查询）
+	GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...domain.EngineType) (int, error)
 }
 
 // Service 工作流大业务服务接口
@@ -130,17 +128,7 @@ func (s *workflowService) Deploy(ctx context.Context, wf domain.Workflow) error 
 		return fmt.Errorf("流程引擎部署失败: %w", err)
 	}
 
-	// 3. 计算平台全局统一自增版本号（继承历史最大快照版本，防止跨引擎切换导致版本重置为 1）
-	maxVersion, err := s.repo.GetMaxSnapshotVersion(ctx, wf.Id)
-	if err != nil {
-		return fmt.Errorf("计算工作流版本失败: %w", err)
-	}
-	newVersion := maxVersion + 1
-	if deployInfo.Version > newVersion {
-		newVersion = deployInfo.Version
-	}
-
-	// 4. 关联回写 process_id（若底层引擎生成了自增ID则更新，flowx 引擎下直接以 wf.Id 建立映射）
+	// 3. 关联回写 process_id（若底层引擎生成了自增ID则更新，flowx 引擎下直接以 wf.Id 建立映射）
 	processId := deployInfo.ProcessID
 	if processId == 0 {
 		processId = int(wf.Id)
@@ -151,8 +139,8 @@ func (s *workflowService) Deploy(ctx context.Context, wf domain.Workflow) error 
 		}
 	}
 
-	// 5. 统一将当前发布的最新图数据在物理快照表中锁死存档
-	return s.repo.CreateSnapshot(ctx, wf, processId, newVersion)
+	// 4. 彻底以底层引擎返回的权威版本为准，在物理快照表中锁死存档（单一真实源 SSOT 原则）
+	return s.repo.CreateSnapshot(ctx, wf, processId, deployInfo.Version)
 }
 
 func (s *workflowService) FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Workflow, int64, error) {
@@ -206,10 +194,6 @@ func (s *workflowService) GetAutomationNodes(ctx context.Context, workflowId int
 	}
 
 	return refs, nil
-}
-
-func (s *workflowService) GetWorkflowSnapshot(ctx context.Context, processID, version int) (domain.Workflow, error) {
-	return s.repo.FindSnapshot(ctx, processID, version)
 }
 
 func (s *workflowService) FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error) {
@@ -267,6 +251,6 @@ func (s *workflowService) GetHighlightedGraph(ctx context.Context, workflowId in
 	return flow, nil
 }
 
-func (s *workflowService) GetMaxSnapshotVersion(ctx context.Context, workflowID int64) (int, error) {
-	return s.repo.GetMaxSnapshotVersion(ctx, workflowID)
+func (s *workflowService) GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...domain.EngineType) (int, error) {
+	return s.repo.GetMaxSnapshotVersion(ctx, workflowID, engineType...)
 }

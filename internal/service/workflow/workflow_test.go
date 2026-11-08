@@ -138,7 +138,6 @@ func TestService_Deploy(t *testing.T) {
 			},
 			mockRepo: func(ctrl *gomock.Controller) repository.IWorkflowRepository {
 				repo := repomocks.NewMockIWorkflowRepository(ctrl)
-				repo.EXPECT().GetMaxSnapshotVersion(gomock.Any(), int64(1001)).Return(0, nil)
 				repo.EXPECT().UpdateProcessId(gomock.Any(), int64(1001), 1001).Return(nil)
 				repo.EXPECT().CreateSnapshot(gomock.Any(), gomock.Any(), 1001, 1).Return(nil)
 				return repo
@@ -158,7 +157,6 @@ func TestService_Deploy(t *testing.T) {
 			},
 			mockRepo: func(ctrl *gomock.Controller) repository.IWorkflowRepository {
 				repo := repomocks.NewMockIWorkflowRepository(ctrl)
-				repo.EXPECT().GetMaxSnapshotVersion(gomock.Any(), int64(2002)).Return(0, nil)
 				repo.EXPECT().UpdateProcessId(gomock.Any(), int64(2002), 999).Return(nil)
 				repo.EXPECT().CreateSnapshot(gomock.Any(), gomock.Any(), 999, 1).Return(nil)
 				return repo
@@ -181,7 +179,6 @@ func TestService_Deploy(t *testing.T) {
 			},
 			mockRepo: func(ctrl *gomock.Controller) repository.IWorkflowRepository {
 				repo := repomocks.NewMockIWorkflowRepository(ctrl)
-				repo.EXPECT().GetMaxSnapshotVersion(gomock.Any(), int64(3003)).Return(1, nil)
 				repo.EXPECT().UpdateProcessId(gomock.Any(), int64(3003), 888).Return(nil)
 				repo.EXPECT().CreateSnapshot(gomock.Any(), gomock.Any(), 888, 2).Return(nil)
 				return repo

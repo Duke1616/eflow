@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -426,4 +427,35 @@ func TestEngineDispatcher_ListTodoTasks_GlobalSortAndPage(t *testing.T) {
 	require.Len(t, paged2, 1)
 	// 验证第二页命中最早的任务(A)
 	assert.Equal(t, domain.NewID("task_flowx_1"), paged2[0].TaskID)
+}
+
+func TestEngineDispatcher_GetInstanceExecutionView_CrossEngineFallback(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	flowxMock := enginemocks.NewMockIEngine(ctrl)
+	easyMock := enginemocks.NewMockIEngine(ctrl)
+
+	flowxMock.EXPECT().EngineType().Return(domain.EngineTypeFlowx).AnyTimes()
+	easyMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
+
+	dispatcher := engine.NewEngineDispatcher(flowxMock, easyMock)
+
+	instID := domain.NewID("flowx_history_inst_123")
+
+	// 模拟指定 EasyFlow 查询历史 FlowX 实例时 EasyFlow 报未找到
+	easyMock.EXPECT().GetInstanceExecutionView(gomock.Any(), domain.EngineTypeEasyFlow, instID, uint8(1)).
+		Return(domain.InstanceExecutionView{}, errors.New("easyflow 获取实例详情失败: record not found"))
+
+	// 期望调度器自动降级尝试 FlowX 并成功返回
+	flowxMock.EXPECT().GetInstanceExecutionView(gomock.Any(), domain.EngineTypeFlowx, instID, uint8(1)).
+		Return(domain.InstanceExecutionView{
+			ProcessKey: "wf_key_45",
+			ProcessID:  45,
+		}, nil)
+
+	view, err := dispatcher.GetInstanceExecutionView(context.Background(), domain.EngineTypeEasyFlow, instID, 1)
+	require.NoError(t, err)
+	assert.Equal(t, "wf_key_45", view.ProcessKey)
+	assert.Equal(t, 45, view.ProcessID)
 }

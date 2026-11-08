@@ -49,7 +49,7 @@ func (s *stubWorkflowService) Find(_ context.Context, _ int64) (domain.Workflow,
 	return s.workflow, nil
 }
 
-func (s *stubWorkflowService) GetMaxSnapshotVersion(_ context.Context, _ int64) (int, error) {
+func (s *stubWorkflowService) GetMaxSnapshotVersion(_ context.Context, _ int64, _ ...domain.EngineType) (int, error) {
 	if s.versionErr != nil {
 		return 0, s.versionErr
 	}
