@@ -3,10 +3,12 @@ package task
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
+	"github.com/samber/lo"
 )
 
 const taskPreparationOperation = "准备"
@@ -118,38 +120,41 @@ func (s *taskService) resolveRunnerByDispatch(ctx context.Context, templateID in
 	if err != nil {
 		return etaskclient.Runner{}, 0, fmt.Errorf("查询执行单元路由规则失败: %w", err)
 	}
-	for _, dispatch := range dispatches {
-		actual, exists := input[dispatch.Field]
-		if !exists || dispatch.Field == "" || fmt.Sprint(actual) != dispatch.Value {
-			continue
+	matched, found := lo.Find(dispatches, func(d domain.Dispatch) bool {
+		if d.Field == "" {
+			return false
 		}
-		if dispatch.RunnerId <= 0 {
-			return etaskclient.Runner{}, 0, fmt.Errorf("路由规则 %d 缺少有效执行单元", dispatch.Id)
-		}
-		runner, findErr := s.etask.FindByID(ctx, dispatch.RunnerId)
-		if findErr != nil {
-			return etaskclient.Runner{}, 0, fmt.Errorf("查询路由规则执行单元失败: %w", findErr)
-		}
-		if runner.CodebookID != codebookID {
-			return etaskclient.Runner{}, 0, fmt.Errorf(
-				"路由规则执行单元 %d 未绑定自动化节点脚本 %d", runner.ID, codebookID)
-		}
-		return runner, dispatch.Id, nil
+		actual, exists := input[d.Field]
+		return exists && fmt.Sprint(actual) == d.Value
+	})
+	if !found {
+		return etaskclient.Runner{}, 0, nil
 	}
-	return etaskclient.Runner{}, 0, nil
+	if matched.RunnerId <= 0 {
+		return etaskclient.Runner{}, 0, fmt.Errorf("路由规则 %d 缺少有效执行单元", matched.Id)
+	}
+	runner, findErr := s.etask.FindByID(ctx, matched.RunnerId)
+	if findErr != nil {
+		return etaskclient.Runner{}, 0, fmt.Errorf("查询路由规则执行单元失败: %w", findErr)
+	}
+	if runner.CodebookID != codebookID {
+		return etaskclient.Runner{}, 0, fmt.Errorf(
+			"路由规则执行单元 %d 未绑定自动化节点脚本 %d", runner.ID, codebookID)
+	}
+	return runner, matched.Id, nil
 }
 
 func (s *taskService) assembleRuntimeArgs(ctx context.Context, ticket domain.Ticket) (domain.TaskArgs, error) {
-	input := make(domain.TaskArgs, len(ticket.Data))
-	for key, value := range ticket.Data {
-		input[key] = value
+	input := maps.Clone(ticket.Data)
+	if input == nil {
+		input = make(domain.TaskArgs)
 	}
 	forms, err := s.tickets.ListTaskFormsByTicketID(ctx, ticket.Id)
 	if err != nil {
 		return nil, err
 	}
-	for _, value := range forms {
-		input[value.Key] = value.Value
+	for _, form := range forms {
+		input[form.Key] = form.Value
 	}
 	return input, nil
 }

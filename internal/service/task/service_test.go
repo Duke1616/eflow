@@ -30,6 +30,22 @@ func TestCreateTaskDoesNotResetExistingTask(t *testing.T) {
 	require.Equal(t, existing, actual)
 }
 
+func TestFindTaskEnrichesOutput(t *testing.T) {
+	task := domain.Task{ID: 1, TicketID: 10, NodeID: "node_1", CurrentAttemptID: 100}
+	attempt := domain.TaskAttempt{ID: 100, Output: `{"code":0,"msg":"success"}`}
+	tasks := &taskRepositoryStub{findOrCreateTask: task}
+	attempts := &attemptRepositoryStub{attempt: attempt}
+	svc := &taskService{tasks: tasks, attempts: attempts}
+
+	byTicket, err := svc.FindTaskByTicketNode(context.Background(), 10, "node_1")
+	require.NoError(t, err)
+	require.Equal(t, attempt.Output, byTicket.Output)
+
+	byProcess, err := svc.FindTaskByNodeID(context.Background(), 100, "node_1")
+	require.NoError(t, err)
+	require.Equal(t, attempt.Output, byProcess.Output)
+}
+
 func TestStartTaskResumesCurrentAttempt(t *testing.T) {
 	testCases := []struct {
 		name        string

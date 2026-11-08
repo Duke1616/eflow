@@ -8,6 +8,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	formrule "github.com/Duke1616/eflow/internal/pkg/rule"
+	"github.com/samber/lo"
 )
 
 func (s *taskService) applyTemplateScheduleOverride(ctx context.Context, nodeID string,
@@ -43,10 +44,9 @@ func resolveTemplateScheduleOverride(override domain.ScheduleOverride, rules []d
 	if err != nil {
 		return flowdsl.ScheduleConfig{}, fmt.Errorf("解析模板字段失败: %w", err)
 	}
-	fields := make(map[string]formrule.Rule, len(parsed))
-	for _, item := range parsed {
-		fields[item.Field] = item
-	}
+	fields := lo.KeyBy(parsed, func(item formrule.Rule) string {
+		return item.Field
+	})
 	primary, ok := fields[override.Field]
 	if !ok {
 		return flowdsl.ScheduleConfig{}, fmt.Errorf("字段 %s 不存在", override.Field)

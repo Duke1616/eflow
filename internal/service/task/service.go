@@ -55,6 +55,8 @@ type Service interface {
 	ListUnadvancedSuccessTasks(ctx context.Context, limit, afterID int64) ([]domain.Task, error)
 	// FindTaskByNodeID 查询流程实例节点任务，并补充当前执行输出。
 	FindTaskByNodeID(ctx context.Context, instanceID int64, nodeID string) (domain.Task, error)
+	// FindTaskByTicketNode 查询工单节点任务，并补充当前执行输出（核心入口）。
+	FindTaskByTicketNode(ctx context.Context, ticketID int64, nodeID string) (domain.Task, error)
 	// ListAttempts 查询任务全部执行尝试。
 	ListAttempts(ctx context.Context, taskID int64) ([]domain.TaskAttempt, error)
 	// Logs 根据执行尝试读取 etask 日志。
@@ -125,17 +127,17 @@ func (s *taskService) CreateTask(ctx context.Context, ticketID int64,
 
 	draft := domain.Task{
 		TenantID: ticket.TenantID, TicketID: ticketID,
-		InstanceID: instanceID,
-		NodeID:     nodeID,
-		NodeName:   nodeName, ProcessVersion: version,
-		Status: domain.TaskStatusWaiting, Phase: domain.TaskPhaseReady,
-		ExecutionKind: domain.TaskExecutionProcess,
+		InstanceID:     instanceID,
+		NodeID:         nodeID,
+		NodeName:       nodeName,
+		ProcessVersion: version,
+		Status:         domain.TaskStatusWaiting,
+		ExecutionKind:  domain.TaskExecutionProcess,
 	}
 	definition, err := s.prepareTaskDefinition(ctx, draft, ticket)
 	draft.CompensationNodeID = definition.compensationNodeID
 	if err != nil {
 		draft.Status = domain.TaskStatusBlocked
-		draft.Phase = domain.TaskPhaseBlocked
 		draft.LastError = err.Error()
 		blocked, _, persistErr := s.tasks.FindOrCreate(ctx, draft)
 		if persistErr != nil {
@@ -145,7 +147,6 @@ func (s *taskService) CreateTask(ctx context.Context, ticketID int64,
 		return blocked, err
 	}
 	draft.ScheduledAt = definition.scheduledAt
-	draft.OriginalScheduledAt = definition.scheduledAt
 	task, created, err := s.tasks.FindOrCreate(ctx, draft)
 	if err != nil {
 		return domain.Task{}, err
@@ -321,11 +322,7 @@ func (s *taskService) CompleteAttempt(ctx context.Context, requestID string,
 	if !status.IsTerminal() {
 		return domain.TaskAttempt{}, fmt.Errorf("执行尝试终态非法: %s", status)
 	}
-	attempt, err := s.attempts.Complete(ctx, requestID, status, output, reason)
-	if err != nil || attempt.Status != domain.AttemptStatusSuccess {
-		return attempt, err
-	}
-	return attempt, nil
+	return s.attempts.Complete(ctx, requestID, status, output, reason)
 }
 
 func (s *taskService) ListTasksByStatusAfterID(ctx context.Context, status domain.TaskStatus,
@@ -370,8 +367,24 @@ func (s *taskService) ListUnadvancedSuccessTasks(ctx context.Context, limit,
 func (s *taskService) FindTaskByNodeID(ctx context.Context, instanceID int64,
 	nodeID string) (domain.Task, error) {
 	task, err := s.tasks.FindByProcessNode(ctx, instanceID, nodeID)
-	if err != nil || task.CurrentAttemptID <= 0 {
+	if err != nil {
 		return task, err
+	}
+	return s.enrichTaskOutput(ctx, task)
+}
+
+func (s *taskService) FindTaskByTicketNode(ctx context.Context, ticketID int64,
+	nodeID string) (domain.Task, error) {
+	task, err := s.tasks.FindByTicketNode(ctx, ticketID, nodeID)
+	if err != nil {
+		return task, err
+	}
+	return s.enrichTaskOutput(ctx, task)
+}
+
+func (s *taskService) enrichTaskOutput(ctx context.Context, task domain.Task) (domain.Task, error) {
+	if task.CurrentAttemptID <= 0 {
+		return task, nil
 	}
 	attempt, err := s.attempts.FindByID(ctx, task.CurrentAttemptID)
 	if err != nil {
