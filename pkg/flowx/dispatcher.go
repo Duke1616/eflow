@@ -294,7 +294,7 @@ func (x *endNodeExecutor) Execute(ctx context.Context, session *flowSession, nod
 	return nil
 }
 
-// chatGroupNodeExecutor 群聊通知节点执行器 (职责明确：广播群聊通知事件、瞬时穿透推进下一节点)
+// chatGroupNodeExecutor 群聊通知节点执行器 (职责明确：记录任务快照、广播群聊通知事件、瞬时穿透推进下一节点)
 type chatGroupNodeExecutor struct {
 	engine *flowEngine
 }
@@ -302,10 +302,19 @@ type chatGroupNodeExecutor struct {
 func (x *chatGroupNodeExecutor) Execute(ctx context.Context, session *flowSession, node model.NodeSpec, batchCode int, operator string) error {
 	inst := session.Instance()
 
-	// 1. 广播群聊通知节点激活事件（供上层通知监听器消费并发送飞书群卡片）
-	x.engine.eventBus.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &node, operator, "群聊通知自动穿透"))
+	// 1. 生成并落库已通过的任务快照，供拓扑高亮推导 (traverser) 与上层通知链路消费
+	taskID := x.engine.idGen.GenTaskID(node.ID, "chat_group", batchCode, 1)
+	chatTask := model.NewTask(taskID, inst.ID, node, batchCode, "chat_group", model.TaskPending)
+	chatTask.Pass("群聊通知自动完成")
+	if err := session.SaveTasks(ctx, []*model.Task{chatTask}); err != nil {
+		return err
+	}
 
-	// 2. 瞬时自动穿透推进：驱动群聊通知节点下一步流转决策
+	// 2. 广播群聊通知节点激活与任务通过事件
+	x.engine.eventBus.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &node, operator, "群聊通知自动穿透"))
+	x.engine.eventBus.Publish(ctx, NewTaskEvent(EventTaskPassed, inst, &node, chatTask, operator, "群聊通知自动完成"))
+
+	// 3. 瞬时自动穿透推进：驱动群聊通知节点下一步流转决策
 	nextDec, err := session.Plan().ResolveNextStep(node.ID, inst.Variables, session.AllTasks(), batchCode)
 	if err != nil {
 		return err

@@ -93,14 +93,12 @@ func (s *ChatTestSuite) TestSend_ExistingGroup() {
 		f(ctx)
 	})
 
-	s.mockBase.EXPECT().FetchTasksWithRetry(gomock.Any(), gomock.Any()).Return([]strategy.Task{{TaskID: domain.NewID(70001)}}, nil)
 	s.mockBase.EXPECT().IsGlobalNotify(gomock.Any()).Return(true)
 	s.mockTeam.EXPECT().GetChatGroupByIds(gomock.Any(), gomock.Any()).Return(&teamv1.GetChatGroupByIdsResponse{
 		Groups: []*teamv1.ChatGroup{
 			{ChatId: "oc_chat123", Name: "交付群", Channel: notificationv1.Channel_LARK_CARD},
 		},
 	}, nil)
-	s.mockBase.EXPECT().PassTask(gomock.Any(), gomock.Any(), domain.NewID(70001), gomock.Any()).Return(nil)
 
 	s.mockSender.EXPECT().BatchSend(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context,
 		ns []notification.Notification) (notification.Response, error) {

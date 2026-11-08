@@ -40,10 +40,10 @@ func NewNotification(base strategy.Service, sender sender.NotificationSender,
 
 // chatContext 封装发送所需的所有元数据
 type chatContext struct {
-	*strategy.NotificationData                            // 基础元数据和自动化输出
+	*strategy.NotificationData                         // 基础元数据和自动化输出
 	property                   flowdsl.ChatGroupConfig // 节点配置属性
-	members                    []domain.User              // 运行解析出的成员
-	userInputs                 []domain.FormValue         // 动态加载的用户输入
+	members                    []domain.User           // 运行解析出的成员
+	userInputs                 []domain.FormValue      // 动态加载的用户输入
 }
 
 // recipient 内部接收者描述
@@ -72,48 +72,21 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 	return notification.Response{}, nil
 }
 
-// asyncHandleChat 异步处理核心逻辑
+// asyncHandleChat 异步处理核心逻辑（作为纯粹的只读通知观察者，成败绝不影响工单状态机推进）
 func (n *Notification) asyncHandleChat(ctx context.Context, info strategy.Info, data *chatContext) {
 	n.Logger().Info("Notification 开始异步处理群组通知",
 		elog.Int("instId", info.InstID),
 		elog.String("node", info.CurrentNode.NodeID))
 
-	// 1. 获取任务信息 (带重试，等待引擎完成任务下发)
-	tasks, err := n.FetchTasksWithRetry(ctx, info)
-	if err != nil {
-		n.Logger().Error("Notification 获取任务失败", elog.FieldErr(err), elog.Int("instId", info.InstID))
+	// 1. 检查全局消息通知开关
+	if !n.IsGlobalNotify(info.Workflow) {
+		n.Logger().Info("Notification 全局流程通知开关已关闭，跳过群消息发送",
+			elog.Int64("wfId", info.Workflow.Id))
 		return
 	}
 
-	// 2. 检查全局消息通知开关
-	if !n.IsGlobalNotify(info.Workflow) {
-		n.Logger().Info("Notification 全局流程通知开关已关闭，跳过消息发送，仅执行流程自动推进",
-			elog.Int64("wfId", info.Workflow.Id))
-	} else {
-		n.sendNotifications(ctx, info, data)
-	}
-
-	// 3. 自动推进流程
-	n.autoPassTasks(ctx, tasks)
-}
-
-func (n *Notification) autoPassTasks(ctx context.Context, tasks []strategy.Task) {
-	for _, t := range tasks {
-		if err := n.PassTask(ctx, t.EngineType, t.TaskID, "ChatGroup Auto Pass"); err != nil {
-			n.Logger().Error("Notification 流程自动推进失败",
-				elog.FieldErr(err),
-				elog.String("taskId", t.TaskID.String()))
-			continue
-		}
-
-		n.Logger().Info("Notification 节点任务已自动推进",
-			elog.String("taskId", t.TaskID.String()))
-
-		// 抄送或自动通知通常一人通过全组通过 (非会签)
-		if t.IsCosigned != 1 {
-			return
-		}
-	}
+	// 2. 解析群组接收者并发送消息
+	n.sendNotifications(ctx, info, data)
 }
 
 func (n *Notification) sendNotifications(ctx context.Context, info strategy.Info, data *chatContext) {

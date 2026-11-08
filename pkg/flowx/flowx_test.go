@@ -1182,6 +1182,56 @@ func TestEngine_GetExecutionView(t *testing.T) {
 	assert.Contains(t, view.PendingUsers, "leader_alice")
 }
 
+// TestEngine_ChatGroupNodeTraversalAndTask 验证群聊通知节点在穿透推进时正确落库 Task 快照并点亮拓扑连线
+func TestEngine_ChatGroupNodeTraversalAndTask(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+
+	def := model.ProcessDefinition{
+		Key:     "chat_group_flow",
+		Name:    "群通知测试流程",
+		Version: 1,
+		Nodes: []model.NodeSpec{
+			{ID: "start", Type: model.NodeStart, Name: "开始"},
+			{ID: "chat_node", Type: model.NodeChatGroup, Name: "发版群通知"},
+			{ID: "end", Type: model.NodeEnd, Name: "结束"},
+		},
+		Edges: []model.EdgeSpec{
+			{Source: "start", Target: "chat_node"},
+			{Source: "chat_node", Target: "end"},
+		},
+	}
+	_, err := engine.Deploy(ctx, def)
+	require.NoError(t, err)
+
+	// 启动流程：应当自动经过 chat_node 穿透流转，直接全单办结
+	instID, err := engine.Start(ctx, StartReq{
+		Key:     "chat_group_flow",
+		Starter: "luankz",
+	})
+	require.NoError(t, err)
+
+	inst, err := store.GetInstance(ctx, instID)
+	require.NoError(t, err)
+	assert.True(t, inst.IsTerminal(), "群通知穿透后流程应当顺利办结归档")
+
+	// 1. 验证生成了已通过的群通知 Task 快照记录
+	tasks, err := store.ListTasksByInstance(ctx, instID)
+	require.NoError(t, err)
+	chatTask, ok := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "chat_node" })
+	require.True(t, ok, "必须落库群通知节点的 Task 记录")
+	assert.Equal(t, model.TaskPassed, chatTask.Status)
+	assert.Equal(t, "chat_group", chatTask.Assignee)
+
+	// 2. 验证执行视图拓扑高亮完整贯穿：start -> chat_node -> end
+	view, err := engine.GetExecutionView(ctx, instID)
+	require.NoError(t, err)
+	assert.Contains(t, view.TraversedEdges["start"], "chat_node", "start 到 chat_node 的边必须高亮")
+	assert.Contains(t, view.TraversedEdges["chat_node"], "end", "chat_node 到 end 的边必须高亮")
+	assert.Equal(t, int(model.TaskPassed), view.NodeStatusMap["chat_node"])
+}
+
 // BenchmarkFlowxFullProcess 基准测试：单次完整综合流程（启动 -> 或签通过 -> 条件分流 -> 会签双人通过 -> 自动办结）
 func BenchmarkFlowxFullProcess(b *testing.B) {
 	ctx := context.Background()

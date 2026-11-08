@@ -119,7 +119,7 @@ func (e *ProcessEvent) EventAutomation(instID int, node *model.Node, prevNode mo
 	return err
 }
 
-// EventChatGroup 群通知节点事件：发送消息后自动推进
+// EventChatGroup 群通知节点事件：发送消息后由引擎自身异步自动推进
 func (e *ProcessEvent) EventChatGroup(instID int, node *model.Node, prevNode model.Node) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
@@ -129,14 +129,17 @@ func (e *ProcessEvent) EventChatGroup(instID int, node *model.Node, prevNode mod
 		return err
 	}
 
-	// 发送群通知，自动提交
+	// 1. 发送群通知消息
 	if err = e.dispatchNotify(ctx, fCtx, strategy.ChatGroup); err != nil {
 		e.logger.Error("【EventChatGroup】群消息发送失败", elog.FieldErr(err), elog.Int("instID", instID))
 	}
+
+	// 2. 由 Engine 自身异步自动推进，彻底解除通知模块对流程流转的副作用
+	go e.autoPassNode(ctx, instID, node.NodeID, "ChatGroup Auto Pass")
 	return nil
 }
 
-// EventCarbonCopy 抄送节点事件
+// EventCarbonCopy 抄送节点事件：发送消息后由引擎自身异步自动推进
 func (e *ProcessEvent) EventCarbonCopy(instID int, node *model.Node, prevNode model.Node) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
@@ -146,12 +149,14 @@ func (e *ProcessEvent) EventCarbonCopy(instID int, node *model.Node, prevNode mo
 		return err
 	}
 
-	// 发送抄送信息，自动提交
+	// 1. 发送抄送知会消息
 	if err = e.dispatchNotify(ctx, fCtx, strategy.CarbonCopy); err != nil {
 		e.logger.Error("【EventCarbonCopy】消息发送失败", elog.FieldErr(err), elog.Int("instID", instID))
 	}
 	syncBackUserIDs(node, fCtx)
 
+	// 2. 由 Engine 自身异步自动推进，彻底解除通知模块对流程流转的副作用
+	go e.autoPassNode(ctx, instID, node.NodeID, "CarbonCopy Auto Pass")
 	return nil
 }
 

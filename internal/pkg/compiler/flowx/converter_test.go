@@ -502,9 +502,16 @@ func TestFlowxConverter_ChatGroupNode(t *testing.T) {
 
 	tasks, err := engine.ListTasksByInstance(ctx, instID)
 	require.NoError(t, err)
-	require.Len(t, tasks, 1)
-	assert.Equal(t, "approval_1", tasks[0].NodeID)
-	assert.Equal(t, "manager", tasks[0].Assignee)
+	// 包含已通过的群通知 Task 快照与待处理的主管审批任务
+	require.Len(t, tasks, 2)
+	chatTask, ok := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "chat_1" })
+	require.True(t, ok)
+	assert.Equal(t, model.TaskPassed, chatTask.Status)
+
+	approvalTask, ok := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "approval_1" })
+	require.True(t, ok)
+	assert.Equal(t, "manager", approvalTask.Assignee)
+	assert.Equal(t, model.TaskPending, approvalTask.Status)
 }
 
 func TestFlowxConverter_ConditionNodeCompatibility(t *testing.T) {
