@@ -387,6 +387,13 @@ func (s *taskRepositoryStub) FindByProcessNode(context.Context, int64, string) (
 	return domain.Task{}, repository.ErrTaskNotFound
 }
 
+func (s *taskRepositoryStub) FindByTicketNode(context.Context, int64, string) (domain.Task, error) {
+	if s.findOrCreateTask.ID > 0 {
+		return s.findOrCreateTask, nil
+	}
+	return domain.Task{}, repository.ErrTaskNotFound
+}
+
 type attemptRepositoryStub struct {
 	repository.TaskAttemptRepository
 	attempt           domain.TaskAttempt

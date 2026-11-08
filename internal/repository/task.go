@@ -18,7 +18,9 @@ type TaskRepository interface {
 	FindOrCreate(ctx context.Context, task domain.Task) (domain.Task, bool, error)
 	// FindByID 根据主键查询任务。
 	FindByID(ctx context.Context, id int64) (domain.Task, error)
-	// FindByProcessNode 根据流程实例和节点查询任务。
+	// FindByTicketNode 根据关联工单和节点查询任务（核心权威入口）。
+	FindByTicketNode(ctx context.Context, ticketID int64, nodeID string) (domain.Task, error)
+	// FindByProcessNode 根据流程实例和节点查询任务（向下兼容入口）。
 	FindByProcessNode(ctx context.Context, processInstanceID int64, nodeID string) (domain.Task, error)
 	// Block 将任务置为需要人工处理的阻塞状态。
 	Block(ctx context.Context, id int64, reason string) error
@@ -31,9 +33,13 @@ type TaskRepository interface {
 		afterID, limit int64) ([]domain.Task, error)
 	// Count 统计任务总数。
 	Count(ctx context.Context) (int64, error)
-	// ListByInstanceID 查询流程实例下的任务。
+	// ListByTicketID 查询工单下的全部自动化任务。
+	ListByTicketID(ctx context.Context, offset, limit int64, ticketID int64) ([]domain.Task, error)
+	// CountByTicketID 统计工单下的任务数量。
+	CountByTicketID(ctx context.Context, ticketID int64) (int64, error)
+	// ListByInstanceID 查询流程实例下的任务（向下兼容）。
 	ListByInstanceID(ctx context.Context, offset, limit int64, instanceID int64) ([]domain.Task, error)
-	// CountByInstanceID 统计流程实例下的任务数量。
+	// CountByInstanceID 统计流程实例下的任务数量（向下兼容）。
 	CountByInstanceID(ctx context.Context, instanceID int64) (int64, error)
 	// ListReady 查询已到计划时间的待提交任务。
 	ListReady(ctx context.Context, limit int64) ([]domain.Task, error)
@@ -51,7 +57,7 @@ func NewTaskRepository(taskDAO dao.TaskDAO) TaskRepository {
 }
 
 func (r *taskRepository) FindOrCreate(ctx context.Context, task domain.Task) (domain.Task, bool, error) {
-	entity, err := r.dao.FindByProcessNode(ctx, task.InstanceID.Int64(), task.NodeID)
+	entity, err := r.dao.FindByTicketNode(ctx, task.TicketID, task.NodeID)
 	if err == nil {
 		return toTaskDomain(entity), false, nil
 	}
@@ -63,7 +69,7 @@ func (r *taskRepository) FindOrCreate(ctx context.Context, task domain.Task) (do
 		return toTaskDomain(created), true, nil
 	}
 	// 唯一约束处理并发创建，失败方读取已存在记录。
-	entity, findErr := r.dao.FindByProcessNode(ctx, task.InstanceID.Int64(), task.NodeID)
+	entity, findErr := r.dao.FindByTicketNode(ctx, task.TicketID, task.NodeID)
 	if findErr != nil {
 		return domain.Task{}, false, err
 	}
@@ -72,6 +78,12 @@ func (r *taskRepository) FindOrCreate(ctx context.Context, task domain.Task) (do
 
 func (r *taskRepository) FindByID(ctx context.Context, id int64) (domain.Task, error) {
 	entity, err := r.dao.FindByID(ctx, id)
+	return toTaskDomain(entity), err
+}
+
+func (r *taskRepository) FindByTicketNode(ctx context.Context, ticketID int64,
+	nodeID string) (domain.Task, error) {
+	entity, err := r.dao.FindByTicketNode(ctx, ticketID, nodeID)
 	return toTaskDomain(entity), err
 }
 
@@ -102,6 +114,16 @@ func (r *taskRepository) ListByStatusAfterID(ctx context.Context, status domain.
 
 func (r *taskRepository) Count(ctx context.Context) (int64, error) {
 	return r.dao.Count(ctx)
+}
+
+func (r *taskRepository) ListByTicketID(ctx context.Context, offset, limit int64,
+	ticketID int64) ([]domain.Task, error) {
+	entities, err := r.dao.ListByTicketID(ctx, offset, limit, ticketID)
+	return mapTasks(entities), err
+}
+
+func (r *taskRepository) CountByTicketID(ctx context.Context, ticketID int64) (int64, error) {
+	return r.dao.CountByTicketID(ctx, ticketID)
 }
 
 func (r *taskRepository) ListByInstanceID(ctx context.Context, offset, limit int64,
@@ -136,27 +158,39 @@ func mapTasks(entities []dao.Task) []domain.Task {
 func toTaskEntity(task domain.Task) dao.Task {
 	return dao.Task{
 		ID: task.ID, TenantID: task.TenantID, TicketID: task.TicketID,
-		ProcessInstanceID: task.InstanceID.Int64(), NodeID: task.NodeID,
-		NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
-		Status: task.Status.ToUint8(), Phase: string(task.Phase), ScheduledAt: task.ScheduledAt,
-		OriginalScheduledAt: task.OriginalScheduledAt, ExecutionKind: string(task.ExecutionKind),
-		CompensationNodeID: task.CompensationNodeID, CancelledAt: task.CancelledAt,
-		CurrentAttemptID: task.CurrentAttemptID, AdvancedAt: task.AdvancedAt,
-		LastError: task.LastError, CTime: task.CTime, UTime: task.UTime,
+		InstanceKey:        task.InstanceID.String(),
+		ProcessInstanceID:  task.InstanceID.Int64(),
+		NodeID:             task.NodeID,
+		NodeName:           task.NodeName, ProcessVersion: task.ProcessVersion,
+		Status: task.Status.ToUint8(), ScheduledAt: task.ScheduledAt,
+		ExecutionKind:      string(task.ExecutionKind),
+		CompensationNodeID: task.CompensationNodeID,
+		CurrentAttemptID:   task.CurrentAttemptID, AdvancedAt: task.AdvancedAt,
+		LastError:          task.LastError, CTime: task.CTime, UTime: task.UTime,
 	}
 }
 
 func toTaskDomain(task dao.Task) domain.Task {
+	instID := domain.NewID(task.InstanceKey)
+	if instID.IsZero() && task.ProcessInstanceID > 0 {
+		instID = domain.NewID(task.ProcessInstanceID)
+	}
 	return domain.Task{
 		ID: task.ID, TenantID: task.TenantID, TicketID: task.TicketID,
-		InstanceID:         domain.NewID(task.ProcessInstanceID),
+		InstanceID:         instID,
 		NodeID:             task.NodeID,
 		NodeName:           task.NodeName, ProcessVersion: task.ProcessVersion,
-		Status: domain.TaskStatus(task.Status), Phase: domain.TaskPhase(task.Phase),
-		ScheduledAt: task.ScheduledAt, OriginalScheduledAt: task.OriginalScheduledAt,
+		Status:             domain.TaskStatus(task.Status),
+		Phase:              domain.TaskStatus(task.Status).ToPhase(),
+		ScheduledAt:        task.ScheduledAt,
+		OriginalScheduledAt: task.ScheduledAt,
 		ExecutionKind:      domain.TaskExecutionKind(task.ExecutionKind),
-		CompensationNodeID: task.CompensationNodeID, CurrentAttemptID: task.CurrentAttemptID,
-		AdvancedAt: task.AdvancedAt, CancelledAt: task.CancelledAt, LastError: task.LastError,
-		CTime: task.CTime, UTime: task.UTime,
+		CompensationNodeID: task.CompensationNodeID,
+		CurrentAttemptID:   task.CurrentAttemptID,
+		AdvancedAt:         task.AdvancedAt,
+		CancelledAt:        0,
+		LastError:          task.LastError,
+		CTime:              task.CTime,
+		UTime:              task.UTime,
 	}
 }

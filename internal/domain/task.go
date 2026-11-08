@@ -32,6 +32,28 @@ func (s TaskStatus) CanTerminate() bool {
 	}
 }
 
+// ToPhase 根据当前任务状态派生阶段文案枚举（表现层与向下兼容）。
+func (s TaskStatus) ToPhase() TaskPhase {
+	switch s {
+	case TaskStatusSuccess:
+		return TaskPhaseSucceeded
+	case TaskStatusFailed:
+		return TaskPhaseFailed
+	case TaskStatusRunning:
+		return TaskPhaseRunning
+	case TaskStatusWaiting:
+		return TaskPhaseReady
+	case TaskStatusBlocked:
+		return TaskPhaseBlocked
+	case TaskStatusSubmitting:
+		return TaskPhaseSubmitting
+	case TaskStatusCancelled:
+		return TaskPhaseCancelled
+	default:
+		return TaskPhaseReady
+	}
+}
+
 // TaskPhase 描述最近一次编排动作，展示文案由表现层转换。
 type TaskPhase string
 

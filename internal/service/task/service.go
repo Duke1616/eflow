@@ -49,6 +49,8 @@ type Service interface {
 	ListTask(ctx context.Context, offset, limit int64) ([]domain.Task, int64, error)
 	// ListTaskByInstanceID 查询流程实例下的任务。
 	ListTaskByInstanceID(ctx context.Context, offset, limit int64, instanceID int64) ([]domain.Task, int64, error)
+	// ListTaskByTicketID 查询工单下的自动化任务（核心推荐接口）。
+	ListTaskByTicketID(ctx context.Context, offset, limit int64, ticketID int64) ([]domain.Task, int64, error)
 	// ListUnadvancedSuccessTasks 按主键游标查询一批尚未推进流程的成功任务。
 	ListUnadvancedSuccessTasks(ctx context.Context, limit, afterID int64) ([]domain.Task, error)
 	// FindTaskByNodeID 查询流程实例节点任务，并补充当前执行输出。
@@ -97,7 +99,7 @@ func (s *taskService) CreateTask(ctx context.Context, ticketID int64,
 		return domain.Task{}, err
 	}
 	ctx = tenantContext(ctx, ticket.TenantID)
-	existing, err := s.tasks.FindByProcessNode(ctx, instanceID.Int64(), nodeID)
+	existing, err := s.tasks.FindByTicketNode(ctx, ticketID, nodeID)
 	if err == nil {
 		return existing, nil
 	}
@@ -347,6 +349,16 @@ func (s *taskService) ListTaskByInstanceID(ctx context.Context, offset, limit in
 		return nil, 0, err
 	}
 	total, err := s.tasks.CountByInstanceID(ctx, instanceID)
+	return tasks, total, err
+}
+
+func (s *taskService) ListTaskByTicketID(ctx context.Context, offset, limit int64,
+	ticketID int64) ([]domain.Task, int64, error) {
+	tasks, err := s.tasks.ListByTicketID(ctx, offset, limit, ticketID)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := s.tasks.CountByTicketID(ctx, ticketID)
 	return tasks, total, err
 }
 

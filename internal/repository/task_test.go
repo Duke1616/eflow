@@ -19,7 +19,6 @@ func TestTaskSnapshotMapping(t *testing.T) {
 				NodeID: "automation-node", NodeName: "部署生产环境", ProcessVersion: 7,
 				ScheduledAt: 100, OriginalScheduledAt: 100,
 				ExecutionKind: domain.TaskExecutionCompensation, CompensationNodeID: "compensation-node",
-				CancelledAt: 200,
 			},
 		},
 	}
@@ -34,7 +33,6 @@ func TestTaskSnapshotMapping(t *testing.T) {
 			require.Equal(t, testCase.task.OriginalScheduledAt, actual.OriginalScheduledAt)
 			require.Equal(t, testCase.task.ExecutionKind, actual.ExecutionKind)
 			require.Equal(t, testCase.task.CompensationNodeID, actual.CompensationNodeID)
-			require.Equal(t, testCase.task.CancelledAt, actual.CancelledAt)
 		})
 	}
 }

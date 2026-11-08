@@ -12,25 +12,23 @@ import (
 
 // Task 是流程自动化节点的持久化实体，不保存执行器配置和日志镜像。
 type Task struct {
-	ID                  int64  `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'自动化任务主键'"`
-	TenantID            int64  `gorm:"column:tenant_id;type:bigint;not null;uniqueIndex:uk_automation_node,priority:1;index;comment:'租户 ID'"`
-	TicketID            int64  `gorm:"column:ticket_id;type:bigint;not null;index;comment:'关联工单 ID'"`
-	ProcessInstanceID   int64  `gorm:"column:process_instance_id;type:bigint;not null;uniqueIndex:uk_automation_node,priority:2;index;comment:'流程实例 ID'"`
-	NodeID              string `gorm:"column:node_id;type:varchar(128);not null;uniqueIndex:uk_automation_node,priority:3;comment:'自动化节点 ID'"`
-	NodeName            string `gorm:"column:node_name;type:varchar(250);not null;comment:'自动化节点名称快照'"`
-	ProcessVersion      int    `gorm:"column:process_version;type:int;not null;comment:'流程实例版本快照'"`
-	Status              uint8  `gorm:"column:status;type:tinyint unsigned;not null;index;comment:'编排状态'"`
-	Phase               string `gorm:"column:phase;type:varchar(32);not null;comment:'最近编排阶段'"`
-	ScheduledAt         int64  `gorm:"column:scheduled_at;type:bigint;not null;index;comment:'计划提交时间'"`
-	OriginalScheduledAt int64  `gorm:"column:original_scheduled_at;type:bigint;not null;default:0;comment:'首次计划提交时间'"`
-	ExecutionKind       string `gorm:"column:execution_kind;type:varchar(24);not null;default:'PROCESS';index;comment:'任务执行类型'"`
-	CompensationNodeID  string `gorm:"column:compensation_node_id;type:varchar(128);not null;default:'';comment:'成功动作对应的补偿节点 ID'"`
-	CurrentAttemptID    int64  `gorm:"column:current_attempt_id;type:bigint;not null;default:0;index;comment:'当前执行尝试 ID'"`
-	AdvancedAt          int64  `gorm:"column:advanced_at;type:bigint;not null;default:0;index;comment:'流程推进完成时间'"`
-	CancelledAt         int64  `gorm:"column:cancelled_at;type:bigint;not null;default:0;comment:'任务取消或强制终止时间'"`
-	LastError           string `gorm:"column:last_error;type:text;comment:'最近编排错误'"`
-	CTime               int64  `gorm:"column:ctime;type:bigint;comment:'创建时间'"`
-	UTime               int64  `gorm:"column:utime;type:bigint;comment:'更新时间'"`
+	ID                 int64  `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'自动化任务主键'"`
+	TenantID           int64  `gorm:"column:tenant_id;type:bigint;not null;uniqueIndex:uk_tenant_ticket_node,priority:1;index;comment:'租户 ID'"`
+	TicketID           int64  `gorm:"column:ticket_id;type:bigint;not null;uniqueIndex:uk_tenant_ticket_node,priority:2;index;comment:'关联工单 ID'"`
+	NodeID             string `gorm:"column:node_id;type:varchar(128);not null;uniqueIndex:uk_tenant_ticket_node,priority:3;comment:'自动化节点 ID'"`
+	InstanceKey        string `gorm:"column:instance_key;type:varchar(64);not null;default:'';index;comment:'流程实例全局唯一标识Key'"`
+	ProcessInstanceID  int64  `gorm:"column:process_instance_id;type:bigint;not null;default:0;index;comment:'流程实例历史数字ID'"`
+	NodeName           string `gorm:"column:node_name;type:varchar(250);not null;comment:'自动化节点名称快照'"`
+	ProcessVersion     int    `gorm:"column:process_version;type:int;not null;comment:'流程实例版本快照'"`
+	Status             uint8  `gorm:"column:status;type:tinyint unsigned;not null;index;comment:'编排状态'"`
+	ScheduledAt        int64  `gorm:"column:scheduled_at;type:bigint;not null;index;comment:'计划提交时间'"`
+	ExecutionKind      string `gorm:"column:execution_kind;type:varchar(24);not null;default:'PROCESS';index;comment:'任务执行类型'"`
+	CompensationNodeID string `gorm:"column:compensation_node_id;type:varchar(128);not null;default:'';comment:'成功动作对应的补偿节点 ID'"`
+	CurrentAttemptID   int64  `gorm:"column:current_attempt_id;type:bigint;not null;default:0;index;comment:'当前执行尝试 ID'"`
+	AdvancedAt         int64  `gorm:"column:advanced_at;type:bigint;not null;default:0;index;comment:'流程推进完成时间'"`
+	LastError          string `gorm:"column:last_error;type:text;comment:'最近编排错误'"`
+	CTime              int64  `gorm:"column:ctime;type:bigint;comment:'创建时间'"`
+	UTime              int64  `gorm:"column:utime;type:bigint;comment:'更新时间'"`
 }
 
 // TableName 返回新自动化任务表名。
@@ -40,7 +38,9 @@ func (Task) TableName() string { return "automation_tasks" }
 type TaskDAO interface {
 	// Create 创建自动化任务。
 	Create(ctx context.Context, task Task) (Task, error)
-	// FindByProcessNode 根据流程实例和节点查询任务。
+	// FindByTicketNode 根据关联工单和节点查询任务（核心权威入口）。
+	FindByTicketNode(ctx context.Context, ticketID int64, nodeID string) (Task, error)
+	// FindByProcessNode 根据流程实例和节点查询任务（向下兼容入口）。
 	FindByProcessNode(ctx context.Context, processInstanceID int64, nodeID string) (Task, error)
 	// FindByID 根据主键查询任务。
 	FindByID(ctx context.Context, id int64) (Task, error)
@@ -54,9 +54,13 @@ type TaskDAO interface {
 	ListByStatusAfterID(ctx context.Context, status uint8, afterID, limit int64) ([]Task, error)
 	// Count 统计任务总数。
 	Count(ctx context.Context) (int64, error)
-	// ListByInstanceID 查询流程实例下的任务。
+	// ListByTicketID 查询工单下的全部自动化任务。
+	ListByTicketID(ctx context.Context, offset, limit int64, ticketID int64) ([]Task, error)
+	// CountByTicketID 统计工单下的任务数量。
+	CountByTicketID(ctx context.Context, ticketID int64) (int64, error)
+	// ListByInstanceID 查询流程实例下的任务（向下兼容）。
 	ListByInstanceID(ctx context.Context, offset, limit int64, instanceID int64) ([]Task, error)
-	// CountByInstanceID 统计流程实例下的任务数量。
+	// CountByInstanceID 统计流程实例下的任务数量（向下兼容）。
 	CountByInstanceID(ctx context.Context, instanceID int64) (int64, error)
 	// ListReady 查询已到计划时间的待提交任务。
 	ListReady(ctx context.Context, limit int64) ([]Task, error)
@@ -74,10 +78,18 @@ func NewTaskDAO(db *gorm.DB) TaskDAO { return &gormTaskDAO{db: db} }
 func (g *gormTaskDAO) Create(ctx context.Context, task Task) (Task, error) {
 	now := time.Now().UnixMilli()
 	task.CTime, task.UTime = now, now
-	if task.Status == 0 || task.Phase == "" {
+	if task.Status == 0 {
 		return Task{}, fmt.Errorf("自动化任务初始状态不能为空")
 	}
 	err := g.db.WithContext(ctx).Create(&task).Error
+	return task, err
+}
+
+func (g *gormTaskDAO) FindByTicketNode(ctx context.Context, ticketID int64, nodeID string) (Task, error) {
+	var task Task
+	err := g.db.WithContext(ctx).
+		Where("ticket_id = ? AND node_id = ?", ticketID, nodeID).
+		First(&task).Error
 	return task, err
 }
 
@@ -100,7 +112,7 @@ func (g *gormTaskDAO) Block(ctx context.Context, id int64, reason string) error 
 		Where("id = ? AND status IN (?, ?)", id,
 			domain.TaskStatusWaiting.ToUint8(), domain.TaskStatusFailed.ToUint8()).
 		Updates(map[string]any{
-			"status": domain.TaskStatusBlocked.ToUint8(), "phase": domain.TaskPhaseBlocked,
+			"status": domain.TaskStatusBlocked.ToUint8(),
 			"last_error": reason, "utime": time.Now().UnixMilli(),
 		}).Error
 }
@@ -111,8 +123,8 @@ func (g *gormTaskDAO) PrepareRetry(ctx context.Context, id int64) error {
 			domain.TaskStatusFailed.ToUint8(), domain.TaskStatusBlocked.ToUint8(),
 			domain.TaskStatusCancelled.ToUint8()).
 		Updates(map[string]any{
-			"status": domain.TaskStatusWaiting.ToUint8(), "phase": domain.TaskPhaseRetrying,
-			"cancelled_at": 0, "last_error": "", "utime": time.Now().UnixMilli(),
+			"status": domain.TaskStatusWaiting.ToUint8(),
+			"last_error": "", "utime": time.Now().UnixMilli(),
 		})
 	if result.Error != nil {
 		return result.Error
@@ -145,16 +157,31 @@ func (g *gormTaskDAO) Count(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+func (g *gormTaskDAO) ListByTicketID(ctx context.Context, offset, limit int64, ticketID int64) ([]Task, error) {
+	var tasks []Task
+	err := g.db.WithContext(ctx).Where("ticket_id = ?", ticketID).
+		Order("ctime DESC").Offset(int(offset)).Limit(int(limit)).Find(&tasks).Error
+	return tasks, err
+}
+
+func (g *gormTaskDAO) CountByTicketID(ctx context.Context, ticketID int64) (int64, error) {
+	var count int64
+	err := g.db.WithContext(ctx).Model(&Task{}).Where("ticket_id = ?", ticketID).Count(&count).Error
+	return count, err
+}
+
 func (g *gormTaskDAO) ListByInstanceID(ctx context.Context, offset, limit int64, instanceID int64) ([]Task, error) {
 	var tasks []Task
-	err := g.db.WithContext(ctx).Where("process_instance_id = ?", instanceID).
+	instKey := fmt.Sprintf("%d", instanceID)
+	err := g.db.WithContext(ctx).Where("process_instance_id = ? OR instance_key = ?", instanceID, instKey).
 		Order("ctime DESC").Offset(int(offset)).Limit(int(limit)).Find(&tasks).Error
 	return tasks, err
 }
 
 func (g *gormTaskDAO) CountByInstanceID(ctx context.Context, instanceID int64) (int64, error) {
 	var count int64
-	err := g.db.WithContext(ctx).Model(&Task{}).Where("process_instance_id = ?", instanceID).Count(&count).Error
+	instKey := fmt.Sprintf("%d", instanceID)
+	err := g.db.WithContext(ctx).Model(&Task{}).Where("process_instance_id = ? OR instance_key = ?", instanceID, instKey).Count(&count).Error
 	return count, err
 }
 

@@ -71,13 +71,22 @@ func (h *Handler) ListTask(ctx *ginx.Context, req ListTaskReq) (ginx.Result, err
 
 func (h *Handler) ListTaskByInstanceID(ctx *ginx.Context,
 	req ListTaskByInstanceIDReq) (ginx.Result, error) {
-	if req.InstanceID <= 0 {
-		return invalidParameterResult(fmt.Errorf("流程实例 ID 非法")), nil
+	if req.TicketID <= 0 && req.InstanceID <= 0 {
+		return invalidParameterResult(fmt.Errorf("工单 ID 或流程实例 ID 不能为空")), nil
 	}
 	if err := normalizePage(&req.Page); err != nil {
 		return invalidParameterResult(err), nil
 	}
-	tasks, total, err := h.svc.ListTaskByInstanceID(ctx, req.Offset, req.Limit, req.InstanceID)
+	var (
+		tasks []domain.Task
+		total int64
+		err   error
+	)
+	if req.TicketID > 0 {
+		tasks, total, err = h.svc.ListTaskByTicketID(ctx, req.Offset, req.Limit, req.TicketID)
+	} else {
+		tasks, total, err = h.svc.ListTaskByInstanceID(ctx, req.Offset, req.Limit, req.InstanceID)
+	}
 	if err != nil {
 		return systemErrorResult, err
 	}
@@ -159,12 +168,14 @@ func mapTasks(tasks []domain.Task) []Task {
 			ID: task.ID, TicketID: task.TicketID,
 			ProcessInstanceID: task.InstanceID.Int64(),
 			NodeID:            task.NodeID, NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
-			Status: task.Status.ToUint8(), Phase: string(task.Phase),
-			ScheduledAt: task.ScheduledAt, OriginalScheduledAt: task.OriginalScheduledAt,
+			Status:             task.Status.ToUint8(),
+			Phase:              string(task.Status.ToPhase()),
+			ScheduledAt:        task.ScheduledAt,
+			OriginalScheduledAt: task.ScheduledAt,
 			CompensationNodeID: task.CompensationNodeID,
 			IsCompensation:     task.ExecutionKind == domain.TaskExecutionCompensation,
 			CurrentAttemptID:   task.CurrentAttemptID, AdvancedAt: task.AdvancedAt,
-			CancelledAt: task.CancelledAt, LastError: task.LastError,
+			CancelledAt: 0, LastError: task.LastError,
 			CTime: task.CTime, UTime: task.UTime,
 		}
 	})
