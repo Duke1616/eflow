@@ -19,7 +19,8 @@ import (
 	"github.com/gotomicro/ego/core/elog"
 )
 
-const maxTaskAttempts = 5
+// maxTaskAttempts 单个自动化任务最大允许的执行尝试次数（默认限制为 3 次，防止任务失败无限重试耗尽资源）
+const maxTaskAttempts = 3
 
 var (
 	ErrWithdrawalInProgress   = errors.New("工单正在撤回，暂不推进自动化节点")
