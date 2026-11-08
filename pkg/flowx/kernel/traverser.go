@@ -60,13 +60,16 @@ func (t *executionTracer) markTerminalNodes(inst *model.Instance) {
 func (t *executionTracer) markTaskNodes(tasks []*model.Task) {
 	tasksByNode := lo.GroupBy(tasks, func(tk *model.Task) string { return tk.NodeID })
 	for nodeID, nodeTasks := range tasksByNode {
-		t.activated[nodeID] = true
 		latestTasks := model.FilterLatestBatchTasks(nodeTasks)
 
-		// 最新批次只要有任意通过任务，或者全为系统跳过任务，判定节点完成
-		isPassed := lo.SomeBy(latestTasks, func(tk *model.Task) bool { return tk.IsPassed() })
+		// 若最新批次全为系统跳过任务，说明属于未命中分支，不参与流转高亮投影，严格遵循用户的实际选择
 		isAllSkipped := len(latestTasks) > 0 && lo.EveryBy(latestTasks, func(tk *model.Task) bool { return tk.Status == model.TaskSkipped })
-		if isPassed || isAllSkipped {
+		if isAllSkipped {
+			continue
+		}
+
+		t.activated[nodeID] = true
+		if lo.SomeBy(latestTasks, func(tk *model.Task) bool { return tk.IsPassed() }) {
 			t.completed[nodeID] = true
 		}
 	}

@@ -527,7 +527,7 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 		}
 		targetNodes = []model.NodeSpec{tn}
 	} else {
-		nodes, err := session.Plan().FindUpstreamRejectNodes(task.NodeID)
+		nodes, err := session.Plan().FindUpstreamRejectNodes(task.NodeID, session.AllTasks())
 		if err != nil || len(nodes) == 0 {
 			session.Instance().Reject() // 无可用上游审批节点，流程置为终态 Rejected
 			return session.SaveInstance(ctx)

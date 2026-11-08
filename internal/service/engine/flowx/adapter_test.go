@@ -196,10 +196,10 @@ func TestCalculateFlowxTraversedEdges_ComplexTopology(t *testing.T) {
 	plan := kernel.NewExecutionPlan(def)
 	edges1 := plan.CalculateTraversedEdges(tasksCase1, nil)
 
-	// 上游与到达待办分支正常点亮
+	// 上游与到达待办分支正常点亮 (跳过的分支不予点亮，严格遵循实际选择)
 	assert.Contains(t, edges1["start"], "submitter")
 	assert.Contains(t, edges1["submitter"], "split_gw")
-	assert.Contains(t, edges1["split_gw"], "backend")
+	assert.NotContains(t, edges1["split_gw"], "backend")
 	assert.Contains(t, edges1["split_gw"], "frontend")
 	assert.Contains(t, edges1["split_gw"], "algo")
 
@@ -221,8 +221,8 @@ func TestCalculateFlowxTraversedEdges_ComplexTopology(t *testing.T) {
 
 	edges2 := plan.CalculateTraversedEdges(tasksCase2, nil)
 
-	// 后端、前端、算法流入汇聚网关全部点亮
-	assert.Contains(t, edges2["backend"], "join_gw")
+	// 跳过的后端入网关线不点亮；前端、算法流入汇聚网关正常点亮
+	assert.NotContains(t, edges2["backend"], "join_gw")
 	assert.Contains(t, edges2["frontend"], "join_gw")
 	assert.Contains(t, edges2["algo"], "join_gw")
 
