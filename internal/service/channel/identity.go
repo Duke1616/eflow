@@ -71,6 +71,29 @@ func (r *channelIdentityResolver) ResolveUser(ctx context.Context, channel domai
 	return nil, fmt.Errorf("%w: channel=%s, id=%s", ErrChannelUserNotFound, channel, trimmedID)
 }
 
+// ResolveStarter 校验第三方渠道操作人是否为工单的合法发起人（用于发起人撤销卡片等工单级操作鉴权）
+func (r *channelIdentityResolver) ResolveStarter(ctx context.Context, channel domain.ChannelType, channelUserID string, starter string) (*userv1.User, error) {
+	trimmedID := strings.TrimSpace(channelUserID)
+	if trimmedID == "" {
+		return nil, fmt.Errorf("%w: 渠道用户标识不能为空", ErrChannelUserNotFound)
+	}
+	trimmedStarter := strings.TrimSpace(starter)
+	if trimmedStarter == "" {
+		return nil, fmt.Errorf("%w: 工单发起人不能为空", ErrChannelUserNotFound)
+	}
+
+	user, err := r.findUserByUsername(ctx, trimmedStarter)
+	if err != nil {
+		return nil, fmt.Errorf("查询工单发起人账户失败 [starter=%s]: %w", trimmedStarter, err)
+	}
+
+	if !r.isChannelBindingMatch(user, channel, trimmedID) {
+		return nil, fmt.Errorf("当前操作者 %s 未绑定工单发起人 %s 账号", trimmedID, trimmedStarter)
+	}
+
+	return user, nil
+}
+
 // resolveByTaskAssignee 通过任务上下文的 Assignee 提取用户信息并校验三方渠道绑定关系
 func (r *channelIdentityResolver) resolveByTaskAssignee(ctx context.Context, channel domain.ChannelType, channelUserID string, engineType domain.EngineType, taskID domain.ID) (*userv1.User, error) {
 	taskCtx, err := r.engine.GetTaskContext(ctx, engineType, taskID)

@@ -139,12 +139,22 @@ func (q *queryService) assembleTicketViews(ctx context.Context, tickets []domain
 		return t.InstanceID.String()
 	})
 
-	// 2. 批量解析待办处理人真实姓名字典
-	displayNames := q.resolveDisplayNames(ctx, processTasks)
+	// 2. 批量解析待办处理人与工单提单人的展示姓名
+	approvers := lo.FilterMap(processTasks, func(t domain.TodoTask, _ int) (string, bool) {
+		return t.ApprovedBy, t.ApprovedBy != ""
+	})
+	starters := lo.FilterMap(tickets, func(t domain.Ticket, _ int) (string, bool) {
+		return t.CreateBy, t.CreateBy != ""
+	})
+	displayNames := q.getUserMap(ctx, lo.Uniq(append(approvers, starters...)))
 
-	// 3. 以工单实体为基准展开待办视图，当存在并行多分支时展开为多条独立的视图记录供前端进行 Rowspan 合并
+	// 3. 以工单实体为基准展开待办视图，将提单人映射为真实展示姓名；当存在并行多分支时展开为多条独立的视图记录供前端进行 Rowspan 合并
 	views := lo.FlatMap(tickets, func(ticket domain.Ticket, _ int) []domain.TicketTaskView {
-		return ticket.ResolveViews(tasksByProcInst[ticket.Process.InstanceID.String()], displayNames)
+		viewTicket := ticket
+		if name, ok := displayNames[ticket.CreateBy]; ok && name != "" {
+			viewTicket.CreateBy = name
+		}
+		return viewTicket.ResolveViews(tasksByProcInst[ticket.Process.InstanceID.String()], displayNames)
 	})
 
 	return views, total, nil
@@ -248,10 +258,14 @@ func (q *queryService) assemblePendingTasks(ctx context.Context, todos []domain.
 		return t.Process.InstanceID.String()
 	})
 
-	usernames := lo.Uniq(lo.FilterMap(todos, func(t domain.TodoTask, _ int) (string, bool) {
+	approvers := lo.FilterMap(todos, func(t domain.TodoTask, _ int) (string, bool) {
 		return t.ApprovedBy, t.ApprovedBy != ""
-	}))
-	displayNames := q.getUserMap(ctx, usernames)
+	})
+	allTickets := append(easyflowTickets, flowxTickets...)
+	starters := lo.FilterMap(allTickets, func(t domain.Ticket, _ int) (string, bool) {
+		return t.CreateBy, t.CreateBy != ""
+	})
+	displayNames := q.getUserMap(ctx, lo.Uniq(append(approvers, starters...)))
 
 	return lo.Map(todos, func(t domain.TodoTask, _ int) domain.TicketTaskView {
 		view := domain.TicketTaskView{
@@ -267,14 +281,20 @@ func (q *queryService) assemblePendingTasks(ctx context.Context, todos []domain.
 			view.ApprovedBy = t.ApprovedBy
 		}
 
+		var matchedTicket domain.Ticket
+		var found bool
 		if t.EngineType == domain.EngineTypeFlowx {
-			if matchedTicket, ok := ticketsByInstKey[t.InstanceID.String()]; ok {
-				view.Ticket = matchedTicket
-			}
+			matchedTicket, found = ticketsByInstKey[t.InstanceID.String()]
 		} else {
-			if matchedTicket, ok := ticketsByProcInst[t.InstanceID.Int()]; ok {
-				view.Ticket = matchedTicket
+			matchedTicket, found = ticketsByProcInst[t.InstanceID.Int()]
+		}
+
+		if found {
+			viewTicket := matchedTicket
+			if name, ok := displayNames[matchedTicket.CreateBy]; ok && name != "" {
+				viewTicket.CreateBy = name
 			}
+			view.Ticket = viewTicket
 		}
 		return view
 	}), nil

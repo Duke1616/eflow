@@ -125,7 +125,32 @@ func (h *larkCallbackHandler) OnCardAction(ctx context.Context, cte *larkcallbac
 		}
 	}()
 
-	return &larkcallback.CardActionTriggerResponse{}, nil
+	// 针对异步耗时操作立即向飞书客户端下发轻量 Toast 响应，消除“点击无反应”假死体验
+	var resp larkcallback.CardActionTriggerResponse
+	switch domainEvt.Action {
+	case domain.ChannelActionProgress:
+		resp.Toast = &larkcallback.Toast{
+			Type:    "info",
+			Content: "正在生成流程进度图，请稍候...",
+		}
+	case domain.ChannelActionPass:
+		resp.Toast = &larkcallback.Toast{
+			Type:    "info",
+			Content: "正在处理审批通过...",
+		}
+	case domain.ChannelActionReject:
+		resp.Toast = &larkcallback.Toast{
+			Type:    "info",
+			Content: "正在处理审批驳回...",
+		}
+	case domain.ChannelActionRevoke:
+		resp.Toast = &larkcallback.Toast{
+			Type:    "info",
+			Content: "正在处理工单撤销...",
+		}
+	}
+
+	return &resp, nil
 }
 
 // Handle 执行具体的流转处理逻辑
@@ -426,11 +451,18 @@ func getCallbackValue(evt domain.ChannelActionEvent) []notification.Value {
 func extractChannelActionEvent(cte *larkcallback.CardActionTriggerEvent) domain.ChannelActionEvent {
 	actionValue := cte.Event.Action.Value
 	formValue := cte.Event.Action.FormValue
+	actionMap := mapx.Map(actionValue)
 
-	// 1. 安全解引用操作人 ID（借助 lo.FromPtr 实现空指针安全防护）
+	// 1. 安全解引用操作人 ID（依次尝试 UserID、OpenID 及卡片载荷中的 user_id 兜底，避免身份丢失）
 	var userID string
 	if cte.Event.Operator != nil {
-		userID = lo.FromPtr(cte.Event.Operator.UserID)
+		userID = strings.TrimSpace(lo.FromPtr(cte.Event.Operator.UserID))
+		if userID == "" {
+			userID = strings.TrimSpace(cte.Event.Operator.OpenID)
+		}
+	}
+	if userID == "" {
+		userID = strings.TrimSpace(actionMap.GetString("user_id"))
 	}
 
 	var msgID string
@@ -446,7 +478,6 @@ func extractChannelActionEvent(cte *larkcallback.CardActionTriggerEvent) domain.
 	}
 
 	// 3. 优雅回退动作类型（优先使用 Action.Name，为空时回退使用 Action.Value 载荷中的 action 字段）
-	actionMap := mapx.Map(actionValue)
 	valAction := actionMap.GetString("action")
 	actionName := strings.TrimSpace(lo.CoalesceOrEmpty(cte.Event.Action.Name, valAction))
 

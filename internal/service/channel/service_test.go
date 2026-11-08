@@ -113,6 +113,51 @@ func TestChannelActionService_DispatchAction(t *testing.T) {
 			wantSuccess: true,
 			wantRemark:  "你已同意该申请, 批注：FlowX准予发布",
 		},
+		{
+			name: "查看进度即使任务上下文不存在也安全放行",
+			evt: domain.ChannelActionEvent{
+				Channel:       domain.ChannelFeishu,
+				ChannelUserID: "observer_feishu_id",
+				Action:        domain.ChannelActionProgress,
+				TicketID:      2735,
+			},
+			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
+				mockTicket.EXPECT().GetByID(gomock.Any(), int64(2735)).Return(domain.Ticket{
+					CreateBy: "luankz",
+					Process:  domain.Process{EngineType: domain.EngineTypeFlowx},
+				}, nil).AnyTimes()
+				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelFeishu, "observer_feishu_id", domain.EngineTypeFlowx, domain.NewID("")).
+					Return(nil, ErrChannelUserNotFound)
+				mockResolver.EXPECT().ResolveStarter(gomock.Any(), domain.ChannelFeishu, "observer_feishu_id", "luankz").
+					Return(nil, errors.New("not starter"))
+			},
+			wantSuccess: true,
+			wantRemark:  "查看工单流转进度",
+		},
+		{
+			name: "发起人撤销卡片回退校验发起人成功",
+			evt: domain.ChannelActionEvent{
+				Channel:       domain.ChannelFeishu,
+				ChannelUserID: "starter_feishu_id",
+				Action:        domain.ChannelActionRevoke,
+				TicketID:      2735,
+				Comment:       "不再需要发布",
+			},
+			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
+				mockTicket.EXPECT().GetByID(gomock.Any(), int64(2735)).Return(domain.Ticket{
+					Id:       2735,
+					CreateBy: "luankz",
+					Process:  domain.Process{EngineType: domain.EngineTypeFlowx, InstanceID: domain.NewID("inst_123")},
+				}, nil).AnyTimes()
+				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelFeishu, "starter_feishu_id", domain.EngineTypeFlowx, domain.NewID("")).
+					Return(nil, ErrChannelUserNotFound)
+				mockResolver.EXPECT().ResolveStarter(gomock.Any(), domain.ChannelFeishu, "starter_feishu_id", "luankz").
+					Return(&userv1.User{Username: "luankz"}, nil)
+				mockWithdrawal.EXPECT().Revoke(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("inst_123"), true, "luankz", "不再需要发布").Return(nil)
+			},
+			wantSuccess: true,
+			wantRemark:  "你已撤销该申请, 原因：不再需要发布",
+		},
 	}
 
 	for _, tc := range testCases {

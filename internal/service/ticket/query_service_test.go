@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 )
 
 func TestQueryService_ListUserInitiated(t *testing.T) {
@@ -81,22 +82,30 @@ func TestQueryService_ListUserInitiated(t *testing.T) {
 						{InstanceID: domain.NewID(101), NodeName: "组长审批", ApprovedBy: "bob", TaskID: domain.NewID(999)},
 					}, nil)
 
-				userSvc.EXPECT().QueryByUsernames(gomock.Any(), &userv1.QueryByUsernamesReq{Usernames: []string{"bob"}}).
-					Return(&userv1.QueryUsersResp{
-						Users: []*userv1.User{{Username: "bob", DisplayName: "鲍勃"}},
-					}, nil)
+				userSvc.EXPECT().QueryByUsernames(gomock.Any(), gomock.Any()).
+					DoAndReturn(func(_ context.Context, req *userv1.QueryByUsernamesReq, _ ...grpc.CallOption) (*userv1.QueryUsersResp, error) {
+						assert.ElementsMatch(t, []string{"bob", "alice"}, req.Usernames)
+						return &userv1.QueryUsersResp{
+							Users: []*userv1.User{
+								{Username: "bob", DisplayName: "鲍勃"},
+								{Username: "alice", DisplayName: "爱丽丝"},
+							},
+						}, nil
+					})
 			},
 			wantCount: 2,
 			wantTotal: 2,
 			check: func(t *testing.T, views []domain.TicketTaskView) {
-				// 工单 1 聚合了当前步骤与处理人真实姓名
+				// 工单 1 聚合了当前步骤与处理人真实姓名，提单人也解析为真实姓名
 				assert.Equal(t, int64(1), views[0].Ticket.Id)
+				assert.Equal(t, "爱丽丝", views[0].Ticket.CreateBy)
 				assert.Equal(t, "组长审批", views[0].CurrentStep)
 				assert.Equal(t, "鲍勃", views[0].ApprovedBy)
 				assert.Equal(t, domain.NewID("999"), views[0].TaskID)
 
-				// 工单 2 已撤回，步骤展示为“已撤回”
+				// 工单 2 已撤回，步骤展示为“已撤回”，提单人同样解析为真实姓名
 				assert.Equal(t, int64(2), views[1].Ticket.Id)
+				assert.Equal(t, "爱丽丝", views[1].Ticket.CreateBy)
 				assert.Equal(t, "已撤回", views[1].CurrentStep)
 			},
 		},
@@ -138,14 +147,16 @@ func TestQueryService_ListUserInitiated(t *testing.T) {
 			wantCount: 2, // 同一工单按步骤展开为 2 条视图记录
 			wantTotal: 1, // 工单基础分页总数维持 1
 			check: func(t *testing.T, views []domain.TicketTaskView) {
-				// 第一条视图对应“后端”分支
+				// 第一条视图对应“后端”分支，提单人解析为真实姓名
 				assert.Equal(t, int64(2735), views[0].Ticket.Id)
+				assert.Equal(t, "张三", views[0].Ticket.CreateBy)
 				assert.Equal(t, "后端", views[0].CurrentStep)
 				assert.Equal(t, "裴承运", views[0].ApprovedBy)
 				assert.Equal(t, domain.NewID("5242"), views[0].TaskID)
 
 				// 第二条视图对应“前端”分支，工单主体数据完全一致，供前端根据 ID 合并行
 				assert.Equal(t, int64(2735), views[1].Ticket.Id)
+				assert.Equal(t, "张三", views[1].Ticket.CreateBy)
 				assert.Equal(t, "前端", views[1].CurrentStep)
 				assert.Equal(t, "张三", views[1].ApprovedBy)
 				assert.Equal(t, domain.NewID("5243"), views[1].TaskID)
@@ -196,8 +207,9 @@ func TestQueryService_ListAllTodo(t *testing.T) {
 				Status: domain.START_FAILED,
 			},
 			{
-				Id:     10,
-				Status: domain.PROCESS,
+				Id:       10,
+				Status:   domain.PROCESS,
+				CreateBy: "luan",
 				Process: domain.Process{
 					EngineType: domain.EngineTypeFlowx,
 					InstanceID: domain.NewID("inst_101"),
@@ -223,10 +235,16 @@ func TestQueryService_ListAllTodo(t *testing.T) {
 			},
 		}, nil)
 
-	mockUser.EXPECT().QueryByUsernames(gomock.Any(), &userv1.QueryByUsernamesReq{Usernames: []string{"charlie"}}).
-		Return(&userv1.QueryUsersResp{
-			Users: []*userv1.User{{Username: "charlie", DisplayName: "查理"}},
-		}, nil)
+	mockUser.EXPECT().QueryByUsernames(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, req *userv1.QueryByUsernamesReq, _ ...grpc.CallOption) (*userv1.QueryUsersResp, error) {
+			assert.ElementsMatch(t, []string{"charlie", "luan"}, req.Usernames)
+			return &userv1.QueryUsersResp{
+				Users: []*userv1.User{
+					{Username: "charlie", DisplayName: "查理"},
+					{Username: "luan", DisplayName: "栾凯朝"},
+				},
+			}, nil
+		})
 
 	svc := NewQueryService(mockRepo, mockEngine, mockUser, nil)
 	views, total, err := svc.ListAllTodo(context.Background(), "", "", false, 0, 10)
@@ -238,8 +256,9 @@ func TestQueryService_ListAllTodo(t *testing.T) {
 	assert.Equal(t, int64(99), views[0].Ticket.Id)
 	assert.Equal(t, "流程启动失败", views[0].CurrentStep)
 
-	// 第二个是正常引擎任务
+	// 第二个是正常引擎任务，提单人成功解析为“栾凯朝”
 	assert.Equal(t, int64(10), views[1].Ticket.Id)
+	assert.Equal(t, "栾凯朝", views[1].Ticket.CreateBy)
 	assert.Equal(t, "财务复核", views[1].CurrentStep)
 	assert.Equal(t, "查理", views[1].ApprovedBy)
 }

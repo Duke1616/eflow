@@ -57,6 +57,21 @@ func (mr *MockIChannelIdentityResolverMockRecorder) ResolveUser(ctx, channel, ch
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveUser", reflect.TypeOf((*MockIChannelIdentityResolver)(nil).ResolveUser), ctx, channel, channelUserID, engineType, taskID)
 }
 
+// ResolveStarter mocks base method.
+func (m *MockIChannelIdentityResolver) ResolveStarter(ctx context.Context, channel domain.ChannelType, channelUserID, starter string) (*userv1.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveStarter", ctx, channel, channelUserID, starter)
+	ret0, _ := ret[0].(*userv1.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolveStarter indicates an expected call of ResolveStarter.
+func (mr *MockIChannelIdentityResolverMockRecorder) ResolveStarter(ctx, channel, channelUserID, starter any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveStarter", reflect.TypeOf((*MockIChannelIdentityResolver)(nil).ResolveStarter), ctx, channel, channelUserID, starter)
+}
+
 // MockIChannelActionService is a mock of IChannelActionService interface.
 type MockIChannelActionService struct {
 	ctrl     *gomock.Controller

@@ -280,18 +280,26 @@ func (a *flowxEngine) GetTasksByCurrentNode(ctx context.Context, _ domain.Engine
 		return nil, err
 	}
 
-	pendingTasks := lo.Filter(tasks, func(t *flowxModel.Task, _ int) bool {
+	// 针对当前节点任务过滤：
+	// 1. 优先提取处于待决挂起态的任务 (如普通人工审批节点)
+	// 2. 若无待决任务，提取当前节点生成的任务 (适配抄送知会等瞬时穿透定态节点，确保通知事件可正常索引)
+	matchedTasks := lo.Filter(tasks, func(t *flowxModel.Task, _ int) bool {
 		return t.NodeID == nodeID && t.IsPending()
 	})
+	if len(matchedTasks) == 0 {
+		matchedTasks = lo.Filter(tasks, func(t *flowxModel.Task, _ int) bool {
+			return t.NodeID == nodeID
+		})
+	}
 
-	return lo.Map(pendingTasks, func(t *flowxModel.Task, _ int) domain.TaskRecord {
+	return lo.Map(matchedTasks, func(t *flowxModel.Task, _ int) domain.TaskRecord {
 		return domain.TaskRecord{
 			TaskID:     domain.NewID(t.ID),
 			NodeID:     t.NodeID,
 			NodeName:   t.NodeName,
 			ApprovedBy: t.Assignee,
-			Status:     0,
-			IsFinished: 0,
+			Status:     int(t.Status),
+			IsFinished: lo.Ternary(t.IsTerminal(), 1, 0),
 		}
 	}), nil
 }

@@ -91,8 +91,11 @@ func (n *Notification) asyncHandleCarbonCopy(ctx context.Context, info strategy.
 		}
 	}
 
-	// 3. 自动通过任务流转
+	// 3. 自动通过任务流转（仅针对老 Easyflow 阻塞式审批待办模式；FlowX 引擎已瞬时自动穿透推进，无需且禁止重复 Pass）
 	for _, task := range tasks {
+		if task.EngineType == domain.EngineTypeFlowx {
+			continue
+		}
 		if err = n.PassTask(ctx, task.EngineType, task.TaskID, "抄送系统自动通过"); err != nil {
 			n.Logger().Error("CarbonCopy 自动流转失败", elog.FieldErr(err), elog.String("taskId", task.TaskID.String()))
 		}

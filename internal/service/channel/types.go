@@ -19,6 +19,8 @@ var (
 type IChannelIdentityResolver interface {
 	// ResolveUser 基于渠道类型、第三方平台用户标识及任务上下文精准定位可信的内部用户
 	ResolveUser(ctx context.Context, channel domain.ChannelType, channelUserID string, engineType domain.EngineType, taskID domain.ID) (*userv1.User, error)
+	// ResolveStarter 校验第三方渠道用户是否为工单的合法发起人（用于撤销卡片等工单级操作）
+	ResolveStarter(ctx context.Context, channel domain.ChannelType, channelUserID string, starter string) (*userv1.User, error)
 }
 
 // IChannelActionService 跨渠道工单审批流转统一业务编排接口

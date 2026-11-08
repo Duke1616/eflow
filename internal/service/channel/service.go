@@ -46,15 +46,46 @@ func (s *channelActionService) DispatchAction(ctx context.Context, evt domain.Ch
 		comment = "无"
 	}
 
-	var engineType domain.EngineType
+	var (
+		engineType domain.EngineType
+		createBy   string
+	)
 	if evt.TicketID > 0 {
 		if ticket, err := s.ticketSvc.GetByID(ctx, evt.TicketID); err == nil {
 			engineType = ticket.Process.EngineType
+			createBy = ticket.CreateBy
 		}
 	}
 
-	// 2. 身份解析（核心鉴权防线）
+	// 2. 特权动作与只读交互优化：
+	// “查看进度”为只读查询，绝不修改工单或任务状态。优先解析操作人，解析不到也安全放行
+	if evt.Action == domain.ChannelActionProgress {
+		operator := evt.ChannelUserID
+		if user, err := s.identityResolver.ResolveUser(ctx, evt.Channel, evt.ChannelUserID, engineType, evt.TaskID); err == nil && user != nil {
+			operator = user.Username
+		} else if createBy != "" {
+			if startUser, sErr := s.identityResolver.ResolveStarter(ctx, evt.Channel, evt.ChannelUserID, createBy); sErr == nil && startUser != nil {
+				operator = startUser.Username
+			}
+		}
+		return &domain.ChannelActionResult{
+			Success:  true,
+			Action:   domain.ChannelActionProgress,
+			Operator: operator,
+			Remark:   "查看工单流转进度",
+		}, nil
+	}
+
+	// 3. 身份解析（针对审批与撤销等写操作的核心鉴权防线）
 	user, err := s.identityResolver.ResolveUser(ctx, evt.Channel, evt.ChannelUserID, engineType, evt.TaskID)
+	// 若任务上下文未解析到（如发起人撤销卡片无具体审批任务），且当前动作是撤销，回退校验工单发起人身份
+	if err != nil && evt.Action == domain.ChannelActionRevoke && createBy != "" {
+		if startUser, sErr := s.identityResolver.ResolveStarter(ctx, evt.Channel, evt.ChannelUserID, createBy); sErr == nil && startUser != nil {
+			user = startUser
+			err = nil
+		}
+	}
+
 	if err != nil {
 		s.logger.Error("跨渠道审批身份解析失败，强行阻断流转",
 			elog.String("channel", string(evt.Channel)),

@@ -156,6 +156,10 @@ func (l *FlowxNotificationListener) buildNotificationInfo(
 	userIDs []string,
 ) strategy.Info {
 	instID := domain.NewID(instanceKey).Int()
+	if ticket.Process.InstanceID.IsZero() && instanceKey != "" {
+		ticket.Process.InstanceID = domain.NewID(instanceKey)
+		ticket.Process.EngineType = domain.EngineTypeFlowx
+	}
 	return strategy.Info{
 		NodeName: strategyName,
 		FlowContext: strategy.FlowContext{
