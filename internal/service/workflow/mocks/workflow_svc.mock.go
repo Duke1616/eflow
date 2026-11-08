@@ -132,18 +132,23 @@ func (mr *MockIWorkflowCoreServiceMockRecorder) FindByKeyword(ctx, keyword, offs
 }
 
 // FindInstanceFlow mocks base method.
-func (m *MockIWorkflowCoreService) FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error) {
+func (m *MockIWorkflowCoreService) FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int, engineType ...domain.EngineType) (domain.Workflow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FindInstanceFlow", ctx, workflowID, processID, version)
+	varargs := []any{ctx, workflowID, processID, version}
+	for _, a := range engineType {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "FindInstanceFlow", varargs...)
 	ret0, _ := ret[0].(domain.Workflow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FindInstanceFlow indicates an expected call of FindInstanceFlow.
-func (mr *MockIWorkflowCoreServiceMockRecorder) FindInstanceFlow(ctx, workflowID, processID, version any) *gomock.Call {
+func (mr *MockIWorkflowCoreServiceMockRecorder) FindInstanceFlow(ctx, workflowID, processID, version any, engineType ...any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindInstanceFlow", reflect.TypeOf((*MockIWorkflowCoreService)(nil).FindInstanceFlow), ctx, workflowID, processID, version)
+	varargs := append([]any{ctx, workflowID, processID, version}, engineType...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindInstanceFlow", reflect.TypeOf((*MockIWorkflowCoreService)(nil).FindInstanceFlow), varargs...)
 }
 
 // GetAutomationNodes mocks base method.
@@ -342,18 +347,23 @@ func (mr *MockServiceMockRecorder) FindByKeyword(ctx, keyword, offset, limit any
 }
 
 // FindInstanceFlow mocks base method.
-func (m *MockService) FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error) {
+func (m *MockService) FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int, engineType ...domain.EngineType) (domain.Workflow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FindInstanceFlow", ctx, workflowID, processID, version)
+	varargs := []any{ctx, workflowID, processID, version}
+	for _, a := range engineType {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "FindInstanceFlow", varargs...)
 	ret0, _ := ret[0].(domain.Workflow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FindInstanceFlow indicates an expected call of FindInstanceFlow.
-func (mr *MockServiceMockRecorder) FindInstanceFlow(ctx, workflowID, processID, version any) *gomock.Call {
+func (mr *MockServiceMockRecorder) FindInstanceFlow(ctx, workflowID, processID, version any, engineType ...any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindInstanceFlow", reflect.TypeOf((*MockService)(nil).FindInstanceFlow), ctx, workflowID, processID, version)
+	varargs := append([]any{ctx, workflowID, processID, version}, engineType...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindInstanceFlow", reflect.TypeOf((*MockService)(nil).FindInstanceFlow), varargs...)
 }
 
 // GetAutomationNodes mocks base method.

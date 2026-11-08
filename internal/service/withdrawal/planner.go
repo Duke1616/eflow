@@ -89,7 +89,7 @@ func (p *compensationPlanner) Build(ctx context.Context, processInstanceID int) 
 	if err != nil {
 		return CompensationPlan{}, fmt.Errorf("查询流程实例失败: %w", err)
 	}
-	flow, err := p.workflows.FindInstanceFlow(ctx, ticket.WorkflowId, instance.ProcID, instance.ProcVersion)
+	flow, err := p.workflows.FindInstanceFlow(ctx, ticket.WorkflowId, instance.ProcID, instance.ProcVersion, ticket.Process.ResolveEngineType())
 	if err != nil {
 		return CompensationPlan{}, fmt.Errorf("查询流程实例快照失败: %w", err)
 	}

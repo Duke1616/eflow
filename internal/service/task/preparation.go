@@ -60,7 +60,7 @@ func (s *taskService) prepareAttempt(ctx context.Context,
 
 func (s *taskService) resolvePreparation(ctx context.Context, task domain.Task,
 	ticket domain.Ticket) (preparation, error) {
-	flow, err := s.workflows.FindInstanceFlow(ctx, ticket.WorkflowId, 0, task.ProcessVersion)
+	flow, err := s.workflows.FindInstanceFlow(ctx, ticket.WorkflowId, 0, task.ProcessVersion, ticket.Process.ResolveEngineType())
 	if err != nil {
 		return preparation{}, s.taskError(task.ID, taskPreparationOperation, err)
 	}

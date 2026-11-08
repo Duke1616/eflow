@@ -189,6 +189,7 @@ func (t TaskContext) ValidateOperable(operator string, isAdmin bool) error {
 
 // InstanceExecutionView 流程实例运行时轨迹与点亮视图
 type InstanceExecutionView struct {
+	EngineType     EngineType          // 产生该执行视图的底层引擎类型 (EasyFlow / FlowX)
 	WorkflowID     int64               // 关联的工作流定义主键 ID
 	ProcessKey     string              // 流程全局唯一标识 Key（FlowX 对应 procKey）
 	ProcessID      int                 // Deprecated: 历史流程定义 ID（仅用于兼容 EasyFlow 引擎存量实例）

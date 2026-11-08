@@ -269,6 +269,7 @@ func (a *adapter) GetInstanceExecutionView(ctx context.Context, _ domain.EngineT
 	}
 
 	return domain.InstanceExecutionView{
+		EngineType:     domain.EngineTypeEasyFlow,
 		ProcessID:      inst.ProcID,
 		ProcessVersion: inst.ProcVersion,
 		NodeStatusMap:  nodeStatusMap,

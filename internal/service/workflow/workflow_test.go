@@ -269,7 +269,7 @@ func TestService_GetHighlightedGraph(t *testing.T) {
 	}, nil)
 
 	// 3. Mock FindSnapshotByWorkflowVersion (FindInstanceFlow 内部调用)
-	repo.EXPECT().FindSnapshotByWorkflowVersion(gomock.Any(), int64(10), domain.EngineType(""), 1).Return(domain.Workflow{
+	repo.EXPECT().FindSnapshotByWorkflowVersion(gomock.Any(), int64(10), domain.EngineTypeEasyFlow, 1).Return(domain.Workflow{
 		Id: 10,
 		FlowData: domain.CanvasData{
 			"nodes": []map[string]any{

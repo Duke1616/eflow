@@ -208,6 +208,7 @@ func (a *flowxEngine) GetInstanceExecutionView(ctx context.Context, _ domain.Eng
 	wfID := domain.ParseWorkflowIDFromProcessKey(view.ProcessKey)
 
 	return domain.InstanceExecutionView{
+		EngineType:     domain.EngineTypeFlowx,
 		WorkflowID:     wfID,
 		ProcessKey:     view.ProcessKey,
 		ProcessID:      int(wfID), // 兼顾下游仅读取 ProcessID 的场景

@@ -239,7 +239,7 @@ func (h *larkCallbackHandler) progress(ctx context.Context, ticketId int64, user
 		return err
 	}
 
-	wf, err := h.workflowSvc.FindInstanceFlow(taskCtx, ticketDetail.WorkflowId, view.ProcessID, view.ProcessVersion)
+	wf, err := h.workflowSvc.FindInstanceFlow(taskCtx, ticketDetail.WorkflowId, view.ProcessID, view.ProcessVersion, view.EngineType)
 	if err != nil {
 		return err
 	}

@@ -306,7 +306,7 @@ func (s *ticketService) Pass(ctx context.Context, ticketId int64, taskId string,
 	engineType := opCtx.ticket.Process.ResolveEngineType()
 
 	// 4. 统一加载流程图版本拓扑快照（支持按 workflow_id 智能检索与回退兜底，对底层流程引擎透明）
-	targetWf, err := s.workflowSvc.FindInstanceFlow(ctx, opCtx.ticket.WorkflowId, opCtx.taskInfo.ProcessID, opCtx.taskInfo.ProcessVersion)
+	targetWf, err := s.workflowSvc.FindInstanceFlow(ctx, opCtx.ticket.WorkflowId, opCtx.taskInfo.ProcessID, opCtx.taskInfo.ProcessVersion, engineType)
 	if err != nil {
 		return fmt.Errorf("获取流程拓扑快照失败: %w", err)
 	}
@@ -442,7 +442,8 @@ func (s *ticketService) GetTaskFormConfig(ctx context.Context, ticketId int64, t
 		wfID = opCtx.ticket.WorkflowId
 	}
 
-	targetWf, err := s.workflowSvc.FindInstanceFlow(ctx, wfID, opCtx.taskInfo.ProcessID, opCtx.taskInfo.ProcessVersion)
+	engineType := opCtx.ticket.Process.ResolveEngineType()
+	targetWf, err := s.workflowSvc.FindInstanceFlow(ctx, wfID, opCtx.taskInfo.ProcessID, opCtx.taskInfo.ProcessVersion, engineType)
 	if err != nil {
 		return nil, err
 	}

@@ -120,7 +120,7 @@ type plannerWorkflowServiceStub struct {
 	nodeName string
 }
 
-func (s *plannerWorkflowServiceStub) FindInstanceFlow(context.Context, int64, int, int) (domain.Workflow, error) {
+func (s *plannerWorkflowServiceStub) FindInstanceFlow(context.Context, int64, int, int, ...domain.EngineType) (domain.Workflow, error) {
 	return domain.Workflow{
 		FlowData: map[string]any{
 			"nodes": []map[string]any{
