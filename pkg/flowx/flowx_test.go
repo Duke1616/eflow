@@ -1182,6 +1182,69 @@ func TestEngine_GetExecutionView(t *testing.T) {
 	assert.Contains(t, view.PendingUsers, "leader_alice")
 }
 
+// TestEngine_GetExecutionView_OrSignPassNotOverwrittenBySkipped 验证或签场景下通过的任务不会被兄弟跳过任务覆盖状态
+func TestEngine_GetExecutionView_OrSignPassNotOverwrittenBySkipped(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+
+	def := model.ProcessDefinition{
+		Key:     "or_sign_flow",
+		Name:    "或签高亮测试",
+		Version: 1,
+		Nodes: []model.NodeSpec{
+			{ID: "start", Type: model.NodeStart, Name: "开始"},
+			{
+				ID: "hr_node", Type: model.NodeApproval, Name: "人事",
+				SignRule: model.SignOneVote,
+				Assignees: []string{"luankz", "peicg"},
+			},
+			{ID: "end", Type: model.NodeEnd, Name: "结束"},
+		},
+		Edges: []model.EdgeSpec{
+			{Source: "start", Target: "hr_node"},
+			{Source: "hr_node", Target: "end"},
+		},
+	}
+	_, err := engine.Deploy(ctx, def)
+	require.NoError(t, err)
+
+	instID, err := engine.Start(ctx, StartReq{
+		Key:     "or_sign_flow",
+		Starter: "alice",
+	})
+	require.NoError(t, err)
+
+	tasks, err := store.ListTasksByInstance(ctx, instID)
+	require.NoError(t, err)
+	require.Len(t, tasks, 2)
+
+	// 查找 luankz 的任务并审批通过
+	luanTask, ok := lo.Find(tasks, func(t *model.Task) bool { return t.Assignee == "luankz" })
+	require.True(t, ok)
+
+	err = engine.Pass(ctx, PassReq{
+		TaskID:   luanTask.ID,
+		Operator: "luankz",
+		Comment:  "同意",
+	})
+	require.NoError(t, err)
+
+	// 检查当前任务状态：luankz 任务为 Passed (1)，peicg 任务为 Skipped (5)
+	afterTasks, err := store.ListTasksByInstance(ctx, instID)
+	require.NoError(t, err)
+	peicgTask, ok := lo.Find(afterTasks, func(t *model.Task) bool { return t.Assignee == "peicg" })
+	require.True(t, ok)
+	assert.Equal(t, model.TaskSkipped, peicgTask.Status, "兄弟任务应当被联动置为 Skipped (5)")
+
+	// 核心断言：获取执行视图时，hr_node 的综合状态必须为 TaskPassed (1)，绝不能被 5 覆盖！
+	view, err := engine.GetExecutionView(ctx, instID)
+	require.NoError(t, err)
+	assert.Equal(t, int(model.TaskPassed), view.NodeStatusMap["hr_node"], "或签一人通过后，节点综合状态必须为 Passed(1)")
+	assert.Contains(t, view.TraversedEdges["start"], "hr_node", "start 到 hr_node 的边必须高亮")
+	assert.Contains(t, view.TraversedEdges["hr_node"], "end", "hr_node 到 end 的边必须高亮")
+}
+
 // TestEngine_ChatGroupNodeTraversalAndTask 验证群聊通知节点在穿透推进时正确落库 Task 快照并点亮拓扑连线
 func TestEngine_ChatGroupNodeTraversalAndTask(t *testing.T) {
 	ctx := context.Background()

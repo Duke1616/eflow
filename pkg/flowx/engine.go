@@ -697,8 +697,12 @@ func (e *flowEngine) GetExecutionView(ctx context.Context, instanceID string) (m
 		return model.ExecutionView{}, fmt.Errorf("加载流程执行计划失败: %w", err)
 	}
 
-	nodeStatusMap := lo.Associate(tasks, func(t *model.Task) (string, int) {
-		return t.NodeID, int(t.Status)
+	// 按节点分组聚合任务状态，避免或签场景下兄弟任务的 TaskSkipped(5) 错误覆盖已通过的 TaskPassed(1)
+	nodeTasks := lo.GroupBy(tasks, func(t *model.Task) string {
+		return t.NodeID
+	})
+	nodeStatusMap := lo.MapValues(nodeTasks, func(group []*model.Task, _ string) int {
+		return resolveNodeAggregateStatus(group)
 	})
 
 	pendingUsers := lo.Uniq(lo.FilterMap(tasks, func(t *model.Task, _ int) (string, bool) {
@@ -717,4 +721,35 @@ func (e *flowEngine) GetExecutionView(ctx context.Context, instanceID string) (m
 		TraversedEdges: traversedEdges,
 		PendingUsers:   pendingUsers,
 	}, nil
+}
+
+// resolveNodeAggregateStatus 根据节点下的所有任务裁决节点的综合状态
+// 状态裁决优先级：Passed (通过) > Rejected (驳回) > Pending (待办中) > Skipped (全跳过)
+func resolveNodeAggregateStatus(tasks []*model.Task) int {
+	if len(tasks) == 0 {
+		return int(model.TaskPending)
+	}
+
+	// 1. 节点下只要有任意任务已通过（人工通过或系统放行），节点综合状态必须裁决为通过
+	if lo.SomeBy(tasks, func(t *model.Task) bool { return t.IsPassed() }) {
+		return int(model.TaskPassed)
+	}
+
+	// 2. 节点下存在主动驳回任务
+	if lo.SomeBy(tasks, func(t *model.Task) bool { return t.Status == model.TaskRejected }) {
+		return int(model.TaskRejected)
+	}
+
+	// 3. 节点下仍有待办任务（会签等待中或尚未处理）
+	if lo.SomeBy(tasks, func(t *model.Task) bool { return t.IsPending() }) {
+		return int(model.TaskPending)
+	}
+
+	// 4. 当且仅当所有任务全为跳过时，节点综合状态才为跳过
+	if lo.EveryBy(tasks, func(t *model.Task) bool { return t.Status == model.TaskSkipped }) {
+		return int(model.TaskSkipped)
+	}
+
+	// 5. 兜底返回最后一个任务状态
+	return int(tasks[len(tasks)-1].Status)
 }

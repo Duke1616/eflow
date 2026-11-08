@@ -252,8 +252,23 @@ func (a *adapter) GetInstanceExecutionView(ctx context.Context, _ domain.EngineT
 		return domain.InstanceExecutionView{}, fmt.Errorf("easyflow 查询审批记录失败: %w", err)
 	}
 
-	nodeStatusMap := lo.Associate(tasks, func(task model.Task) (string, int) {
-		return task.NodeID, int(task.Status)
+	nodeTasks := lo.GroupBy(tasks, func(task model.Task) string {
+		return task.NodeID
+	})
+	nodeStatusMap := lo.MapValues(nodeTasks, func(group []model.Task, _ string) int {
+		if lo.SomeBy(group, func(t model.Task) bool { return t.Status == 1 || t.Status == 3 }) {
+			return 1
+		}
+		if lo.SomeBy(group, func(t model.Task) bool { return t.Status == 2 }) {
+			return 2
+		}
+		if lo.SomeBy(group, func(t model.Task) bool { return t.Status == 0 && t.IsFinished == 0 }) {
+			return 0
+		}
+		if lo.EveryBy(group, func(t model.Task) bool { return t.Status == 5 }) {
+			return 5
+		}
+		return int(group[len(group)-1].Status)
 	})
 
 	pendingUsers := lo.Uniq(lo.FilterMap(tasks, func(src model.Task, _ int) (string, bool) {

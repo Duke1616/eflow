@@ -203,7 +203,7 @@ func (p *ExecutionPlan) extractBranchStates(joinNode model.NodeSpec, allTasks []
 			})
 
 			isPassed := IsNodeSatisfiedToAdvance(node, srcTasks)
-			isSkipped := lo.SomeBy(srcTasks, func(t *model.Task) bool {
+			isSkipped := !isPassed && len(srcTasks) > 0 && lo.EveryBy(srcTasks, func(t *model.Task) bool {
 				return t.Status == model.TaskSkipped
 			})
 
