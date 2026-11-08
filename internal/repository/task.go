@@ -159,7 +159,6 @@ func toTaskEntity(task domain.Task) dao.Task {
 	return dao.Task{
 		ID: task.ID, TenantID: task.TenantID, TicketID: task.TicketID,
 		InstanceKey:        task.InstanceID.String(),
-		ProcessInstanceID:  task.InstanceID.Int64(),
 		NodeID:             task.NodeID,
 		NodeName:           task.NodeName, ProcessVersion: task.ProcessVersion,
 		Status: task.Status.ToUint8(), ScheduledAt: task.ScheduledAt,
@@ -172,9 +171,6 @@ func toTaskEntity(task domain.Task) dao.Task {
 
 func toTaskDomain(task dao.Task) domain.Task {
 	instID := domain.NewID(task.InstanceKey)
-	if instID.IsZero() && task.ProcessInstanceID > 0 {
-		instID = domain.NewID(task.ProcessInstanceID)
-	}
 	return domain.Task{
 		ID: task.ID, TenantID: task.TenantID, TicketID: task.TicketID,
 		InstanceID:         instID,

@@ -161,9 +161,9 @@ func convertLegacyTask(source legacyTask, defaultTenantID int64) (dao.Task, dao.
 	}
 	task := dao.Task{
 		TenantID: tenantID, TicketID: source.TicketID,
-		InstanceKey:       fmt.Sprintf("%d", source.ProcessInstID),
-		ProcessInstanceID: int64(source.ProcessInstID), NodeID: strings.TrimSpace(source.CurrentNodeID),
-		NodeName: "自动化任务", Status: status.ToUint8(),
+		InstanceKey: fmt.Sprintf("%d", source.ProcessInstID),
+		NodeID:      strings.TrimSpace(source.CurrentNodeID),
+		NodeName:    "自动化任务", Status: status.ToUint8(),
 		ScheduledAt: source.ScheduledTime, AdvancedAt: advancedAt, LastError: reason,
 		CTime: source.CTime, UTime: firstPositive(source.UTime, source.CTime),
 	}

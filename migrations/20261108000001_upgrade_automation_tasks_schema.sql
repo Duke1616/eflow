@@ -24,15 +24,17 @@ BEGIN
     ALTER TABLE `automation_tasks`
         ADD UNIQUE KEY `uk_tenant_ticket_node` (`tenant_id`, `ticket_id`, `node_id`);
 
-    -- 1.4 旧唯一索引 uk_automation_node 降级为普通辅助查询索引
+    -- 1.4 旧唯一索引 uk_automation_node 降级为基于全局 instance_key 的普通辅助查询索引
     ALTER TABLE `automation_tasks` DROP INDEX `uk_automation_node`;
+    ALTER TABLE `automation_tasks` DROP INDEX `idx_tenant_process_node`;
     ALTER TABLE `automation_tasks`
-        ADD INDEX `idx_tenant_process_node` (`tenant_id`, `process_instance_id`, `node_id`);
+        ADD INDEX `idx_tenant_inst_key_node` (`tenant_id`, `instance_key`, `node_id`);
 
-    -- 1.5 清理未落地与冗余死字段
+    -- 1.5 清理已迁移至新结构的历史字段与未落地死字段
     ALTER TABLE `automation_tasks` DROP COLUMN `original_scheduled_at`;
     ALTER TABLE `automation_tasks` DROP COLUMN `cancelled_at`;
     ALTER TABLE `automation_tasks` DROP COLUMN `phase`;
+    ALTER TABLE `automation_tasks` DROP COLUMN `process_instance_id`;
 END;
 -- +goose StatementEnd
 
@@ -52,6 +54,8 @@ BEGIN
 
     -- 回滚字段
     ALTER TABLE `automation_tasks`
+        ADD COLUMN `process_instance_id` BIGINT NOT NULL DEFAULT 0 COMMENT '流程实例历史数字ID';
+    ALTER TABLE `automation_tasks`
         ADD COLUMN `original_scheduled_at` BIGINT NOT NULL DEFAULT 0 COMMENT '首次计划提交时间';
     ALTER TABLE `automation_tasks`
         ADD COLUMN `cancelled_at` BIGINT NOT NULL DEFAULT 0 COMMENT '任务取消或强制终止时间';
@@ -60,7 +64,7 @@ BEGIN
 
     -- 回滚索引
     ALTER TABLE `automation_tasks` DROP INDEX `uk_tenant_ticket_node`;
-    ALTER TABLE `automation_tasks` DROP INDEX `idx_tenant_process_node`;
+    ALTER TABLE `automation_tasks` DROP INDEX `idx_tenant_inst_key_node`;
     ALTER TABLE `automation_tasks`
         ADD UNIQUE KEY `uk_automation_node` (`tenant_id`, `process_instance_id`, `node_id`);
 

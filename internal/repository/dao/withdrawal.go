@@ -65,15 +65,15 @@ func (g *gormWithdrawalDAO) Prepare(ctx context.Context, instanceID domain.ID, r
 
 		// 只有成功动作所关联的补偿节点可以在撤回时继续运行。
 		var active int64
-		if ticket.ProcessInstanceId > 0 {
+		if ticket.Id > 0 {
 			if err := tx.Model(&Task{}).
-				Where(`process_instance_id = ? AND status IN (?, ?) AND NOT EXISTS (
+				Where(`ticket_id = ? AND status IN (?, ?) AND NOT EXISTS (
 					SELECT 1 FROM automation_tasks AS source
-					WHERE source.process_instance_id = automation_tasks.process_instance_id
+					WHERE source.ticket_id = automation_tasks.ticket_id
 						AND source.status = ?
 						AND source.compensation_node_id = automation_tasks.node_id
 				)`,
-					ticket.ProcessInstanceId, domain.TaskStatusSubmitting.ToUint8(),
+					ticket.Id, domain.TaskStatusSubmitting.ToUint8(),
 					domain.TaskStatusRunning.ToUint8(), domain.TaskStatusSuccess.ToUint8()).
 				Count(&active).Error; err != nil {
 				return err
@@ -90,8 +90,8 @@ func (g *gormWithdrawalDAO) Prepare(ctx context.Context, instanceID domain.ID, r
 			return err
 		}
 		// 冻结阶段不允许任何待执行任务穿过撤回边界；补偿计划在引擎撤回后重新激活。
-		if ticket.ProcessInstanceId > 0 {
-			return tx.Model(&Task{}).Where("process_instance_id = ?", ticket.ProcessInstanceId).
+		if ticket.Id > 0 {
+			return tx.Model(&Task{}).Where("ticket_id = ?", ticket.Id).
 				Update("execution_kind", domain.TaskExecutionProcess).Error
 		}
 		return nil
@@ -113,20 +113,20 @@ func (g *gormWithdrawalDAO) ActivateCompensations(ctx context.Context,
 			return fmt.Errorf("%w: status=%d", ErrTicketNotProcessing, ticket.Status)
 		}
 
-		if ticket.ProcessInstanceId <= 0 {
+		if ticket.Id <= 0 {
 			return nil
 		}
 
 		pending := withdrawalPendingStatuses()
 		normalTasks := tx.Model(&Task{}).
-			Where("process_instance_id = ? AND status IN ?", ticket.ProcessInstanceId, pending)
+			Where("ticket_id = ? AND status IN ?", ticket.Id, pending)
 		if len(nodeIDs) > 0 {
 			normalTasks = normalTasks.Where("node_id NOT IN ?", nodeIDs)
 		}
 		if err := normalTasks.
 			Updates(map[string]any{
-				"status": domain.TaskStatusCancelled.ToUint8(), "phase": domain.TaskPhaseCancelled,
-				"cancelled_at": now, "last_error": "", "utime": now,
+				"status": domain.TaskStatusCancelled.ToUint8(),
+				"last_error": "", "utime": now,
 			}).Error; err != nil {
 			return err
 		}
@@ -135,18 +135,16 @@ func (g *gormWithdrawalDAO) ActivateCompensations(ctx context.Context,
 		}
 		// execution_kind=COMPENSATION 同时充当激活标记，恢复任务重复执行时不会重置失败状态。
 		if err := tx.Model(&Task{}).
-			Where("process_instance_id = ? AND node_id IN ? AND execution_kind <> ? AND status IN ?",
-				ticket.ProcessInstanceId, nodeIDs, domain.TaskExecutionCompensation, pending).
+			Where("ticket_id = ? AND node_id IN ? AND execution_kind <> ? AND status IN ?",
+				ticket.Id, nodeIDs, domain.TaskExecutionCompensation, pending).
 			Updates(map[string]any{
-				"status": domain.TaskStatusWaiting.ToUint8(), "phase": domain.TaskPhaseReady,
-				"original_scheduled_at": gorm.Expr(
-					"CASE WHEN original_scheduled_at = 0 THEN scheduled_at ELSE original_scheduled_at END"),
+				"status": domain.TaskStatusWaiting.ToUint8(),
 				"scheduled_at": now, "last_error": "", "utime": now,
 			}).Error; err != nil {
 			return err
 		}
 		return tx.Model(&Task{}).
-			Where("process_instance_id = ? AND node_id IN ?", ticket.ProcessInstanceId, nodeIDs).
+			Where("ticket_id = ? AND node_id IN ?", ticket.Id, nodeIDs).
 			Update("execution_kind", domain.TaskExecutionCompensation).Error
 	})
 }
@@ -174,11 +172,11 @@ func (g *gormWithdrawalDAO) TryFinalize(ctx context.Context, instanceID domain.I
 			return fmt.Errorf("%w: status=%d", ErrTicketNotProcessing, ticket.Status)
 		}
 
-		if ticket.ProcessInstanceId > 0 {
+		if ticket.Id > 0 {
 			var unfinished int64
 			if err := tx.Model(&Task{}).
-				Where("process_instance_id = ? AND execution_kind = ? AND status <> ?",
-					ticket.ProcessInstanceId, domain.TaskExecutionCompensation, domain.TaskStatusSuccess.ToUint8()).
+				Where("ticket_id = ? AND execution_kind = ? AND status <> ?",
+					ticket.Id, domain.TaskExecutionCompensation, domain.TaskStatusSuccess.ToUint8()).
 				Count(&unfinished).Error; err != nil {
 				return err
 			}

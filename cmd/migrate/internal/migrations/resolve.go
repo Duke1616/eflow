@@ -87,8 +87,7 @@ SELECT GREATEST(
     COALESCE((SELECT MAX(proc_inst_id) FROM hist_proc_task), 0),
     COALESCE((SELECT MAX(proc_inst_id) FROM proc_inst_variable), 0),
     COALESCE((SELECT MAX(proc_inst_id) FROM hist_proc_inst_variable), 0),
-    COALESCE((SELECT MAX(process_instance_id) FROM ticket), 0),
-    COALESCE((SELECT MAX(process_instance_id) FROM automation_tasks), 0)
+    COALESCE((SELECT MAX(process_instance_id) FROM ticket), 0)
 ) + 1
 `).Scan(&nextID).Error
 	if err != nil {

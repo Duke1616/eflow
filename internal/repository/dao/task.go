@@ -17,7 +17,6 @@ type Task struct {
 	TicketID           int64  `gorm:"column:ticket_id;type:bigint;not null;uniqueIndex:uk_tenant_ticket_node,priority:2;index;comment:'关联工单 ID'"`
 	NodeID             string `gorm:"column:node_id;type:varchar(128);not null;uniqueIndex:uk_tenant_ticket_node,priority:3;comment:'自动化节点 ID'"`
 	InstanceKey        string `gorm:"column:instance_key;type:varchar(64);not null;default:'';index;comment:'流程实例全局唯一标识Key'"`
-	ProcessInstanceID  int64  `gorm:"column:process_instance_id;type:bigint;not null;default:0;index;comment:'流程实例历史数字ID'"`
 	NodeName           string `gorm:"column:node_name;type:varchar(250);not null;comment:'自动化节点名称快照'"`
 	ProcessVersion     int    `gorm:"column:process_version;type:int;not null;comment:'流程实例版本快照'"`
 	Status             uint8  `gorm:"column:status;type:tinyint unsigned;not null;index;comment:'编排状态'"`
@@ -95,8 +94,9 @@ func (g *gormTaskDAO) FindByTicketNode(ctx context.Context, ticketID int64, node
 
 func (g *gormTaskDAO) FindByProcessNode(ctx context.Context, processInstanceID int64, nodeID string) (Task, error) {
 	var task Task
+	instKey := fmt.Sprintf("%d", processInstanceID)
 	err := g.db.WithContext(ctx).
-		Where("process_instance_id = ? AND node_id = ?", processInstanceID, nodeID).
+		Where("instance_key = ? AND node_id = ?", instKey, nodeID).
 		First(&task).Error
 	return task, err
 }
@@ -173,7 +173,7 @@ func (g *gormTaskDAO) CountByTicketID(ctx context.Context, ticketID int64) (int6
 func (g *gormTaskDAO) ListByInstanceID(ctx context.Context, offset, limit int64, instanceID int64) ([]Task, error) {
 	var tasks []Task
 	instKey := fmt.Sprintf("%d", instanceID)
-	err := g.db.WithContext(ctx).Where("process_instance_id = ? OR instance_key = ?", instanceID, instKey).
+	err := g.db.WithContext(ctx).Where("instance_key = ?", instKey).
 		Order("ctime DESC").Offset(int(offset)).Limit(int(limit)).Find(&tasks).Error
 	return tasks, err
 }
@@ -181,7 +181,7 @@ func (g *gormTaskDAO) ListByInstanceID(ctx context.Context, offset, limit int64,
 func (g *gormTaskDAO) CountByInstanceID(ctx context.Context, instanceID int64) (int64, error) {
 	var count int64
 	instKey := fmt.Sprintf("%d", instanceID)
-	err := g.db.WithContext(ctx).Model(&Task{}).Where("process_instance_id = ? OR instance_key = ?", instanceID, instKey).Count(&count).Error
+	err := g.db.WithContext(ctx).Model(&Task{}).Where("instance_key = ?", instKey).Count(&count).Error
 	return count, err
 }
 
