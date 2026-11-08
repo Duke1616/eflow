@@ -40,9 +40,11 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	group.POST("/list", h.Define("自动化任务列表", "view").
 		Bind(ginx.B[ListTaskReq](h.ListTask)))
 
-	group.POST("/list/by_instance_id", h.For(model.Manager).Define("关联自动化任务", "view_tasks").
+	listByTicket := h.For(model.Manager).Define("关联自动化任务", "view_tasks").
 		Group("工单中心/工单详情").
-		Bind(ginx.B[ListTaskByInstanceIDReq](h.ListTaskByInstanceID)))
+		Bind(ginx.B[ListTaskByTicketIDReq](h.ListTaskByTicketID))
+	group.POST("/list/by_ticket_id", listByTicket)
+	group.POST("/list/by_instance_id", listByTicket)
 
 	group.POST("/retry", h.Define("重试自动化任务", "retry").
 		Bind(ginx.B[RetryReq](h.Retry)))
@@ -69,24 +71,15 @@ func (h *Handler) ListTask(ctx *ginx.Context, req ListTaskReq) (ginx.Result, err
 	return ginx.Result{Msg: "success", Data: RetrieveTasks{Total: total, Tasks: mapTasks(tasks)}}, nil
 }
 
-func (h *Handler) ListTaskByInstanceID(ctx *ginx.Context,
-	req ListTaskByInstanceIDReq) (ginx.Result, error) {
-	if req.TicketID <= 0 && req.InstanceID <= 0 {
-		return invalidParameterResult(fmt.Errorf("工单 ID 或流程实例 ID 不能为空")), nil
+func (h *Handler) ListTaskByTicketID(ctx *ginx.Context,
+	req ListTaskByTicketIDReq) (ginx.Result, error) {
+	if req.TicketID <= 0 {
+		return invalidParameterResult(fmt.Errorf("工单 ID 不能为空")), nil
 	}
 	if err := normalizePage(&req.Page); err != nil {
 		return invalidParameterResult(err), nil
 	}
-	var (
-		tasks []domain.Task
-		total int64
-		err   error
-	)
-	if req.TicketID > 0 {
-		tasks, total, err = h.svc.ListTaskByTicketID(ctx, req.Offset, req.Limit, req.TicketID)
-	} else {
-		tasks, total, err = h.svc.ListTaskByInstanceID(ctx, req.Offset, req.Limit, req.InstanceID)
-	}
+	tasks, total, err := h.svc.ListTaskByTicketID(ctx, req.Offset, req.Limit, req.TicketID)
 	if err != nil {
 		return systemErrorResult, err
 	}

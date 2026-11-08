@@ -9,9 +9,8 @@ type Page struct {
 
 type ListTaskReq struct{ Page }
 
-type ListTaskByInstanceIDReq struct {
-	InstanceID int64 `json:"instance_id"`
-	TicketID   int64 `json:"ticket_id"`
+type ListTaskByTicketIDReq struct {
+	TicketID int64 `json:"ticket_id"`
 	Page
 }
 

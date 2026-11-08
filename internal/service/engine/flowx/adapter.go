@@ -1,9 +1,11 @@
 package flowx
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -398,6 +400,20 @@ func (a *flowxEngine) GetTaskTimeline(ctx context.Context, _ domain.EngineType, 
 		return nil, 0, fmt.Errorf("flowx 查询时间线失败: %w", err)
 	}
 	total := int64(len(events))
+
+	// 对齐 EasyFlow 审批时间线标准：按发生时间倒序呈现（最新发生节点排在最前）
+	slices.SortFunc(events, func(a, b flowxModel.TimelineEvent) int {
+		if !a.OccurredAt.Equal(b.OccurredAt) {
+			if a.OccurredAt.After(b.OccurredAt) {
+				return -1
+			}
+			return 1
+		}
+		if n := cmp.Compare(b.BatchCode, a.BatchCode); n != 0 {
+			return n
+		}
+		return cmp.Compare(b.NodeID, a.NodeID)
+	})
 
 	pagedEvents := paginateSlice(events, offset, limit)
 	groups := lo.Map(pagedEvents, func(evt flowxModel.TimelineEvent, _ int) domain.TaskTimelineGroup {

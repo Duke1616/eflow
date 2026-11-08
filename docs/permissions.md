@@ -58,11 +58,11 @@
 
 | 操作名称 | 完整权限码 | 作用域 | 归属类型 | 暴露状态 | 联动包含权限 | 宿主源码位置 |
 |:---|:---|:---|:---|:---|:---|:---|
-| 执行尝试日志 | `ticket:task:logs` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/task/handler.go` 行 57 |
-| 重试自动化任务 | `ticket:task:retry` | 租户级 | 本级 | 正常 | - | `internal/web/task/handler.go` 行 47 |
-| 强制终止自动化任务 | `ticket:task:terminate` | 租户级 | 本级 | 正常 | - | `internal/web/task/handler.go` 行 50 |
+| 执行尝试日志 | `ticket:task:logs` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/task/handler.go` 行 59 |
+| 重试自动化任务 | `ticket:task:retry` | 租户级 | 本级 | 正常 | - | `internal/web/task/handler.go` 行 49 |
+| 强制终止自动化任务 | `ticket:task:terminate` | 租户级 | 本级 | 正常 | - | `internal/web/task/handler.go` 行 52 |
 | 自动化任务列表 | `ticket:task:view` | 租户级 | 本级 | 正常 | - | `internal/web/task/handler.go` 行 40 |
-| 执行尝试列表 | `ticket:task:view_attempts` | 租户级 | 本级 | 正常 | 执行尝试日志 · `ticket:task:logs`<br>`task:manager:logs` | `internal/web/task/handler.go` 行 53 |
+| 执行尝试列表 | `ticket:task:view_attempts` | 租户级 | 本级 | 正常 | 执行尝试日志 · `ticket:task:logs`<br>`task:manager:logs` | `internal/web/task/handler.go` 行 55 |
 
 ---
 

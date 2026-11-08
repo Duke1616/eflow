@@ -26,6 +26,7 @@ func (FlowDefinitionPO) TableName() string {
 type FlowInstancePO struct {
 	ID          string        `gorm:"primaryKey;column:id;type:varchar(64);comment:'流程运行实例全局唯一Key'"`
 	ProcKey     string        `gorm:"column:proc_key;type:varchar(64);not null;index:idx_key;comment:'流程唯一标识Key'"`
+	BusinessKey string        `gorm:"column:business_key;type:varchar(64);not null;default:'';index:idx_bkey;comment:'业务关联主键（如工单 ID）'"`
 	Version     int           `gorm:"column:version;not null;comment:'执行版本号'"`
 	Starter     string        `gorm:"column:starter;type:varchar(64);not null;index:idx_starter;comment:'流程发起人用户名'"`
 	Status      uint8         `gorm:"column:status;not null;index:idx_status;comment:'实例状态(0:Running, 1:Completed, 2:Rejected, 3:Revoked)'"`
@@ -97,6 +98,7 @@ func toInstancePO(inst *model.Instance) (FlowInstancePO, error) {
 	po := FlowInstancePO{
 		ID:          inst.ID,
 		ProcKey:     inst.ProcKey,
+		BusinessKey: inst.BusinessKey,
 		Version:     inst.Version,
 		Starter:     inst.Starter,
 		Status:      uint8(inst.Status),
@@ -122,6 +124,7 @@ func toInstanceDO(po FlowInstancePO) (*model.Instance, error) {
 	inst := &model.Instance{
 		ID:          po.ID,
 		ProcKey:     po.ProcKey,
+		BusinessKey: po.BusinessKey,
 		Version:     po.Version,
 		Starter:     po.Starter,
 		Status:      model.InstanceStatus(po.Status),

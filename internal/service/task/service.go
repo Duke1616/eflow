@@ -47,8 +47,6 @@ type Service interface {
 		afterID, limit int64) ([]domain.Task, error)
 	// ListTask 分页查询全部任务。
 	ListTask(ctx context.Context, offset, limit int64) ([]domain.Task, int64, error)
-	// ListTaskByInstanceID 查询流程实例下的任务。
-	ListTaskByInstanceID(ctx context.Context, offset, limit int64, instanceID int64) ([]domain.Task, int64, error)
 	// ListTaskByTicketID 查询工单下的自动化任务（核心推荐接口）。
 	ListTaskByTicketID(ctx context.Context, offset, limit int64, ticketID int64) ([]domain.Task, int64, error)
 	// ListUnadvancedSuccessTasks 按主键游标查询一批尚未推进流程的成功任务。
@@ -96,10 +94,24 @@ func NewTaskService(tasks repository.TaskRepository, attempts repository.TaskAtt
 
 func (s *taskService) CreateTask(ctx context.Context, ticketID int64,
 	instanceID domain.ID, nodeID, nodeName string, procVersion ...int) (domain.Task, error) {
-	ticket, err := s.tickets.GetByID(ctx, ticketID)
-	if err != nil {
-		return domain.Task{}, err
+	var (
+		ticket domain.Ticket
+		err    error
+	)
+	if ticketID > 0 {
+		ticket, err = s.tickets.GetByID(ctx, ticketID)
+	} else if !instanceID.IsZero() {
+		ticket, err = s.tickets.GetByProcessInstance(ctx, instanceID)
+		if err == nil {
+			ticketID = ticket.Id
+		}
+	} else {
+		return domain.Task{}, fmt.Errorf("创建自动化任务缺少有效工单标识与流程实例标识")
 	}
+	if err != nil {
+		return domain.Task{}, fmt.Errorf("查询关联工单失败 [ticketID=%d, instanceID=%s]: %w", ticketID, instanceID, err)
+	}
+
 	ctx = tenantContext(ctx, ticket.TenantID)
 	existing, err := s.tasks.FindByTicketNode(ctx, ticketID, nodeID)
 	if err == nil {
@@ -329,16 +341,6 @@ func (s *taskService) ListTask(ctx context.Context, offset, limit int64) ([]doma
 		return nil, 0, err
 	}
 	total, err := s.tasks.Count(ctx)
-	return tasks, total, err
-}
-
-func (s *taskService) ListTaskByInstanceID(ctx context.Context, offset, limit int64,
-	instanceID int64) ([]domain.Task, int64, error) {
-	tasks, err := s.tasks.ListByInstanceID(ctx, offset, limit, instanceID)
-	if err != nil {
-		return nil, 0, err
-	}
-	total, err := s.tasks.CountByInstanceID(ctx, instanceID)
 	return tasks, total, err
 }
 

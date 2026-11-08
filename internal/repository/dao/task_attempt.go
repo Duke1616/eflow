@@ -103,19 +103,23 @@ func (g *gormTaskAttemptDAO) Begin(ctx context.Context, taskID int64,
 		}
 		now := time.Now().UnixMilli()
 		attempt = TaskAttempt{
-			TaskID: taskID, AttemptNo: attemptNo,
+			TenantID:        task.TenantID,
+			TaskID:          taskID,
+			AttemptNo:       attemptNo,
 			RequestID:       fmt.Sprintf("eflow:%d:%d", taskID, attemptNo),
 			DefaultRunnerID: decision.DefaultRunnerID,
 			RunnerID:        decision.SelectedRunnerID,
 			RouteRuleID:     decision.RuleID,
 			Status:          string(domain.AttemptStatusSubmitting),
-			Input:           sqlx.JsonField[domain.TaskArgs]{Val: input, Valid: true}, CTime: now, UTime: now,
+			Input:           sqlx.JsonField[domain.TaskArgs]{Val: input, Valid: true},
+			CTime:           now,
+			UTime:           now,
 		}
 		if err := tx.Create(&attempt).Error; err != nil {
 			return err
 		}
 		return tx.Model(&Task{}).Where("id = ?", taskID).Updates(map[string]any{
-			"status": domain.TaskStatusSubmitting.ToUint8(), "phase": domain.TaskPhaseSubmitting,
+			"status": domain.TaskStatusSubmitting.ToUint8(),
 			"current_attempt_id": attempt.ID, "last_error": "", "utime": now,
 		}).Error
 	})
@@ -149,7 +153,7 @@ func (g *gormTaskAttemptDAO) BindExecution(ctx context.Context, attemptID, execu
 		return tx.Model(&Task{}).
 			Where("id = ? AND current_attempt_id = ? AND status = ?", attempt.TaskID, attempt.ID,
 				domain.TaskStatusSubmitting.ToUint8()).Updates(map[string]any{
-			"status": domain.TaskStatusRunning.ToUint8(), "phase": domain.TaskPhaseRunning,
+			"status": domain.TaskStatusRunning.ToUint8(),
 			"last_error": "", "utime": now,
 		}).Error
 	})
@@ -198,7 +202,7 @@ func (g *gormTaskAttemptDAO) RejectSubmission(ctx context.Context, attemptID int
 		return tx.Model(&Task{}).
 			Where("id = ? AND current_attempt_id = ? AND status = ?", attempt.TaskID, attempt.ID,
 				domain.TaskStatusSubmitting.ToUint8()).Updates(map[string]any{
-			"status": domain.TaskStatusBlocked.ToUint8(), "phase": domain.TaskPhaseBlocked,
+			"status": domain.TaskStatusBlocked.ToUint8(),
 			"last_error": reason, "utime": now,
 		}).Error
 	})
@@ -222,8 +226,8 @@ func (g *gormTaskAttemptDAO) TerminateTask(ctx context.Context,
 			result := tx.Model(&Task{}).
 				Where("id = ? AND status = ?", taskID, task.Status).
 				Updates(map[string]any{
-					"status": domain.TaskStatusCancelled.ToUint8(), "phase": domain.TaskPhaseCancelled,
-					"cancelled_at": now, "last_error": reason, "utime": now,
+					"status":     domain.TaskStatusCancelled.ToUint8(),
+					"last_error": reason, "utime": now,
 				})
 			if result.Error != nil {
 				return result.Error
@@ -272,15 +276,12 @@ func (g *gormTaskAttemptDAO) Complete(ctx context.Context, requestID, status, ou
 		now := time.Now().UnixMilli()
 		attemptStatus := domain.AttemptStatusFailed
 		taskStatus := domain.TaskStatusFailed
-		phase := domain.TaskPhaseFailed
 		if status == string(domain.AttemptStatusSuccess) {
 			attemptStatus = domain.AttemptStatusSuccess
 			taskStatus = domain.TaskStatusSuccess
-			phase = domain.TaskPhaseSucceeded
 		} else if status == string(domain.AttemptStatusCancelled) {
 			attemptStatus = domain.AttemptStatusCancelled
 			taskStatus = domain.TaskStatusCancelled
-			phase = domain.TaskPhaseCancelled
 		}
 		if err := tx.Model(&TaskAttempt{}).Where("id = ?", attempt.ID).Updates(map[string]any{
 			"status": attemptStatus, "output": output, "error_message": reason,
@@ -292,7 +293,7 @@ func (g *gormTaskAttemptDAO) Complete(ctx context.Context, requestID, status, ou
 			Where("id = ? AND current_attempt_id = ? AND status IN ?", attempt.TaskID, attempt.ID, []int{
 				int(domain.TaskStatusSubmitting), int(domain.TaskStatusRunning),
 			}).Updates(map[string]any{
-			"status": taskStatus.ToUint8(), "phase": phase, "last_error": reason, "utime": now,
+			"status": taskStatus.ToUint8(), "last_error": reason, "utime": now,
 		}).Error; err != nil {
 			return err
 		}
