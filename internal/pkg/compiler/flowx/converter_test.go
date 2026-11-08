@@ -994,5 +994,175 @@ func TestFlowxConverter_BossOrProductsCosigned(t *testing.T) {
 	})
 }
 
+// TestFlowxConverter_ComplexRejectMultiBranch 还原工单 2772 拓扑：领导驳回时完整退回上游多路分支(前端+后端)，且流程图高亮准确
+func TestFlowxConverter_ComplexRejectMultiBranch(t *testing.T) {
+	// 拓扑：开始 -> 抄送提交人 -> 分流网关 -> (后端 & 前端) -> 并行汇聚网关 -> (产品 & 领导) -> 结束
+	flow := map[string]any{
+		"nodes": []any{
+			map[string]any{"id": "node_start", "type": "start", "properties": map[string]any{"name": "开始"}},
+			map[string]any{"id": "node_cc", "type": "user", "properties": map[string]any{"name": "抄送提交人", "is_cc": true}},
+			map[string]any{"id": "gw_fork", "type": "inclusion", "properties": map[string]any{"name": "分流"}},
+			map[string]any{
+				"id":   "node_backend",
+				"type": "user",
+				"properties": map[string]any{
+					"name": "后端",
+					"assignees": []map[string]any{
+						{"rule": "appoint", "values": []string{"peicg"}},
+					},
+				},
+			},
+			map[string]any{
+				"id":   "node_frontend",
+				"type": "user",
+				"properties": map[string]any{
+					"name": "前端",
+					"assignees": []map[string]any{
+						{"rule": "appoint", "values": []string{"luankz"}},
+					},
+				},
+			},
+			map[string]any{"id": "gw_join", "type": "parallel", "properties": map[string]any{"name": "并行汇聚"}},
+			map[string]any{
+				"id":   "node_product",
+				"type": "user",
+				"properties": map[string]any{
+					"name": "产品",
+					"assignees": []map[string]any{
+						{"rule": "appoint", "values": []string{"langtt"}},
+					},
+				},
+			},
+			map[string]any{
+				"id":   "node_leader",
+				"type": "user",
+				"properties": map[string]any{
+					"name": "领导",
+					"assignees": []map[string]any{
+						{"rule": "appoint", "values": []string{"boss_luankz"}},
+					},
+				},
+			},
+			map[string]any{"id": "gw_join2", "type": "parallel", "properties": map[string]any{"name": "二级并行汇聚"}},
+			map[string]any{"id": "node_end", "type": "end", "properties": map[string]any{"name": "办结"}},
+		},
+		"edges": []any{
+			map[string]any{"id": "e1", "sourceNodeId": "node_start", "targetNodeId": "node_cc"},
+			map[string]any{"id": "e2", "sourceNodeId": "node_cc", "targetNodeId": "gw_fork"},
+			map[string]any{"id": "e3", "sourceNodeId": "gw_fork", "targetNodeId": "node_backend"},
+			map[string]any{"id": "e4", "sourceNodeId": "gw_fork", "targetNodeId": "node_frontend"},
+			map[string]any{"id": "e5", "sourceNodeId": "node_backend", "targetNodeId": "gw_join"},
+			map[string]any{"id": "e6", "sourceNodeId": "node_frontend", "targetNodeId": "gw_join"},
+			map[string]any{"id": "e7", "sourceNodeId": "gw_join", "targetNodeId": "node_product"},
+			map[string]any{"id": "e8", "sourceNodeId": "gw_join", "targetNodeId": "node_leader"},
+			map[string]any{"id": "e9", "sourceNodeId": "node_product", "targetNodeId": "gw_join2"},
+			map[string]any{"id": "e10", "sourceNodeId": "node_leader", "targetNodeId": "gw_join2"},
+			map[string]any{"id": "e11", "sourceNodeId": "gw_join2", "targetNodeId": "node_end"},
+		},
+	}
+
+	graph, err := flowdsl.Parse(flow)
+	require.NoError(t, err)
+
+	converter := NewConverter()
+	def, err := converter.Convert("complex_reject_proc", "多分支驳回测试", graph)
+	require.NoError(t, err)
+
+	engine := flowx.NewEngine(memory.NewStorage())
+	_, err = engine.Deploy(context.Background(), def)
+	require.NoError(t, err)
+
+	// 1. 发起流程
+	instID, err := engine.Start(context.Background(), flowx.StartReq{Def: def, Starter: "starter"})
+	require.NoError(t, err)
+
+	tasks, _ := engine.ListTasksByInstance(context.Background(), instID)
+	backendTask, _ := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "node_backend" })
+	frontendTask, _ := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "node_frontend" })
+
+	// 2. 第一阶段：后端与前端均通过
+	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: backendTask.ID, Operator: "peicg"})
+	require.NoError(t, err)
+	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: frontendTask.ID, Operator: "luankz"})
+	require.NoError(t, err)
+
+	// 3. 汇聚网关放行，成功激活产品与领导待办
+	tasks, _ = engine.ListTasksByInstance(context.Background(), instID)
+	productTask, foundProduct := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "node_product" && t.IsPending() })
+	require.True(t, foundProduct)
+	leaderTask, foundLeader := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "node_leader" && t.IsPending() })
+	require.True(t, foundLeader)
+
+	// 产品先通过
+	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: productTask.ID, Operator: "langtt"})
+	require.NoError(t, err)
+
+	// 4. 核心：领导点击驳回
+	err = engine.Reject(context.Background(), flowx.RejectReq{
+		TaskID:   leaderTask.ID,
+		Operator: "boss_luankz",
+		Comment:  "方案不合规，退回重新审核",
+	})
+	require.NoError(t, err)
+
+	// 5. 校验驳回后的实例状态
+	inst, err := engine.GetInstance(context.Background(), instID)
+	require.NoError(t, err)
+	assert.Equal(t, model.InstanceRunning, inst.Status, "领导驳回后，工单绝不能被杀死，必须处于运行中")
+
+	// 6. 校验上游多路分支被完整重新激活（批次号递增为 2）
+	allTasks, err := engine.ListTasksByInstance(context.Background(), instID)
+	require.NoError(t, err)
+
+	batch2Backend, foundB2 := lo.Find(allTasks, func(t *model.Task) bool {
+		return t.NodeID == "node_backend" && t.BatchCode == 2 && t.IsPending()
+	})
+	require.True(t, foundB2, "批次 2 必须重新激活后端待办")
+	assert.Equal(t, "peicg", batch2Backend.Assignee)
+
+	batch2Frontend, foundF2 := lo.Find(allTasks, func(t *model.Task) bool {
+		return t.NodeID == "node_frontend" && t.BatchCode == 2 && t.IsPending()
+	})
+	require.True(t, foundF2, "批次 2 必须重新激活前端待办，绝不能遗漏前端")
+	assert.Equal(t, "luankz", batch2Frontend.Assignee)
+
+	// 7. 校验流程图高亮视图（GetExecutionView）
+	view, err := engine.GetExecutionView(context.Background(), instID)
+	require.NoError(t, err)
+
+	// 后端和前端当前为批次 2 待办态 (Pending = 0)
+	assert.Equal(t, int(model.TaskPending), view.NodeStatusMap["node_backend"], "后端在流程图中必须高亮为待办(Pending)")
+	assert.Equal(t, int(model.TaskPending), view.NodeStatusMap["node_frontend"], "前端在流程图中必须高亮为待办(Pending)")
+	// 领导为驳回态 (Rejected = 2)
+	assert.Equal(t, int(model.TaskRejected), view.NodeStatusMap["node_leader"], "领导在流程图中必须高亮为驳回(Rejected)")
+
+	// 8. 校验待办人列表
+	assert.Contains(t, view.PendingUsers, "peicg")
+	assert.Contains(t, view.PendingUsers, "luankz")
+	assert.NotContains(t, view.PendingUsers, "boss_luankz")
+
+	// 9. 第二轮流转：后端与前端重新审批通过
+	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: batch2Backend.ID, Operator: "peicg"})
+	require.NoError(t, err)
+	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: batch2Frontend.ID, Operator: "luankz"})
+	require.NoError(t, err)
+
+	// 再次推进到产品和领导（批次 2 重新发起）
+	allTasks, err = engine.ListTasksByInstance(context.Background(), instID)
+	require.NoError(t, err)
+	b2Product, foundP := lo.Find(allTasks, func(t *model.Task) bool { return t.NodeID == "node_product" && t.BatchCode == 2 && t.IsPending() })
+	require.True(t, foundP)
+	b2Leader, foundL := lo.Find(allTasks, func(t *model.Task) bool { return t.NodeID == "node_leader" && t.BatchCode == 2 && t.IsPending() })
+	require.True(t, foundL)
+
+	// 产品与领导最终全员通过办结
+	_ = engine.Pass(context.Background(), flowx.PassReq{TaskID: b2Product.ID, Operator: "langtt"})
+	_ = engine.Pass(context.Background(), flowx.PassReq{TaskID: b2Leader.ID, Operator: "boss_luankz"})
+
+	instFinal, _ := engine.GetInstance(context.Background(), instID)
+	assert.True(t, instFinal.IsFinished(), "二轮全员通过后，工单圆满办结")
+}
+
+
 
 

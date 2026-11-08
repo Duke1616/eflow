@@ -262,25 +262,59 @@ func (p *ExecutionPlan) IsJoinSatisfied(joinNode model.NodeSpec, allTasks []*mod
 	return strategy.IsSatisfied(branchStates)
 }
 
-// FindUpstreamApprovalNode 逆向查找上一个可驳回的人工审批节点
-func (p *ExecutionPlan) FindUpstreamApprovalNode(currentNodeID string) (model.NodeSpec, error) {
+// FindUpstreamRejectNodes 逆向广度优先搜索 (Reverse BFS)，寻找最近一层有效的人工审批节点集合
+// 1. 若上游为明确的单一审批节点，返回该节点；
+// 2. 若上游跨越了汇聚网关，递归穿透网关与抄送知会节点，获取上一阶段所有有效的人工审批节点集合，避免并发多分支丢失；
+// 3. 若上游无任何审批节点（已达流程起始审批入口），返回错误以便调用方执行终态裁决。
+func (p *ExecutionPlan) FindUpstreamRejectNodes(currentNodeID string) ([]model.NodeSpec, error) {
 	inEdges := p.InEdges[currentNodeID]
 	if len(inEdges) == 0 {
-		return model.NodeSpec{}, fmt.Errorf("节点 [%s] 无上游前置节点", currentNodeID)
+		return nil, fmt.Errorf("节点 [%s] 无上游前置节点", currentNodeID)
 	}
 
-	// 向上回溯
-	for _, edge := range inEdges {
-		prevNode, ok := p.NodesMap[edge.Source]
+	var approvalNodes []model.NodeSpec
+	queue := lo.Map(inEdges, func(e model.EdgeSpec, _ int) string { return e.Source })
+	visited := make(map[string]bool)
+
+	for len(queue) > 0 {
+		currID := queue[0]
+		queue = queue[1:]
+
+		if visited[currID] {
+			continue
+		}
+		visited[currID] = true
+
+		node, ok := p.NodesMap[currID]
 		if !ok {
 			continue
 		}
-		if prevNode.Type == model.NodeApproval {
-			return prevNode, nil
-		}
-		if prevNode.IsGateway() {
-			return p.FindUpstreamApprovalNode(prevNode.ID)
+
+		switch {
+		case node.Type == model.NodeApproval:
+			// 遇到人工审批节点，作为目标收集，阻断该分支继续向上探索
+			approvalNodes = append(approvalNodes, node)
+		case node.IsGateway() || node.Type == model.NodeCarbonCopy:
+			// 穿透网关与抄送知会节点，将上游入边全部推入队列继续向上搜索
+			for _, edge := range p.InEdges[currID] {
+				queue = append(queue, edge.Source)
+			}
 		}
 	}
-	return model.NodeSpec{}, fmt.Errorf("未找到有效的前置审批节点")
+
+	uniqApprovals := lo.UniqBy(approvalNodes, func(n model.NodeSpec) string { return n.ID })
+	if len(uniqApprovals) == 0 {
+		return nil, fmt.Errorf("未找到有效的前置审批节点")
+	}
+
+	return uniqApprovals, nil
+}
+
+// FindUpstreamApprovalNode 保持兼容性包装，返回首个有效前置节点
+func (p *ExecutionPlan) FindUpstreamApprovalNode(currentNodeID string) (model.NodeSpec, error) {
+	nodes, err := p.FindUpstreamRejectNodes(currentNodeID)
+	if err != nil || len(nodes) == 0 {
+		return model.NodeSpec{}, err
+	}
+	return nodes[0], nil
 }

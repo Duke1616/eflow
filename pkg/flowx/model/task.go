@@ -93,6 +93,26 @@ func (t *Task) IsTerminal() bool {
 	return t.Status != TaskPending
 }
 
+// FilterLatestBatchTasks 纯函数：从任务切片中提取出属于最新执行批次 (Max BatchCode) 的任务快照集合
+func FilterLatestBatchTasks(tasks []*Task) []*Task {
+	if len(tasks) == 0 {
+		return nil
+	}
+	maxBatch := tasks[0].BatchCode
+	for _, t := range tasks[1:] {
+		if t.BatchCode > maxBatch {
+			maxBatch = t.BatchCode
+		}
+	}
+	var res []*Task
+	for _, t := range tasks {
+		if t.BatchCode == maxBatch {
+			res = append(res, t)
+		}
+	}
+	return res
+}
+
 // TimelineEvent 面向前端展示的聚合流转时间线事件
 type TimelineEvent struct {
 	NodeID     string    `json:"node_id"`

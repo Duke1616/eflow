@@ -516,7 +516,7 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 	}
 
 	// 4. 确定驳回的目标节点（自选目标节点 vs 默认回溯上游）
-	var targetNode model.NodeSpec
+	var targetNodes []model.NodeSpec
 	if req.TargetNodeID != "" {
 		tn, ok := session.Plan().NodesMap[req.TargetNodeID]
 		if !ok {
@@ -525,28 +525,30 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 		if !tn.CanRejectTo() {
 			return fmt.Errorf("%w: 驳回目标必须是人工审批或提单节点", ErrInvalidTargetNode)
 		}
-		targetNode = tn
+		targetNodes = []model.NodeSpec{tn}
 	} else {
-		tn, err := session.Plan().FindUpstreamApprovalNode(task.NodeID)
-		if err != nil {
-			session.Instance().Reject() // 无可用上游节点，流程置为终态 Rejected
+		nodes, err := session.Plan().FindUpstreamRejectNodes(task.NodeID)
+		if err != nil || len(nodes) == 0 {
+			session.Instance().Reject() // 无可用上游审批节点，流程置为终态 Rejected
 			return session.SaveInstance(ctx)
 		}
-		targetNode = tn
+		targetNodes = nodes
 	}
 
-	// 5. 流转批次号自增 (batch_code + 1)，激活回退的目标节点
+	// 5. 流转批次号自增 (batch_code + 1)，激活回退的目标节点集合
 	newBatchCode := task.BatchCode + 1
-	if targetNode.Type == model.NodeStart {
+	if len(targetNodes) == 1 && targetNodes[0].Type == model.NodeStart {
 		// 回退至发起人重新编辑发起
+		targetNode := targetNodes[0]
 		session.Instance().CurrentNode = targetNode.ID
 		comment := fmt.Sprintf("由审批人 [%s] 驳回至提单人重新编辑: %s", req.Operator, req.Comment)
 		startTask := e.buildStarterTask(targetNode, session.Instance().ID, session.Instance().Starter, newBatchCode, comment)
 		if err := session.SaveTasks(ctx, []*model.Task{startTask}); err != nil {
 			return err
 		}
+		e.eventBus.Publish(ctx, NewTaskEvent(EventTaskCreated, session.Instance(), &targetNode, startTask, req.Operator, comment))
 	} else {
-		if err := e.activateNodes(ctx, session, []model.NodeSpec{targetNode}, newBatchCode, req.Operator); err != nil {
+		if err := e.activateNodes(ctx, session, targetNodes, newBatchCode, req.Operator); err != nil {
 			return err
 		}
 	}
@@ -724,32 +726,34 @@ func (e *flowEngine) GetExecutionView(ctx context.Context, instanceID string) (m
 }
 
 // resolveNodeAggregateStatus 根据节点下的所有任务裁决节点的综合状态
-// 状态裁决优先级：Passed (通过) > Rejected (驳回) > Pending (待办中) > Skipped (全跳过)
+// 状态裁决原则：基于该节点产生的最新批次（Max BatchCode）进行裁决，避免历史批次干扰当前流转表现
+// 同批次内状态裁决优先级：Passed (通过) > Rejected (驳回) > Pending (待办中) > Skipped (全跳过)
 func resolveNodeAggregateStatus(tasks []*model.Task) int {
-	if len(tasks) == 0 {
+	currentTasks := model.FilterLatestBatchTasks(tasks)
+	if len(currentTasks) == 0 {
 		return int(model.TaskPending)
 	}
 
-	// 1. 节点下只要有任意任务已通过（人工通过或系统放行），节点综合状态必须裁决为通过
-	if lo.SomeBy(tasks, func(t *model.Task) bool { return t.IsPassed() }) {
+	// 1. 最新批次内只要有任意任务已通过（人工通过或系统放行），节点综合状态裁决为通过
+	if lo.SomeBy(currentTasks, func(t *model.Task) bool { return t.IsPassed() }) {
 		return int(model.TaskPassed)
 	}
 
-	// 2. 节点下存在主动驳回任务
-	if lo.SomeBy(tasks, func(t *model.Task) bool { return t.Status == model.TaskRejected }) {
+	// 2. 最新批次内存在主动驳回任务，节点综合状态裁决为驳回
+	if lo.SomeBy(currentTasks, func(t *model.Task) bool { return t.Status == model.TaskRejected }) {
 		return int(model.TaskRejected)
 	}
 
-	// 3. 节点下仍有待办任务（会签等待中或尚未处理）
-	if lo.SomeBy(tasks, func(t *model.Task) bool { return t.IsPending() }) {
+	// 3. 最新批次内仍有待办任务（会签等待中或尚未处理），节点综合状态裁决为待办中
+	if lo.SomeBy(currentTasks, func(t *model.Task) bool { return t.IsPending() }) {
 		return int(model.TaskPending)
 	}
 
-	// 4. 当且仅当所有任务全为跳过时，节点综合状态才为跳过
-	if lo.EveryBy(tasks, func(t *model.Task) bool { return t.Status == model.TaskSkipped }) {
+	// 4. 当且仅当最新批次中所有任务全为跳过时，节点综合状态才为跳过
+	if lo.EveryBy(currentTasks, func(t *model.Task) bool { return t.Status == model.TaskSkipped }) {
 		return int(model.TaskSkipped)
 	}
 
-	// 5. 兜底返回最后一个任务状态
-	return int(tasks[len(tasks)-1].Status)
+	// 5. 兜底返回最新批次的最后一个任务状态
+	return int(currentTasks[len(currentTasks)-1].Status)
 }

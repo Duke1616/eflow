@@ -44,9 +44,9 @@ func newExecutionTracer(p *ExecutionPlan) *executionTracer {
 	return t
 }
 
-// markTerminalNodes 实例处于终态时，标记结束节点为已到达
+// markTerminalNodes 实例正常圆满办结时，标记结束节点为已到达
 func (t *executionTracer) markTerminalNodes(inst *model.Instance) {
-	if inst == nil || !inst.IsTerminal() {
+	if inst == nil || inst.Status != model.InstanceFinished {
 		return
 	}
 	for _, n := range t.plan.Def.Nodes {
@@ -56,12 +56,18 @@ func (t *executionTracer) markTerminalNodes(inst *model.Instance) {
 	}
 }
 
-// markTaskNodes 遍历物理任务切片，标记各业务节点的到达与完成态
+// markTaskNodes 遍历物理任务切片，依据每个节点最新执行批次 (Max BatchCode) 的真实定态标记到达与完成
 func (t *executionTracer) markTaskNodes(tasks []*model.Task) {
-	for _, task := range tasks {
-		t.activated[task.NodeID] = true
-		if task.IsPassed() || task.Status == model.TaskSkipped {
-			t.completed[task.NodeID] = true
+	tasksByNode := lo.GroupBy(tasks, func(tk *model.Task) string { return tk.NodeID })
+	for nodeID, nodeTasks := range tasksByNode {
+		t.activated[nodeID] = true
+		latestTasks := model.FilterLatestBatchTasks(nodeTasks)
+
+		// 最新批次只要有任意通过任务，或者全为系统跳过任务，判定节点完成
+		isPassed := lo.SomeBy(latestTasks, func(tk *model.Task) bool { return tk.IsPassed() })
+		isAllSkipped := len(latestTasks) > 0 && lo.EveryBy(latestTasks, func(tk *model.Task) bool { return tk.Status == model.TaskSkipped })
+		if isPassed || isAllSkipped {
+			t.completed[nodeID] = true
 		}
 	}
 }
