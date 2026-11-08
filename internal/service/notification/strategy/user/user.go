@@ -40,12 +40,17 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 		return notification.NewErrorResponse(string(notification.ErrorCodeNodeNotConfigured), err.Error()), fmt.Errorf("%w: %v", notification.ErrNodeNotConfigured, err)
 	}
 
-	// 2. 解析审批人
-	var assignees []flowdsl.Assignee
-	if userCfg, isUser := node.AsUserTask(); isUser {
-		assignees = userCfg.Assignees
+	// 2. 解析审批人：若上游调用方（如流程引擎任务事件）已明确指派处理人，则直接复用，免去重复解析外部服务开销
+	var users []domain.User
+	if info.CurrentNode != nil && len(info.CurrentNode.UserIDs) > 0 {
+		users = n.QueryUsersByUsernames(ctx, info.CurrentNode.UserIDs)
+	} else {
+		var assignees []flowdsl.Assignee
+		if userCfg, isUser := node.AsUserTask(); isUser {
+			assignees = userCfg.Assignees
+		}
+		users, _ = n.ResolveAssignees(ctx, &info, assignees)
 	}
-	users, _ := n.ResolveAssignees(ctx, &info, assignees)
 	if len(users) == 0 {
 		n.Logger().Warn("未解析到有效审批通知接收人，跳过本次通知发送",
 			elog.String("nodeID", info.CurrentNode.NodeID),

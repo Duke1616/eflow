@@ -21,6 +21,17 @@ type FlowxNotificationListener struct {
 	workflowSvc workflowSvc.Service
 	dispatcher  *strategy.Dispatcher
 	logger      *elog.Component
+	syncMode    bool
+}
+
+// Option 配置 FlowxNotificationListener 可选参数
+type Option func(*FlowxNotificationListener)
+
+// WithSyncMode 设置是否同步处理（默认为 false 异步非阻塞执行；单测可设置为 true 保证可确定性断言）
+func WithSyncMode(sync bool) Option {
+	return func(l *FlowxNotificationListener) {
+		l.syncMode = sync
+	}
 }
 
 // NewFlowxNotificationListener 构造 flowx 专属消息通知监听器
@@ -28,13 +39,18 @@ func NewFlowxNotificationListener(
 	ticketRepo repository.TicketRepository,
 	workflowSvc workflowSvc.Service,
 	dispatcher *strategy.Dispatcher,
+	opts ...Option,
 ) flowx.IEventListener {
-	return &FlowxNotificationListener{
+	l := &FlowxNotificationListener{
 		ticketRepo:  ticketRepo,
 		workflowSvc: workflowSvc,
 		dispatcher:  dispatcher,
 		logger:      elog.DefaultLogger.With(elog.FieldComponentName("FlowxNotificationListener")),
 	}
+	for _, opt := range opts {
+		opt(l)
+	}
+	return l
 }
 
 // InterestIn 声明关注的领域生命周期事件
@@ -46,15 +62,34 @@ func (l *FlowxNotificationListener) InterestIn() []flowx.EventType {
 	}
 }
 
-// OnEvent 响应流程引擎广播的生命周期事件
+// OnEvent 响应流程引擎广播的生命周期事件（异步非阻塞脱钩主事务）
 func (l *FlowxNotificationListener) OnEvent(ctx context.Context, evt flowx.Event) error {
-	// 遵循并发安全与可靠性法则：异步协程/事件脱钩，防止上游 Context 取消导致通知被截断
-	safeCtx := context.WithoutCancel(ctx)
-
 	if evt.Instance == nil || evt.Instance.ID == "" {
 		return nil
 	}
 
+	// 遵循并发安全与可靠性法则：异步协程生命周期脱钩，防止上游 Context 取消导致通知被截断
+	safeCtx := context.WithoutCancel(ctx)
+
+	process := func() {
+		defer func() {
+			if r := recover(); r != nil {
+				l.logger.Error("flowx 通知处理发生 panic", elog.Any("recover", r))
+			}
+		}()
+		l.handleEvent(safeCtx, evt)
+	}
+
+	if l.syncMode {
+		process()
+	} else {
+		go process()
+	}
+
+	return nil
+}
+
+func (l *FlowxNotificationListener) handleEvent(safeCtx context.Context, evt flowx.Event) {
 	instanceKey := evt.Instance.ID
 
 	// 1. 优先根据 BusinessKey（即工单 ID）秒级检索工单实体；若无则通过流程实例多态标识检索
@@ -75,7 +110,7 @@ func (l *FlowxNotificationListener) OnEvent(ctx context.Context, evt flowx.Event
 			elog.String("instanceKey", instanceKey),
 			elog.String("businessKey", evt.Instance.BusinessKey),
 			elog.FieldErr(err))
-		return nil
+		return
 	}
 
 	// 补全流程实例多态标识与引擎元信息，确保后续策略统一寻址
@@ -93,7 +128,7 @@ func (l *FlowxNotificationListener) OnEvent(ctx context.Context, evt flowx.Event
 		l.logger.Warn("flowx 通知处理: 未检索到工作流定义",
 			elog.Int64("workflowID", ticket.WorkflowId),
 			elog.FieldErr(err))
-		return nil
+		return
 	}
 
 	// 4. 根据不同事件细分路由对应的通知策略
@@ -107,8 +142,6 @@ func (l *FlowxNotificationListener) OnEvent(ctx context.Context, evt flowx.Event
 	case flowx.EventNodeEntered:
 		l.handleNodeEntered(safeCtx, instanceKey, ticket, wf, evt)
 	}
-
-	return nil
 }
 
 func (l *FlowxNotificationListener) handleProcessStarted(ctx context.Context, instanceKey string, ticket domain.Ticket, wf domain.Workflow, evt flowx.Event) {

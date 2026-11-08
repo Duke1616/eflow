@@ -43,6 +43,8 @@ type Service interface {
 	PrepareCommonFields(info Info, data *NotificationData) []notification.Field
 	// ResolveAssignees 并发解析当前节点的审批人名单并自动同步注入
 	ResolveAssignees(ctx context.Context, info *Info, assignees []flowdsl.Assignee) ([]domain.User, error)
+	// QueryUsersByUsernames 根据用户名批量获取用户领域实体（优先 EIAM 查询，失败时降级兜底）
+	QueryUsersByUsernames(ctx context.Context, usernames []string) []domain.User
 	// SafeGo 安全执行带 Panic 恢复机制的异步延时任务
 	SafeGo(ctx context.Context, timeout time.Duration, fn func(ctx context.Context))
 	// PassTask 调用工作流引擎接口物理流转推进指定任务
@@ -117,7 +119,19 @@ func (s *service) ResolveAssignees(ctx context.Context, info *Info, assignees []
 	nodeID := lo.Ternary(info.CurrentNode != nil, info.CurrentNode.NodeID, "")
 
 	// 1. 尝试动态解析 (3 秒短超时，避免阻断主流程)
-	userIDs := s.resolveDynamicUserIDs(ctx, selectors, nodeID, info.Workflow.Name)
+	// 仅当选择器包含非静态直属用户（如部门主管、值班组等动态规则）时才请求 EAlert 服务
+	hasDynamicSelector := lo.SomeBy(selectors, func(s *notificationv1.RecipientSelector) bool {
+		return s.Type != notificationv1.RecipientSelectorType_RECIPIENT_USER
+	})
+	var userIDs []int64
+	if hasDynamicSelector {
+		userIDs = s.resolveDynamicUserIDs(ctx, selectors, nodeID, info.Workflow.Name)
+	} else {
+		// 纯静态用户选择器直接提取已绑定的用户 ID，无需调用外部动态服务
+		userIDs = lo.FlatMap(selectors, func(item *notificationv1.RecipientSelector, _ int) []int64 {
+			return item.TargetIds
+		})
+	}
 
 	// 2. 查询用户实体 (动态用户优先，静态指定与提单人降级兜底)
 	staticNames := extractStaticUsernames(assignees, info.Ticket.CreateBy)
@@ -189,6 +203,28 @@ func (s *service) queryDomainUsers(ctx context.Context, userIDs []int64, staticN
 	}
 
 	// EIAM 不可用时直接以用户名构建基础实体，保障流程引擎正常运转
+	return lo.Map(candidates, func(name string, _ int) domain.User {
+		return domain.User{Username: name, DisplayName: name}
+	})
+}
+
+// QueryUsersByUsernames 根据用户名列表批量获取用户领域实体（优先 EIAM，不可用时降级为基础实体）
+func (s *service) QueryUsersByUsernames(ctx context.Context, usernames []string) []domain.User {
+	candidates := lo.Filter(usernames, func(name string, _ int) bool {
+		return strings.TrimSpace(name) != ""
+	})
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	if s.userSvc != nil {
+		if resp, err := s.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{Usernames: candidates}); err == nil && resp != nil {
+			if users := toDomainUsers(resp.GetUsers()); len(users) > 0 {
+				return users
+			}
+		}
+	}
+
 	return lo.Map(candidates, func(name string, _ int) domain.User {
 		return domain.User{Username: name, DisplayName: name}
 	})

@@ -355,6 +355,44 @@ func (c *MockServicePrepareCommonFieldsCall) DoAndReturn(f func(strategy.Info, *
 	return c
 }
 
+// QueryUsersByUsernames mocks base method.
+func (m *MockService) QueryUsersByUsernames(ctx context.Context, usernames []string) []domain.User {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "QueryUsersByUsernames", ctx, usernames)
+	ret0, _ := ret[0].([]domain.User)
+	return ret0
+}
+
+// QueryUsersByUsernames indicates an expected call of QueryUsersByUsernames.
+func (mr *MockServiceMockRecorder) QueryUsersByUsernames(ctx, usernames any) *MockServiceQueryUsersByUsernamesCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "QueryUsersByUsernames", reflect.TypeOf((*MockService)(nil).QueryUsersByUsernames), ctx, usernames)
+	return &MockServiceQueryUsersByUsernamesCall{Call: call}
+}
+
+// MockServiceQueryUsersByUsernamesCall wrap *gomock.Call
+type MockServiceQueryUsersByUsernamesCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockServiceQueryUsersByUsernamesCall) Return(arg0 []domain.User) *MockServiceQueryUsersByUsernamesCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockServiceQueryUsersByUsernamesCall) Do(f func(context.Context, []string) []domain.User) *MockServiceQueryUsersByUsernamesCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockServiceQueryUsersByUsernamesCall) DoAndReturn(f func(context.Context, []string) []domain.User) *MockServiceQueryUsersByUsernamesCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // ResolveAssignees mocks base method.
 func (m *MockService) ResolveAssignees(ctx context.Context, info *strategy.Info, assignees []flowdsl.Assignee) ([]domain.User, error) {
 	m.ctrl.T.Helper()

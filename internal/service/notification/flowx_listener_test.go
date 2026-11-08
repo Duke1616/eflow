@@ -193,7 +193,7 @@ func TestFlowxNotificationListener_OnEvent(t *testing.T) {
 			chatMock := &mockSendStrategy{}
 			dispatcher := strategy.NewDispatcher(userMock, nil, startMock, chatMock, ccMock, nil)
 
-			listener := NewFlowxNotificationListener(repo, wf, dispatcher)
+			listener := NewFlowxNotificationListener(repo, wf, dispatcher, WithSyncMode(true))
 			err := listener.OnEvent(context.Background(), tc.event)
 			require.NoError(t, err)
 
