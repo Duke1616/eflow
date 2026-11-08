@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/event"
@@ -18,7 +17,6 @@ import (
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/samber/lo"
-	"github.com/xen0n/go-workwx"
 )
 
 // ValidationError 局部表单字段校验错误定义
@@ -47,12 +45,6 @@ type Service interface {
 	MarkProcessStartFailed(ctx context.Context, id int64, reason string) error
 	// RestartProcess 使用原工单数据重新发送流程启动事件
 	RestartProcess(ctx context.Context, id int64) error
-	// MergeData 将审批节点提交的最新变量合并追加到工单已存盘的 Data 变量集中
-	MergeData(ctx context.Context, ticketId int64, data map[string]interface{}) error
-	// CreateTaskForm 对指定的任务节点进行审批动作提交时的物理表单快照记录
-	CreateTaskForm(ctx context.Context, taskId domain.ID, ticketId int64, fields []domain.FormValue) error
-	// ListTaskFormsByTaskIDs 根据任务 ID 列表批量拉取历史步骤留存的物理表单数据
-	ListTaskFormsByTaskIDs(ctx context.Context, taskIds []int) (map[int][]domain.FormValue, error)
 	// ListTaskFormsByTicketID 查询某个物理工单下所有审批节点曾提交过的物理表单数据集
 	ListTaskFormsByTicketID(ctx context.Context, ticketID int64) ([]domain.FormValue, error)
 	// Pass 同意当前代办节点审批，统一执行领域自卫校验、变量合并与必填校验并驱动引擎推进
@@ -240,18 +232,6 @@ func (s *ticketService) RestartProcess(ctx context.Context, id int64) error {
 		return err
 	}
 	return nil
-}
-
-func (s *ticketService) MergeData(ctx context.Context, ticketId int64, data map[string]interface{}) error {
-	return s.repo.MergeTicketData(ctx, ticketId, data)
-}
-
-func (s *ticketService) CreateTaskForm(ctx context.Context, taskId domain.ID, ticketId int64, fields []domain.FormValue) error {
-	return s.repo.CreateTaskForm(ctx, taskId, ticketId, fields)
-}
-
-func (s *ticketService) ListTaskFormsByTaskIDs(ctx context.Context, taskIds []int) (map[int][]domain.FormValue, error) {
-	return s.repo.FindTaskFormsBatch(ctx, taskIds)
 }
 
 func (s *ticketService) ListTaskFormsByTicketID(ctx context.Context, ticketID int64) ([]domain.FormValue, error) {
@@ -609,71 +589,4 @@ func (s *ticketService) sendAppendAlertNotification(ctx context.Context, existin
 	}
 
 	return nil
-}
-
-func wechatOaData(data map[string]interface{}) (workwx.OAApprovalDetail, error) {
-	wechatOaJson, err := json.Marshal(data)
-	if err != nil {
-		return workwx.OAApprovalDetail{}, fmt.Errorf("序列化企微表单数据失败: %w", err)
-	}
-
-	var wechatOaDetail workwx.OAApprovalDetail
-	err = json.Unmarshal(wechatOaJson, &wechatOaDetail)
-	if err != nil {
-		return workwx.OAApprovalDetail{}, fmt.Errorf("反序列化企微审批详情失败: %w", err)
-	}
-
-	return wechatOaDetail, nil
-}
-
-func convert(data []event.Variables, oaData workwx.OAApprovalDetail) []event.Variables {
-	oaVars := lo.FilterMap(oaData.ApplyData.Contents, func(c workwx.OAContent, _ int) (event.Variables, bool) {
-		val, ok := extractOAContentValue(c)
-		if !ok {
-			return event.Variables{}, false
-		}
-		return event.Variables{
-			Key:   cleanControlID(c.ID),
-			Value: val,
-		}, true
-	})
-	return append(data, oaVars...)
-}
-
-func cleanControlID(rawID string) string {
-	if idx := strings.Index(rawID, "-"); idx >= 0 && idx < len(rawID)-1 {
-		return rawID[idx+1:]
-	}
-	return rawID
-}
-
-func extractOAContentValue(c workwx.OAContent) (any, bool) {
-	switch c.Control {
-	case "Textarea":
-		return c.Value.Text, c.Value.Text != ""
-	case "Selector":
-		return extractSelectorValue(c.Value.Selector)
-	default:
-		return nil, false
-	}
-}
-
-func extractSelectorValue(s workwx.OAContentSelector) (any, bool) {
-	switch s.Type {
-	case "single":
-		if len(s.Options) > 0 && len(s.Options[0].Value) > 0 {
-			return s.Options[0].Value[0].Text, true
-		}
-	case "multi":
-		vals := lo.FilterMap(s.Options, func(opt workwx.OAContentSelectorOption, _ int) (string, bool) {
-			if len(opt.Value) == 0 {
-				return "", false
-			}
-			return opt.Value[0].Text, true
-		})
-		if len(vals) > 0 {
-			return vals, true
-		}
-	}
-	return nil, false
 }

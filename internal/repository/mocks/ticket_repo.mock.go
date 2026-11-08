@@ -265,34 +265,19 @@ func (mr *MockTicketRepositoryMockRecorder) ListTicket(ctx, userId, status, offs
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTicket", reflect.TypeOf((*MockTicketRepository)(nil).ListTicket), ctx, userId, status, offset, limit)
 }
 
-// ListTicketByProcessInstanceIds mocks base method.
-func (m *MockTicketRepository) ListTicketByProcessInstanceIds(ctx context.Context, instanceIds []int) ([]domain.Ticket, error) {
+// ListTicketByProcessInstances mocks base method.
+func (m *MockTicketRepository) ListTicketByProcessInstances(ctx context.Context, instanceIDs []string) ([]domain.Ticket, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListTicketByProcessInstanceIds", ctx, instanceIds)
+	ret := m.ctrl.Call(m, "ListTicketByProcessInstances", ctx, instanceIDs)
 	ret0, _ := ret[0].([]domain.Ticket)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// ListTicketByProcessInstanceIds indicates an expected call of ListTicketByProcessInstanceIds.
-func (mr *MockTicketRepositoryMockRecorder) ListTicketByProcessInstanceIds(ctx, instanceIds any) *gomock.Call {
+// ListTicketByProcessInstances indicates an expected call of ListTicketByProcessInstances.
+func (mr *MockTicketRepositoryMockRecorder) ListTicketByProcessInstances(ctx, instanceIDs any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTicketByProcessInstanceIds", reflect.TypeOf((*MockTicketRepository)(nil).ListTicketByProcessInstanceIds), ctx, instanceIds)
-}
-
-// ListTicketByProcessInstanceKeys mocks base method.
-func (m *MockTicketRepository) ListTicketByProcessInstanceKeys(ctx context.Context, instanceKeys []string) ([]domain.Ticket, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListTicketByProcessInstanceKeys", ctx, instanceKeys)
-	ret0, _ := ret[0].([]domain.Ticket)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ListTicketByProcessInstanceKeys indicates an expected call of ListTicketByProcessInstanceKeys.
-func (mr *MockTicketRepositoryMockRecorder) ListTicketByProcessInstanceKeys(ctx, instanceKeys any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTicketByProcessInstanceKeys", reflect.TypeOf((*MockTicketRepository)(nil).ListTicketByProcessInstanceKeys), ctx, instanceKeys)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTicketByProcessInstances", reflect.TypeOf((*MockTicketRepository)(nil).ListTicketByProcessInstances), ctx, instanceIDs)
 }
 
 // MarkProcessStartFailed mocks base method.

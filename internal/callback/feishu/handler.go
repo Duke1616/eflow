@@ -97,6 +97,14 @@ func (h *larkCallbackHandler) OnAction(ctx context.Context, cte *larkcallback.Ca
 	return h.OnCardAction(ctx, cte)
 }
 
+// actionToastMap 定义跨渠道动作触发时的即时轻量交互反馈文案
+var actionToastMap = map[domain.ChannelActionType]string{
+	domain.ChannelActionProgress: "正在生成流程进度图，请稍候...",
+	domain.ChannelActionPass:     "正在处理审批通过...",
+	domain.ChannelActionReject:   "正在处理审批驳回...",
+	domain.ChannelActionRevoke:   "正在处理工单撤销...",
+}
+
 // OnCardAction 接收飞书卡片上的用户交互点击回调
 func (h *larkCallbackHandler) OnCardAction(ctx context.Context, cte *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error) {
 	h.logger.Info("捕捉到飞书互动卡片交互点击回调")
@@ -125,28 +133,12 @@ func (h *larkCallbackHandler) OnCardAction(ctx context.Context, cte *larkcallbac
 		}
 	}()
 
-	// 针对异步耗时操作立即向飞书客户端下发轻量 Toast 响应，消除“点击无反应”假死体验
+	// 表驱动法：针对异步耗时操作立即向飞书客户端下发轻量 Toast 响应，消除“点击无反应”假死体验
 	var resp larkcallback.CardActionTriggerResponse
-	switch domainEvt.Action {
-	case domain.ChannelActionProgress:
+	if tip, ok := actionToastMap[domainEvt.Action]; ok {
 		resp.Toast = &larkcallback.Toast{
 			Type:    "info",
-			Content: "正在生成流程进度图，请稍候...",
-		}
-	case domain.ChannelActionPass:
-		resp.Toast = &larkcallback.Toast{
-			Type:    "info",
-			Content: "正在处理审批通过...",
-		}
-	case domain.ChannelActionReject:
-		resp.Toast = &larkcallback.Toast{
-			Type:    "info",
-			Content: "正在处理审批驳回...",
-		}
-	case domain.ChannelActionRevoke:
-		resp.Toast = &larkcallback.Toast{
-			Type:    "info",
-			Content: "正在处理工单撤销...",
+			Content: tip,
 		}
 	}
 
@@ -196,8 +188,7 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt domain.ChannelActi
 	// 业务成功：按交互类型完成后续卡片状态流转或进度截图渲染
 	switch result.Action {
 	case domain.ChannelActionProgress:
-		err = h.progress(ctx, evt.TicketID, evt.ChannelUserID)
-		if err != nil {
+		if err := h.progress(ctx, evt.TicketID, evt.ChannelUserID); err != nil {
 			h.logger.Error("查看流程进度失败", elog.FieldErr(err))
 			return err
 		}
@@ -454,16 +445,12 @@ func extractChannelActionEvent(cte *larkcallback.CardActionTriggerEvent) domain.
 	actionMap := mapx.Map(actionValue)
 
 	// 1. 安全解引用操作人 ID（依次尝试 UserID、OpenID 及卡片载荷中的 user_id 兜底，避免身份丢失）
-	var userID string
+	var operatorID, openID string
 	if cte.Event.Operator != nil {
-		userID = strings.TrimSpace(lo.FromPtr(cte.Event.Operator.UserID))
-		if userID == "" {
-			userID = strings.TrimSpace(cte.Event.Operator.OpenID)
-		}
+		operatorID = lo.FromPtr(cte.Event.Operator.UserID)
+		openID = cte.Event.Operator.OpenID
 	}
-	if userID == "" {
-		userID = strings.TrimSpace(actionMap.GetString("user_id"))
-	}
+	userID := strings.TrimSpace(lo.CoalesceOrEmpty(operatorID, openID, actionMap.GetString("user_id")))
 
 	var msgID string
 	if cte.Event.Context != nil {

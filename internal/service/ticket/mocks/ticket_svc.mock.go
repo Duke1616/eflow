@@ -71,20 +71,6 @@ func (mr *MockServiceMockRecorder) CreateBizTicket(ctx, ticket any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateBizTicket", reflect.TypeOf((*MockService)(nil).CreateBizTicket), ctx, ticket)
 }
 
-// CreateTaskForm mocks base method.
-func (m *MockService) CreateTaskForm(ctx context.Context, taskId domain.ID, ticketId int64, fields []domain.FormValue) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateTaskForm", ctx, taskId, ticketId, fields)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// CreateTaskForm indicates an expected call of CreateTaskForm.
-func (mr *MockServiceMockRecorder) CreateTaskForm(ctx, taskId, ticketId, fields any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateTaskForm", reflect.TypeOf((*MockService)(nil).CreateTaskForm), ctx, taskId, ticketId, fields)
-}
-
 // CreateTicket mocks base method.
 func (m *MockService) CreateTicket(ctx context.Context, req domain.Ticket) error {
 	m.ctrl.T.Helper()
@@ -144,21 +130,6 @@ func (mr *MockServiceMockRecorder) GetTaskFormConfig(ctx, ticketId, taskId, work
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTaskFormConfig", reflect.TypeOf((*MockService)(nil).GetTaskFormConfig), ctx, ticketId, taskId, workflowId)
 }
 
-// ListTaskFormsByTaskIDs mocks base method.
-func (m *MockService) ListTaskFormsByTaskIDs(ctx context.Context, taskIds []int) (map[int][]domain.FormValue, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListTaskFormsByTaskIDs", ctx, taskIds)
-	ret0, _ := ret[0].(map[int][]domain.FormValue)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ListTaskFormsByTaskIDs indicates an expected call of ListTaskFormsByTaskIDs.
-func (mr *MockServiceMockRecorder) ListTaskFormsByTaskIDs(ctx, taskIds any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTaskFormsByTaskIDs", reflect.TypeOf((*MockService)(nil).ListTaskFormsByTaskIDs), ctx, taskIds)
-}
-
 // ListTaskFormsByTicketID mocks base method.
 func (m *MockService) ListTaskFormsByTicketID(ctx context.Context, ticketID int64) ([]domain.FormValue, error) {
 	m.ctrl.T.Helper()
@@ -186,20 +157,6 @@ func (m *MockService) MarkProcessStartFailed(ctx context.Context, id int64, reas
 func (mr *MockServiceMockRecorder) MarkProcessStartFailed(ctx, id, reason any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkProcessStartFailed", reflect.TypeOf((*MockService)(nil).MarkProcessStartFailed), ctx, id, reason)
-}
-
-// MergeData mocks base method.
-func (m *MockService) MergeData(ctx context.Context, ticketId int64, data map[string]any) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "MergeData", ctx, ticketId, data)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// MergeData indicates an expected call of MergeData.
-func (mr *MockServiceMockRecorder) MergeData(ctx, ticketId, data any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MergeData", reflect.TypeOf((*MockService)(nil).MergeData), ctx, ticketId, data)
 }
 
 // Pass mocks base method.

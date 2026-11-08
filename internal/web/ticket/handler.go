@@ -207,6 +207,21 @@ func (h *Handler) TodoByUser(ctx *ginx.Context, req Todo) (ginx.Result, error) {
 	}, nil
 }
 
+// handleTaskOperationError 统一映射工单流转与任务操作中的领域业务错误
+func handleTaskOperationError(err error) (ginx.Result, error) {
+	if err == nil {
+		return ginx.Result{}, nil
+	}
+	switch {
+	case errors.Is(err, domain.ErrTaskUnauthorized), errors.Is(err, domain.ErrTicketUnauthorized):
+		return ginx.Result{Code: 403, Msg: err.Error()}, nil
+	case errors.Is(err, domain.ErrTaskAlreadyFinished), errors.Is(err, domain.ErrInvalidParameter):
+		return ginx.Result{Code: 400, Msg: err.Error()}, nil
+	default:
+		return systemErrorResult, err
+	}
+}
+
 func (h *Handler) Transfer(ctx *ginx.Context, req TransferReq) (ginx.Result, error) {
 	if req.TicketId <= 0 {
 		return ginx.Result{Code: 400, Msg: "工单 ID 非法"}, nil
@@ -225,16 +240,7 @@ func (h *Handler) Transfer(ctx *ginx.Context, req TransferReq) (ginx.Result, err
 
 	err = h.svc.Transfer(ctx.Context, req.TicketId, req.TaskId.String(), user.Username, user.IsAdmin, req.Usernames)
 	if err != nil {
-		if errors.Is(err, domain.ErrTaskUnauthorized) {
-			return ginx.Result{Code: 403, Msg: err.Error()}, nil
-		}
-		if errors.Is(err, domain.ErrTaskAlreadyFinished) {
-			return ginx.Result{Code: 400, Msg: err.Error()}, nil
-		}
-		if errors.Is(err, domain.ErrInvalidParameter) {
-			return ginx.Result{Code: 400, Msg: err.Error()}, nil
-		}
-		return systemErrorResult, err
+		return handleTaskOperationError(err)
 	}
 
 	return ginx.Result{
@@ -321,13 +327,7 @@ func (h *Handler) Pass(ctx *ginx.Context, req PassOrderReq) (ginx.Result, error)
 		return systemErrorResult, err
 	}
 	if err = h.svc.Pass(ctx.Context, req.TicketId, req.TaskId.String(), user.Username, user.IsAdmin, req.Comment, req.ExtraData); err != nil {
-		if errors.Is(err, domain.ErrTaskUnauthorized) {
-			return ginx.Result{Code: 403, Msg: err.Error()}, nil
-		}
-		if errors.Is(err, domain.ErrTaskAlreadyFinished) {
-			return ginx.Result{Code: 400, Msg: err.Error()}, nil
-		}
-		return systemErrorResult, err
+		return handleTaskOperationError(err)
 	}
 
 	return ginx.Result{
@@ -351,13 +351,7 @@ func (h *Handler) Reject(ctx *ginx.Context, req RejectOrderReq) (ginx.Result, er
 
 	err = h.svc.Reject(ctx.Context, req.TicketId, req.TaskId.String(), user.Username, user.IsAdmin, req.Comment)
 	if err != nil {
-		if errors.Is(err, domain.ErrTaskUnauthorized) {
-			return ginx.Result{Code: 403, Msg: err.Error()}, nil
-		}
-		if errors.Is(err, domain.ErrTaskAlreadyFinished) {
-			return ginx.Result{Code: 400, Msg: err.Error()}, nil
-		}
-		return systemErrorResult, err
+		return handleTaskOperationError(err)
 	}
 
 	return ginx.Result{

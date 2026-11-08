@@ -264,6 +264,14 @@ type TicketTaskView struct {
 	Rating             *TicketRating
 }
 
+// WithDisplayName 基于外部提供的用户真实姓名字典，将 Ticket 的提单人 (CreateBy) 安全投影为真实展示姓名
+func (t Ticket) WithDisplayName(displayNames map[string]string) Ticket {
+	if name, ok := displayNames[t.CreateBy]; ok && name != "" {
+		t.CreateBy = name
+	}
+	return t
+}
+
 // CanRevokeBy 断言操作人是否有权撤回当前工单（必须是发起人本人或管理员，且工单处于可撤回状态）
 func (t *Ticket) CanRevokeBy(operator string, isAdmin bool) error {
 	if !isAdmin && t.CreateBy != operator {

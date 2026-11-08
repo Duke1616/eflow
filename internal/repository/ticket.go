@@ -31,10 +31,8 @@ type TicketRepository interface {
 	ListProcessStartFailed(ctx context.Context, userId string, offset, limit int64) ([]domain.Ticket, error)
 	// CountProcessStartFailed 统计流程启动中或启动失败的工单数量
 	CountProcessStartFailed(ctx context.Context, userId string) (int64, error)
-	// ListTicketByProcessInstanceIds 根据引擎实例 ID 集合批量高效拉取工单记录
-	ListTicketByProcessInstanceIds(ctx context.Context, instanceIds []int) ([]domain.Ticket, error)
-	// ListTicketByProcessInstanceKeys 根据现代引擎实例全局唯一 Key 集合批量高效拉取工单记录
-	ListTicketByProcessInstanceKeys(ctx context.Context, instanceKeys []string) ([]domain.Ticket, error)
+	// ListTicketByProcessInstances 根据流程实例标识集合（自动自适应匹配现代全局唯一 Key 或历史自增 ID）批量高效拉取工单记录
+	ListTicketByProcessInstances(ctx context.Context, instanceIDs []string) ([]domain.Ticket, error)
 	// UpdateStatusByProcessInstance 根据流程实例标识自适应更新本地物理工单的最新审批流转状态
 	UpdateStatusByProcessInstance(ctx context.Context, instanceID domain.ID, status uint8, wtime int64) error
 	// ListTicket 分页检索指定用户相关的、符合指定状态集合的物理工单记录
@@ -137,13 +135,8 @@ func (repo *ticketRepository) CountProcessStartFailed(ctx context.Context, userI
 	return repo.dao.CountProcessStartFailed(ctx, userId)
 }
 
-func (repo *ticketRepository) ListTicketByProcessInstanceIds(ctx context.Context, instanceIds []int) ([]domain.Ticket, error) {
-	tickets, err := repo.dao.ListTicketByProcessInstanceIds(ctx, instanceIds)
-	return slice.Map(tickets, func(idx int, src dao.Ticket) domain.Ticket { return repo.toDomain(src) }), err
-}
-
-func (repo *ticketRepository) ListTicketByProcessInstanceKeys(ctx context.Context, instanceKeys []string) ([]domain.Ticket, error) {
-	tickets, err := repo.dao.ListTicketByProcessInstanceKeys(ctx, instanceKeys)
+func (repo *ticketRepository) ListTicketByProcessInstances(ctx context.Context, instanceIDs []string) ([]domain.Ticket, error) {
+	tickets, err := repo.dao.ListTicketByProcessInstances(ctx, instanceIDs)
 	return slice.Map(tickets, func(idx int, src dao.Ticket) domain.Ticket { return repo.toDomain(src) }), err
 }
 

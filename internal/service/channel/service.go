@@ -121,13 +121,6 @@ func (s *channelActionService) DispatchAction(ctx context.Context, evt domain.Ch
 		return s.handleReject(ctx, evt, engineType, operator, isAdmin, comment)
 	case domain.ChannelActionRevoke:
 		return s.handleRevoke(ctx, evt, operator, comment)
-	case domain.ChannelActionProgress:
-		return &domain.ChannelActionResult{
-			Success:  true,
-			Action:   domain.ChannelActionProgress,
-			Operator: operator,
-			Remark:   "查看工单流转进度",
-		}, nil
 	default:
 		s.logger.Warn("收到不支持的渠道动作指令", elog.String("action", string(evt.Action)))
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedAction, evt.Action)

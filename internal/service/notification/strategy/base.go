@@ -254,7 +254,7 @@ func (s *service) FetchRequiredData(ctx context.Context, info Info, nodes []*flo
 
 	errGroup.Go(func() error {
 		var err error
-		data.AutomationOutput, err = s.automationOutput(ctx, info.InstID, nodes)
+		data.AutomationOutput, err = s.automationOutput(ctx, info.ResolveInstanceID(), nodes)
 		return err
 	})
 
@@ -360,13 +360,13 @@ func (s *service) getRules(ctx context.Context, oInfo domain.Ticket) ([]rule.Rul
 	return rules, t.Name, nil
 }
 
-func (s *service) automationOutput(ctx context.Context, instanceId int, nodes []*flowdsl.Node) (map[string]interface{}, error) {
+func (s *service) automationOutput(ctx context.Context, instanceID domain.ID, nodes []*flowdsl.Node) (map[string]interface{}, error) {
 	mergedResult := make(map[string]interface{})
 	for _, node := range nodes {
 		if node.Type != flowdsl.NodeAutoTask {
 			continue
 		}
-		if result, err := s.fetchResult(ctx, instanceId, node.ID); err == nil {
+		if result, err := s.fetchResult(ctx, instanceID, node.ID); err == nil {
 			for k, v := range result {
 				mergedResult[k] = v
 			}
@@ -375,8 +375,8 @@ func (s *service) automationOutput(ctx context.Context, instanceId int, nodes []
 	return mergedResult, nil
 }
 
-func (s *service) fetchResult(ctx context.Context, instanceID int, nodeID string) (map[string]interface{}, error) {
-	result, err := s.taskSvc.FindTaskByNodeID(ctx, int64(instanceID), nodeID)
+func (s *service) fetchResult(ctx context.Context, instanceID domain.ID, nodeID string) (map[string]interface{}, error) {
+	result, err := s.taskSvc.FindTaskByNodeID(ctx, instanceID.Int64(), nodeID)
 	if err != nil {
 		return nil, err
 	}

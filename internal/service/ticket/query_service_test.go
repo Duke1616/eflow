@@ -337,16 +337,15 @@ func TestQueryService_ListUserTodo_CrossEngine(t *testing.T) {
 			Users: []*userv1.User{{Username: "alice", DisplayName: "爱丽丝"}},
 		}, nil)
 
-	// 4. Mock 批量反查工单：EasyFlow 按 ID 查，FlowX 按 Key 查
-	mockRepo.EXPECT().ListTicketByProcessInstanceIds(gomock.Any(), []int{101}).
-		Return([]domain.Ticket{
-			{Id: 1, Process: domain.Process{EngineType: domain.EngineTypeEasyFlow, InstanceID: domain.NewID(101)}},
-		}, nil)
-
-	mockRepo.EXPECT().ListTicketByProcessInstanceKeys(gomock.Any(), []string{flowxInstID}).
-		Return([]domain.Ticket{
-			{Id: 2, Process: domain.Process{EngineType: domain.EngineTypeFlowx, InstanceID: domain.NewID(flowxInstID)}},
-		}, nil)
+	// 4. Mock 统一批量反查工单：一次性传入所有待办的流程实例标识
+	mockRepo.EXPECT().ListTicketByProcessInstances(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, instanceIDs []string) ([]domain.Ticket, error) {
+			assert.ElementsMatch(t, []string{"101", flowxInstID}, instanceIDs)
+			return []domain.Ticket{
+				{Id: 1, Process: domain.Process{EngineType: domain.EngineTypeEasyFlow, InstanceID: domain.NewID(101)}},
+				{Id: 2, Process: domain.Process{EngineType: domain.EngineTypeFlowx, InstanceID: domain.NewID(flowxInstID)}},
+			}, nil
+		})
 
 	// 5. 执行跨引擎多态待办查询
 	svc := NewQueryService(mockRepo, unifiedEngine, mockUser, nil)

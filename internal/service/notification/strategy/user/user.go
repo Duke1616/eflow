@@ -144,14 +144,10 @@ func (n *Notification) prepareNotificationMetadata(ctx context.Context,
 // sendAlertNotification 针对告警工单的特殊简化通知逻辑
 func (n *Notification) sendAlertNotification(ctx context.Context, tasks []strategy.Task,
 	ticketInfo domain.Ticket, userMap strategy.RecipientMap) error {
-	var userIds []string
-	for _, src := range tasks {
+	userIds := lo.FilterMap(tasks, func(src strategy.Task, _ int) (string, bool) {
 		receiver := userMap.GetID(src.UserID)
-		if receiver == "" {
-			continue
-		}
-		userIds = append(userIds, receiver)
-	}
+		return receiver, receiver != ""
+	})
 
 	params, err := structpb.NewStruct(ticketInfo.NotificationConf.TemplateParams)
 	if err != nil {

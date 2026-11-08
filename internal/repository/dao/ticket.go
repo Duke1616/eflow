@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
@@ -11,6 +12,7 @@ import (
 	"github.com/Duke1616/eflow/pkg/sqlx"
 	"github.com/Duke1616/eiam/pkg/gormx"
 	pbacgorm "github.com/Duke1616/eiam/pkg/pbac/gormx"
+	"github.com/samber/lo"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -60,8 +62,6 @@ type TicketDAO interface {
 	DetailByProcessInstance(ctx context.Context, instanceID string) (Ticket, error)
 	// UpdateStatusByProcessInstance 根据流程实例标识更新工单流转状态
 	UpdateStatusByProcessInstance(ctx context.Context, instanceID string, status uint8, wtime int64) error
-	// AccessibleDetailByProcessInstId 获取经过 PBAC AccessScope 约束的单条工单。
-	AccessibleDetailByProcessInstId(ctx context.Context, instanceId int) (Ticket, error)
 	// Detail 依据物理主键 ID 获取单条工单详情
 	Detail(ctx context.Context, id int64) (Ticket, error)
 	// RegisterProcessInstanceId 为指定工单登记绑定的引擎实例 ID 并且同步置为流转状态
@@ -76,14 +76,8 @@ type TicketDAO interface {
 	ListProcessStartFailed(ctx context.Context, userId string, offset, limit int64) ([]Ticket, error)
 	// CountProcessStartFailed 统计流程启动中或启动失败的工单数量
 	CountProcessStartFailed(ctx context.Context, userId string) (int64, error)
-	// ListTicketByProcessInstanceIds 根据引擎实例 ID 列表高效批量反查工单物理记录
-	ListTicketByProcessInstanceIds(ctx context.Context, instanceIds []int) ([]Ticket, error)
-	// ListTicketByProcessInstanceKeys 根据现代引擎实例 Key 列表高效批量反查工单物理记录
-	ListTicketByProcessInstanceKeys(ctx context.Context, instanceKeys []string) ([]Ticket, error)
-	// UpdateStatusByInstanceId 根据工作流实例 ID 物理更新工单单据流转状态
-	UpdateStatusByInstanceId(ctx context.Context, instanceId int, status uint8) error
-	// UpdateStatusByInstanceKey 根据工作流实例全局唯一 Key 物理更新工单单据流转状态
-	UpdateStatusByInstanceKey(ctx context.Context, instanceKey string, status uint8, wtime int64) error
+	// ListTicketByProcessInstances 根据流程实例标识集合（自动自适应匹配现代全局唯一 Key 或历史自增 ID）批量高效拉取工单记录
+	ListTicketByProcessInstances(ctx context.Context, instanceIDs []string) ([]Ticket, error)
 	// ListTicket 分页条件过滤获取与指定用户相关且在状态集合内的物理记录列表
 	ListTicket(ctx context.Context, userId string, status []int, offset, limit int64) ([]Ticket, error)
 	// CountTicket 统计与指定用户相关且在指定状态集合内的工单物理记录总条数
@@ -129,20 +123,6 @@ func (g *gormTicketDAO) DetailByProcessInstId(ctx context.Context, instanceId in
 		Where("process_instance_id = ?", instanceId).
 		First(&res).Error
 	return res, err
-}
-
-func (g *gormTicketDAO) AccessibleDetailByProcessInstId(ctx context.Context, instanceId int) (Ticket, error) {
-	var result Ticket
-	query, err := pbacgorm.Apply(
-		ctx,
-		g.db.WithContext(ctx).Model(&Ticket{}).Where("process_instance_id = ?", instanceId),
-		ticketpbac.History,
-	)
-	if err != nil {
-		return Ticket{}, err
-	}
-	err = query.First(&result).Error
-	return result, err
 }
 
 func (g *gormTicketDAO) Detail(ctx context.Context, id int64) (Ticket, error) {
@@ -195,7 +175,7 @@ func (g *gormTicketDAO) UpdateStatusByProcessInstance(ctx context.Context, insta
 		return nil
 	}
 	if intID, err := strconv.Atoi(instanceID); err == nil && intID > 0 {
-		return g.UpdateStatusByInstanceId(ctx, intID, status)
+		return g.updateStatusByInstanceId(ctx, intID, status)
 	}
 	return nil
 }
@@ -269,31 +249,37 @@ func (g *gormTicketDAO) CountProcessStartFailed(ctx context.Context, userId stri
 	return g.CountTicket(ctx, userId, []int{domain.START.ToInt(), domain.START_FAILED.ToInt()})
 }
 
-func (g *gormTicketDAO) ListTicketByProcessInstanceIds(ctx context.Context, instanceIds []int) ([]Ticket, error) {
+func (g *gormTicketDAO) ListTicketByProcessInstances(ctx context.Context, instanceIDs []string) ([]Ticket, error) {
 	var res []Ticket
-	if len(instanceIds) == 0 {
+	if len(instanceIDs) == 0 {
 		return res, nil
 	}
-	err := g.db.WithContext(ctx).
-		Scopes(gormx.IgnoreTenant()).
-		Where("process_instance_id IN ?", instanceIds).
-		Find(&res).Error
+	cleanIDs := lo.Uniq(lo.Filter(instanceIDs, func(id string, _ int) bool {
+		return strings.TrimSpace(id) != ""
+	}))
+	if len(cleanIDs) == 0 {
+		return res, nil
+	}
+
+	var intIDs []int
+	for _, id := range cleanIDs {
+		if n, err := strconv.Atoi(id); err == nil && n > 0 {
+			intIDs = append(intIDs, n)
+		}
+	}
+
+	query := g.db.WithContext(ctx).Scopes(gormx.IgnoreTenant())
+	if len(intIDs) > 0 {
+		query = query.Where("process_instance_key IN ? OR process_instance_id IN ?", cleanIDs, intIDs)
+	} else {
+		query = query.Where("process_instance_key IN ?", cleanIDs)
+	}
+
+	err := query.Find(&res).Error
 	return res, err
 }
 
-func (g *gormTicketDAO) ListTicketByProcessInstanceKeys(ctx context.Context, instanceKeys []string) ([]Ticket, error) {
-	var res []Ticket
-	if len(instanceKeys) == 0 {
-		return res, nil
-	}
-	err := g.db.WithContext(ctx).
-		Scopes(gormx.IgnoreTenant()).
-		Where("process_instance_key IN ?", instanceKeys).
-		Find(&res).Error
-	return res, err
-}
-
-func (g *gormTicketDAO) UpdateStatusByInstanceId(ctx context.Context, instanceId int, status uint8) error {
+func (g *gormTicketDAO) updateStatusByInstanceId(ctx context.Context, instanceId int, status uint8) error {
 	now := time.Now().UnixMilli()
 	return g.db.WithContext(ctx).Model(&Ticket{}).
 		Scopes(gormx.IgnoreTenant()).
@@ -302,21 +288,6 @@ func (g *gormTicketDAO) UpdateStatusByInstanceId(ctx context.Context, instanceId
 		"utime":  now,
 		"wtime":  now,
 	}).Error
-}
-
-func (g *gormTicketDAO) UpdateStatusByInstanceKey(ctx context.Context, instanceKey string, status uint8, wtime int64) error {
-	now := time.Now().UnixMilli()
-	updates := map[string]interface{}{
-		"status": status,
-		"utime":  now,
-	}
-	if wtime > 0 {
-		updates["wtime"] = wtime
-	}
-	return g.db.WithContext(ctx).Model(&Ticket{}).
-		Scopes(gormx.IgnoreTenant()).
-		Where("process_instance_key = ?", instanceKey).
-		Updates(updates).Error
 }
 
 func (g *gormTicketDAO) ListTicket(ctx context.Context, userId string, status []int, offset, limit int64) ([]Ticket, error) {

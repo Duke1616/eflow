@@ -74,24 +74,44 @@ type SendStrategy interface {
 }
 
 type Dispatcher struct {
-	userStrategy       SendStrategy
-	autoStrategy       SendStrategy
-	startStrategy      SendStrategy
-	chatStrategy       SendStrategy
-	carbonCopyStrategy SendStrategy
-	base               Service
+	strategies      map[NodeName]SendStrategy
+	defaultStrategy SendStrategy
+	base            Service
 }
 
+// NewDispatcher 构建策略分发器，内部基于策略注册表模式组织各节点处理策略，遵循开闭原则 (OCP)
 func NewDispatcher(user SendStrategy, auto SendStrategy,
 	start SendStrategy, chat SendStrategy, carbonCopy SendStrategy, base Service) *Dispatcher {
-	return &Dispatcher{
-		userStrategy:       user,
-		autoStrategy:       auto,
-		startStrategy:      start,
-		chatStrategy:       chat,
-		carbonCopyStrategy: carbonCopy,
-		base:               base,
+	strategies := make(map[NodeName]SendStrategy, 5)
+	if start != nil {
+		strategies[Start] = start
 	}
+	if auto != nil {
+		strategies[Automation] = auto
+	}
+	if user != nil {
+		strategies[User] = user
+	}
+	if carbonCopy != nil {
+		strategies[CarbonCopy] = carbonCopy
+	}
+	if chat != nil {
+		strategies[ChatGroup] = chat
+	}
+
+	return &Dispatcher{
+		strategies:      strategies,
+		defaultStrategy: user,
+		base:            base,
+	}
+}
+
+// Register 动态注册或覆盖指定节点名称对应的通知发送策略
+func (d *Dispatcher) Register(name NodeName, s SendStrategy) {
+	if d.strategies == nil {
+		d.strategies = make(map[NodeName]SendStrategy)
+	}
+	d.strategies[name] = s
 }
 
 func (d *Dispatcher) Send(ctx context.Context, info Info) (notification.Response, error) {
@@ -124,18 +144,8 @@ func getChannel(wf domain.Workflow) Channel {
 }
 
 func (d *Dispatcher) selectStrategy(not Info) SendStrategy {
-	switch not.NodeName {
-	case Start:
-		return d.startStrategy
-	case Automation:
-		return d.autoStrategy
-	case User:
-		return d.userStrategy
-	case CarbonCopy:
-		return d.carbonCopyStrategy
-	case ChatGroup:
-		return d.chatStrategy
-	default:
-		return d.userStrategy
+	if s, ok := d.strategies[not.NodeName]; ok && s != nil {
+		return s
 	}
+	return d.defaultStrategy
 }

@@ -150,10 +150,7 @@ func (q *queryService) assembleTicketViews(ctx context.Context, tickets []domain
 
 	// 3. 以工单实体为基准展开待办视图，将提单人映射为真实展示姓名；当存在并行多分支时展开为多条独立的视图记录供前端进行 Rowspan 合并
 	views := lo.FlatMap(tickets, func(ticket domain.Ticket, _ int) []domain.TicketTaskView {
-		viewTicket := ticket
-		if name, ok := displayNames[ticket.CreateBy]; ok && name != "" {
-			viewTicket.CreateBy = name
-		}
+		viewTicket := ticket.WithDisplayName(displayNames)
 		return viewTicket.ResolveViews(tasksByProcInst[ticket.Process.InstanceID.String()], displayNames)
 	})
 
@@ -188,18 +185,10 @@ func (q *queryService) ListHistory(ctx context.Context, currentUsername, targetU
 	userMap := q.getUserMap(ctx, creatorNames)
 
 	views := lo.Map(tickets, func(src domain.Ticket, _ int) domain.TicketTaskView {
-		starter := src.CreateBy
-		if displayName, ok := userMap[src.CreateBy]; ok && displayName != "" {
-			starter = displayName
-		}
-		viewTicket := src
-		viewTicket.CreateBy = starter
-
 		rating, rated := ratings[src.Id]
-		canRate := src.Status == domain.END && src.CreateBy == currentUsername && !rated
 		view := domain.TicketTaskView{
-			Ticket:  viewTicket,
-			CanRate: canRate,
+			Ticket:  src.WithDisplayName(userMap),
+			CanRate: src.CanBeRatedBy(currentUsername, rated),
 		}
 		if rated {
 			view.Rating = &rating
@@ -221,52 +210,31 @@ func (q *queryService) assemblePendingTasks(ctx context.Context, todos []domain.
 		return []domain.TicketTaskView{}, nil
 	}
 
-	easyflowInstIDs := lo.FilterMap(todos, func(t domain.TodoTask, _ int) (int, bool) {
-		return t.InstanceID.Int(), t.EngineType == domain.EngineTypeEasyFlow && t.InstanceID.Int() > 0
-	})
-	flowxInstKeys := lo.FilterMap(todos, func(t domain.TodoTask, _ int) (string, bool) {
-		return t.InstanceID.String(), t.EngineType == domain.EngineTypeFlowx && t.InstanceID.String() != ""
-	})
+	// 1. 统一提取待办流程实例全局标识，消除对底层存储字段差异的分流与重复查询
+	instIDs := lo.Uniq(lo.FilterMap(todos, func(t domain.TodoTask, _ int) (string, bool) {
+		id := t.InstanceID.String()
+		return id, id != ""
+	}))
 
-	var (
-		eg              errgroup.Group
-		easyflowTickets []domain.Ticket
-		flowxTickets    []domain.Ticket
-	)
-	if len(easyflowInstIDs) > 0 {
-		eg.Go(func() error {
-			var err error
-			easyflowTickets, err = q.repo.ListTicketByProcessInstanceIds(ctx, lo.Uniq(easyflowInstIDs))
-			return err
-		})
-	}
-	if len(flowxInstKeys) > 0 {
-		eg.Go(func() error {
-			var err error
-			flowxTickets, err = q.repo.ListTicketByProcessInstanceKeys(ctx, lo.Uniq(flowxInstKeys))
-			return err
-		})
-	}
-	if err := eg.Wait(); err != nil {
+	tickets, err := q.repo.ListTicketByProcessInstances(ctx, instIDs)
+	if err != nil {
 		return nil, err
 	}
 
-	ticketsByProcInst := lo.KeyBy(easyflowTickets, func(t domain.Ticket) int {
-		return t.Process.InstanceID.Int()
-	})
-	ticketsByInstKey := lo.KeyBy(flowxTickets, func(t domain.Ticket) string {
+	ticketsByInstID := lo.KeyBy(tickets, func(t domain.Ticket) string {
 		return t.Process.InstanceID.String()
 	})
 
+	// 2. 批量并发解析处理人与提单人真名
 	approvers := lo.FilterMap(todos, func(t domain.TodoTask, _ int) (string, bool) {
 		return t.ApprovedBy, t.ApprovedBy != ""
 	})
-	allTickets := append(easyflowTickets, flowxTickets...)
-	starters := lo.FilterMap(allTickets, func(t domain.Ticket, _ int) (string, bool) {
+	starters := lo.FilterMap(tickets, func(t domain.Ticket, _ int) (string, bool) {
 		return t.CreateBy, t.CreateBy != ""
 	})
 	displayNames := q.getUserMap(ctx, lo.Uniq(append(approvers, starters...)))
 
+	// 3. 统一装配任务视图并映射展示姓名
 	return lo.Map(todos, func(t domain.TodoTask, _ int) domain.TicketTaskView {
 		view := domain.TicketTaskView{
 			TaskID:      t.TaskID,
@@ -281,31 +249,11 @@ func (q *queryService) assemblePendingTasks(ctx context.Context, todos []domain.
 			view.ApprovedBy = t.ApprovedBy
 		}
 
-		var matchedTicket domain.Ticket
-		var found bool
-		if t.EngineType == domain.EngineTypeFlowx {
-			matchedTicket, found = ticketsByInstKey[t.InstanceID.String()]
-		} else {
-			matchedTicket, found = ticketsByProcInst[t.InstanceID.Int()]
-		}
-
-		if found {
-			viewTicket := matchedTicket
-			if name, ok := displayNames[matchedTicket.CreateBy]; ok && name != "" {
-				viewTicket.CreateBy = name
-			}
-			view.Ticket = viewTicket
+		if matchedTicket, found := ticketsByInstID[t.InstanceID.String()]; found {
+			view.Ticket = matchedTicket.WithDisplayName(displayNames)
 		}
 		return view
 	}), nil
-}
-
-// resolveDisplayNames 批量反查步骤集合中涉及的处理人展示姓名
-func (q *queryService) resolveDisplayNames(ctx context.Context, tasks []domain.TodoTask) map[string]string {
-	nonEmptyUsers := lo.FilterMap(tasks, func(t domain.TodoTask, _ int) (string, bool) {
-		return t.ApprovedBy, t.ApprovedBy != ""
-	})
-	return q.getUserMap(ctx, lo.Uniq(nonEmptyUsers))
 }
 
 // getUserMap 调取用户服务批量映射账号名称；如果调用失败则平滑降级，不阻塞核心流转查询
