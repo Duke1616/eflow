@@ -305,14 +305,14 @@ func (s *ticketService) Pass(ctx context.Context, ticketId int64, taskId string,
 	}
 	engineType := opCtx.ticket.Process.ResolveEngineType()
 
-	// 4. 统一加载流程图版本拓扑快照（对底层流程引擎透明）
-	snapshot, err := s.workflowSvc.GetWorkflowSnapshot(ctx, opCtx.taskInfo.ProcessID, opCtx.taskInfo.ProcessVersion)
+	// 4. 统一加载流程图版本拓扑快照（支持按 workflow_id 智能检索与回退兜底，对底层流程引擎透明）
+	targetWf, err := s.workflowSvc.FindInstanceFlow(ctx, opCtx.ticket.WorkflowId, opCtx.taskInfo.ProcessID, opCtx.taskInfo.ProcessVersion)
 	if err != nil {
 		return fmt.Errorf("获取流程拓扑快照失败: %w", err)
 	}
 
 	// 5. 解析标准拓扑图并定位当前执行节点
-	graph, err := flowdsl.Parse(snapshot.FlowData)
+	graph, err := flowdsl.Parse(targetWf.FlowData)
 	if err != nil {
 		return fmt.Errorf("解析流程拓扑失败: %w", err)
 	}

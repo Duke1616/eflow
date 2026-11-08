@@ -122,7 +122,7 @@ func TestTicketService_Pass(t *testing.T) {
 					IsFinished:        false,
 				}, nil)
 
-				wfSvc.EXPECT().GetWorkflowSnapshot(gomock.Any(), 10, 1).Return(domain.Workflow{
+				wfSvc.EXPECT().FindInstanceFlow(gomock.Any(), int64(10), 10, 1).Return(domain.Workflow{
 					FlowData: domain.CanvasData{
 						"nodes": []any{
 							map[string]any{
@@ -174,7 +174,7 @@ func TestTicketService_Pass(t *testing.T) {
 					IsFinished:        false,
 				}, nil)
 
-				wfSvc.EXPECT().GetWorkflowSnapshot(gomock.Any(), 10, 1).Return(domain.Workflow{
+				wfSvc.EXPECT().FindInstanceFlow(gomock.Any(), int64(10), 10, 1).Return(domain.Workflow{
 					FlowData: domain.CanvasData{
 						"nodes": []any{
 							map[string]any{
@@ -234,7 +234,7 @@ func TestTicketService_Pass(t *testing.T) {
 					IsFinished:        false,
 				}, nil)
 
-				wfSvc.EXPECT().GetWorkflowSnapshot(gomock.Any(), 10, 1).Return(domain.Workflow{
+				wfSvc.EXPECT().FindInstanceFlow(gomock.Any(), int64(10), 10, 1).Return(domain.Workflow{
 					FlowData: domain.CanvasData{
 						"nodes": []any{
 							map[string]any{
@@ -309,7 +309,7 @@ func TestTicketService_Pass(t *testing.T) {
 					IsFinished:        false,
 				}, nil)
 
-				wfSvc.EXPECT().GetWorkflowSnapshot(gomock.Any(), 20, 1).Return(domain.Workflow{
+				wfSvc.EXPECT().FindInstanceFlow(gomock.Any(), int64(20), 20, 1).Return(domain.Workflow{
 					FlowData: domain.CanvasData{
 						"nodes": []any{
 							map[string]any{
