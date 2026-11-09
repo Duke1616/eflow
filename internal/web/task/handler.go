@@ -1,16 +1,18 @@
 package task
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
-	etaskperm "github.com/Duke1616/etask/pkg/contract/permission"
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	"github.com/Duke1616/eflow/pkg/contract/model"
 	"github.com/Duke1616/eflow/pkg/contract/permission"
 	"github.com/Duke1616/eiam/pkg/web/capability"
+	etaskperm "github.com/Duke1616/etask/pkg/contract/permission"
 	"github.com/ecodeclub/ginx"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
@@ -91,7 +93,7 @@ func (h *Handler) Retry(ctx *ginx.Context, req RetryReq) (ginx.Result, error) {
 		return invalidParameterResult(fmt.Errorf("自动化任务 ID 非法")), nil
 	}
 	if err := h.svc.RetryTask(ctx, req.ID); err != nil {
-		return systemErrorResult, err
+		return handleTaskError(err)
 	}
 	return ginx.Result{Msg: "success"}, nil
 }
@@ -102,9 +104,20 @@ func (h *Handler) Terminate(ctx *ginx.Context, req TerminateReq) (ginx.Result, e
 		return invalidParameterResult(fmt.Errorf("自动化任务 ID 非法或终止原因为空/超过 500 字")), nil
 	}
 	if err := h.svc.TerminateTask(ctx, req.ID, req.Reason); err != nil {
-		return systemErrorResult, err
+		return handleTaskError(err)
 	}
 	return ginx.Result{Msg: "success"}, nil
+}
+
+// handleTaskError 统一映射自动化任务运维中的领域业务错误
+func handleTaskError(err error) (ginx.Result, error) {
+	if err == nil {
+		return ginx.Result{}, nil
+	}
+	if bizErr, ok := errors.AsType[*errs.Error](err); ok {
+		return ginx.Result{Code: int(bizErr.Code), Msg: bizErr.Message}, nil
+	}
+	return systemErrorResult, err
 }
 
 func (h *Handler) ListAttempts(ctx *ginx.Context, req ListAttemptsReq) (ginx.Result, error) {
@@ -161,13 +174,13 @@ func mapTasks(tasks []domain.Task) []Task {
 			ID: task.ID, TicketID: task.TicketID,
 			ProcessInstanceID: task.InstanceID.Int64(),
 			NodeID:            task.NodeID, NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
-			Status:             task.Status.ToUint8(),
-			Phase:              string(task.Status.ToPhase()),
-			ScheduledAt:        task.ScheduledAt,
+			Status:              task.Status.ToUint8(),
+			Phase:               string(task.Status.ToPhase()),
+			ScheduledAt:         task.ScheduledAt,
 			OriginalScheduledAt: task.ScheduledAt,
-			CompensationNodeID: task.CompensationNodeID,
-			IsCompensation:     task.ExecutionKind == domain.TaskExecutionCompensation,
-			CurrentAttemptID:   task.CurrentAttemptID, AdvancedAt: task.AdvancedAt,
+			CompensationNodeID:  task.CompensationNodeID,
+			IsCompensation:      task.ExecutionKind == domain.TaskExecutionCompensation,
+			CurrentAttemptID:    task.CurrentAttemptID, AdvancedAt: task.AdvancedAt,
 			CancelledAt: 0, LastError: task.LastError,
 			CTime: task.CTime, UTime: task.UTime,
 		}

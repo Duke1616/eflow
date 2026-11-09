@@ -7,7 +7,11 @@ import (
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/pkg/sqlx"
 	"github.com/ecodeclub/ekit/slice"
+	"gorm.io/gorm"
 )
+
+// ErrTicketNotFound 工单记录不存在
+var ErrTicketNotFound = gorm.ErrRecordNotFound
 
 // TicketRepository 工单数据访问仓库接口
 type TicketRepository interface {

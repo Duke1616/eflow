@@ -8,7 +8,11 @@ import (
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/pkg/sqlx"
 	"github.com/samber/lo"
+	"gorm.io/gorm"
 )
+
+// ErrWorkflowNotFound 工作流定义不存在
+var ErrWorkflowNotFound = gorm.ErrRecordNotFound
 
 // IWorkflowCoreRepository 工作流核心定义仓储子接口
 type IWorkflowCoreRepository interface {

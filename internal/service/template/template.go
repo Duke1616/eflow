@@ -6,11 +6,15 @@ import (
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
 	"github.com/Duke1616/eflow/internal/pkg/hash"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/xen0n/go-workwx"
 	"golang.org/x/sync/errgroup"
 )
+
+// ErrTemplateNotFound 未找到对应工单模板
+var ErrTemplateNotFound = repository.ErrTemplateNotFound
 
 // ErrTemplateGroupNotEmpty 删除分组前发现分组内仍存在模板
 var ErrTemplateGroupNotEmpty = repository.ErrTemplateGroupNotEmpty
@@ -151,7 +155,14 @@ func (s *templateService) UpdateTemplate(ctx context.Context, t domain.Template)
 }
 
 func (s *templateService) DetailTemplate(ctx context.Context, id int64) (domain.Template, error) {
-	return s.repo.DetailTemplate(ctx, id)
+	t, err := s.repo.DetailTemplate(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrTemplateNotFound) {
+			return domain.Template{}, errs.NotFound("TEMPLATE_NOT_FOUND", "工单模板不存在或已删除").WithCause(repository.ErrTemplateNotFound)
+		}
+		return domain.Template{}, fmt.Errorf("获取工单模板详情失败: %w", err)
+	}
+	return t, nil
 }
 
 func (s *templateService) ListTemplate(ctx context.Context, groupId int64, keyword string, offset, limit int64) ([]domain.Template, int64, error) {

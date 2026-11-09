@@ -1,17 +1,18 @@
 package domain
 
 import (
-	"errors"
 	"strings"
+
+	"github.com/Duke1616/eflow/internal/errs"
 )
 
 var (
-	ErrTaskCannotRetry                  = errors.New("只有失败、阻塞或已取消的自动化任务可以重试")
-	ErrTaskNotTerminable                = errors.New("当前自动化任务不能终止")
-	ErrTaskAlreadySucceeded             = errors.New("任务已经成功")
-	ErrCompensationNotTerminable        = errors.New("撤回补偿任务必须成功才能完成撤回")
-	ErrCancelledTaskRequiresManualRetry = errors.New("已取消的自动化任务只支持人工重试")
-	ErrTaskMaxAttemptsExceeded          = errors.New("超过最大执行尝试次数")
+	ErrTaskCannotRetry                  = errs.BadRequest("TASK_CANNOT_RETRY", "只有失败、阻塞或已取消的自动化任务可以重试")
+	ErrTaskNotTerminable                = errs.BadRequest("TASK_NOT_TERMINABLE", "当前自动化任务不能终止")
+	ErrTaskAlreadySucceeded             = errs.Conflict("TASK_ALREADY_SUCCEEDED", "任务已经成功")
+	ErrCompensationNotTerminable        = errs.Conflict("COMPENSATION_NOT_TERMINABLE", "撤回补偿任务必须成功才能完成撤回")
+	ErrCancelledTaskRequiresManualRetry = errs.BadRequest("CANCELLED_TASK_MANUAL_RETRY", "已取消的自动化任务只支持人工重试")
+	ErrTaskMaxAttemptsExceeded          = errs.Conflict("TASK_MAX_ATTEMPTS_EXCEEDED", "超过最大执行尝试次数")
 )
 
 // TaskStatus 表示自动化节点在流程编排中的状态。

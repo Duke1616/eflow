@@ -7,7 +7,10 @@ import (
 
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
 	"github.com/Duke1616/eflow/internal/pkg/ticketpbac"
+	"github.com/Duke1616/eflow/internal/repository"
+	"github.com/Duke1616/eflow/internal/service/engine"
 	ratingSvc "github.com/Duke1616/eflow/internal/service/rating"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	withdrawalSvc "github.com/Duke1616/eflow/internal/service/withdrawal"
@@ -137,6 +140,9 @@ func (h *Handler) GetTaskFormConfig(ctx *ginx.Context, req TaskFormConfigReq) (g
 
 	fields, err := h.svc.GetTaskFormConfig(ctx.Context, req.TicketId, req.TaskId.String(), req.WorkflowId)
 	if err != nil {
+		if res, handled := handleTaskOperationError(err); res.Code != 500 {
+			return res, handled
+		}
 		return systemErrorResult, err
 	}
 
@@ -157,6 +163,9 @@ func (h *Handler) CreateTicket(ctx *ginx.Context, req CreateTicketReq) (ginx.Res
 
 	err := h.svc.CreateTicket(ctx.Context, h.toDomain(req))
 	if err != nil {
+		if res, errHandled := handleTaskOperationError(err); res.Code != 500 {
+			return res, errHandled
+		}
 		return systemErrorResult, fmt.Errorf("创建工单失败, %w", err)
 	}
 
@@ -168,6 +177,9 @@ func (h *Handler) CreateTicket(ctx *ginx.Context, req CreateTicketReq) (ginx.Res
 // RestartProcess 重新发送流程启动事件，并将结果反馈给工单发起人。
 func (h *Handler) RestartProcess(ctx *ginx.Context, req RestartProcessReq) (ginx.Result, error) {
 	if err := h.svc.RestartProcess(ctx.Context, req.TicketID); err != nil {
+		if res, errHandled := handleTaskOperationError(err); res.Code != 500 {
+			return res, errHandled
+		}
 		return systemErrorResult, fmt.Errorf("重新启动流程失败: %w", err)
 	}
 	return ginx.Result{Msg: "流程已重新启动"}, nil
@@ -212,11 +224,27 @@ func handleTaskOperationError(err error) (ginx.Result, error) {
 	if err == nil {
 		return ginx.Result{}, nil
 	}
+	// 1. 若为 Kratos 风格标准结构化业务错误，自动提取 Code 与友好 Message
+	if bizErr, ok := errors.AsType[*errs.Error](err); ok {
+		return ginx.Result{Code: int(bizErr.Code), Msg: bizErr.Message}, nil
+	}
+
+	// 2. 兼容历史遗留哨兵错误
 	switch {
-	case errors.Is(err, domain.ErrTaskUnauthorized), errors.Is(err, domain.ErrTicketUnauthorized):
+	case errors.Is(err, domain.ErrTaskUnauthorized), errors.Is(err, domain.ErrTicketUnauthorized),
+		errors.Is(err, ratingSvc.ErrTicketNotRateable):
 		return ginx.Result{Code: 403, Msg: err.Error()}, nil
-	case errors.Is(err, domain.ErrTaskAlreadyFinished), errors.Is(err, domain.ErrInvalidParameter):
+	case errors.Is(err, domain.ErrTaskAlreadyFinished),
+		errors.Is(err, domain.ErrInvalidParameter),
+		errors.Is(err, engine.ErrInvalidParameter),
+		errors.Is(err, engine.ErrTaskNotFound),
+		errors.Is(err, withdrawalSvc.ErrInvalidRevokeReason):
 		return ginx.Result{Code: 400, Msg: err.Error()}, nil
+	case errors.Is(err, repository.ErrTicketNotFound):
+		return ginx.Result{Code: 404, Msg: "未找到关联工单信息"}, nil
+	case errors.Is(err, withdrawalSvc.ErrAutomationRunning),
+		errors.Is(err, ratingSvc.ErrAlreadyRated):
+		return ginx.Result{Code: 409, Msg: err.Error()}, nil
 	default:
 		return systemErrorResult, err
 	}
@@ -264,6 +292,9 @@ func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, er
 		if errors.Is(err, domain.ErrTicketNotAccessible) {
 			return ticketNotAccessibleResult, nil
 		}
+		if res, handled := handleTaskOperationError(err); res.Code != 500 {
+			return res, handled
+		}
 		h.logger.Error("撤回工单前检索工单失败", elog.String("instance_id", req.InstanceId.String()), elog.FieldErr(err))
 		return systemErrorResult, fmt.Errorf("查询待撤回工单信息失败 [instance_id=%s]: %w", req.InstanceId, err)
 	}
@@ -277,11 +308,8 @@ func (h *Handler) Revoke(ctx *ginx.Context, req RevokeOrderReq) (ginx.Result, er
 
 	err = h.withdrawalSvc.Revoke(ctx.Context, ticket.Process.ResolveEngineType(), req.InstanceId, req.Force, user.Username, req.Reason)
 	if err != nil {
-		if errors.Is(err, withdrawalSvc.ErrInvalidRevokeReason) {
-			return ginx.Result{Code: 400, Msg: err.Error()}, nil
-		}
-		if errors.Is(err, withdrawalSvc.ErrAutomationRunning) {
-			return ginx.Result{Code: 409, Msg: err.Error()}, nil
+		if res, errHandled := handleTaskOperationError(err); res.Code != 500 {
+			return res, errHandled
 		}
 		h.logger.Error("执行工单撤回失败", elog.String("instance_id", req.InstanceId.String()), elog.FieldErr(err))
 		return systemErrorResult, fmt.Errorf("执行工单撤回失败 [instance_id=%s]: %w", req.InstanceId, err)
@@ -300,16 +328,7 @@ func (h *Handler) SubmitRating(ctx *ginx.Context, req SubmitRatingReq) (ginx.Res
 	}
 	rating, err := h.ratingSvc.Submit(ctx.Context, req.TicketID, username, req.Score, req.Comment)
 	if err != nil {
-		switch {
-		case errors.Is(err, domain.ErrInvalidParameter):
-			return ginx.Result{Code: 400, Msg: err.Error()}, nil
-		case errors.Is(err, ratingSvc.ErrTicketNotRateable):
-			return ginx.Result{Code: 403, Msg: ratingSvc.ErrTicketNotRateable.Error()}, nil
-		case errors.Is(err, ratingSvc.ErrAlreadyRated):
-			return ginx.Result{Code: 409, Msg: ratingSvc.ErrAlreadyRated.Error()}, nil
-		default:
-			return systemErrorResult, err
-		}
+		return handleTaskOperationError(err)
 	}
 	return ginx.Result{Msg: "评价提交成功", Data: toRatingVO(rating)}, nil
 }
@@ -389,6 +408,9 @@ func (h *Handler) Detail(ctx *ginx.Context, req DetailProcessInstIdReq) (ginx.Re
 	if err != nil {
 		if errors.Is(err, domain.ErrTicketNotAccessible) {
 			return ticketNotAccessibleResult, nil
+		}
+		if res, handled := handleTaskOperationError(err); res.Code != 500 {
+			return res, handled
 		}
 		h.logger.Error("获取工单详情失败: 未找到流程实例关联工单", elog.String("process_instance_id", req.ProcessInstanceId.String()), elog.FieldErr(err))
 		return systemErrorResult, fmt.Errorf("根据流程实例标识 [%s] 查询工单详情失败: %w", req.ProcessInstanceId, err)

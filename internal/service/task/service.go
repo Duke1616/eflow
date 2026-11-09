@@ -9,6 +9,7 @@ import (
 
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
 	"github.com/Duke1616/eflow/internal/repository"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	"github.com/Duke1616/eflow/internal/service/engine"
@@ -23,9 +24,9 @@ import (
 const maxTaskAttempts = 3
 
 var (
-	ErrWithdrawalInProgress   = errors.New("工单正在撤回，暂不推进自动化节点")
-	ErrInvalidTerminateReason = errors.New("终止原因不能为空且不能超过 500 个字符")
-	ErrTaskNotTerminable      = errors.New("当前自动化任务不能终止")
+	ErrWithdrawalInProgress   = errs.Conflict("WITHDRAWAL_IN_PROGRESS", "工单正在撤回，暂不推进自动化节点")
+	ErrInvalidTerminateReason = errs.BadRequest("INVALID_TERMINATE_REASON", "终止原因不能为空且不能超过 500 个字符")
+	ErrTaskNotTerminable      = domain.ErrTaskNotTerminable
 )
 
 // Service 定义流程自动化任务的编排能力。

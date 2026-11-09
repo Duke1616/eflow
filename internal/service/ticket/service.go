@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
 	"github.com/Duke1616/eflow/internal/event"
 	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/repository"
@@ -163,7 +164,7 @@ func (s *ticketService) CreateTicket(ctx context.Context, req domain.Ticket) err
 	// 1. 前置校验模板合法性并读取模板名称，避免写库成功后因模板异常残留无绑定的孤儿工单
 	dTm, err := s.templateSvc.DetailTemplate(ctx, req.TemplateId)
 	if err != nil {
-		return fmt.Errorf("读取工单模板失败: %w", err)
+		return errs.NotFound("TEMPLATE_NOT_FOUND", "指定的工单模板不存在或已下线").WithCause(err)
 	}
 
 	// 2. 持久化工单主表记录
@@ -183,13 +184,23 @@ func (s *ticketService) CreateTicket(ctx context.Context, req domain.Ticket) err
 func (s *ticketService) GetByProcessInstance(ctx context.Context, instanceID domain.ID) (domain.Ticket, error) {
 	ticket, err := s.repo.DetailByProcessInstance(ctx, instanceID)
 	if err != nil {
+		if errors.Is(err, repository.ErrTicketNotFound) {
+			return domain.Ticket{}, errs.NotFound("TICKET_NOT_FOUND", fmt.Sprintf("工单流程实例不存在: %s", instanceID)).WithCause(err)
+		}
 		return domain.Ticket{}, fmt.Errorf("根据流程实例标识 [%s] 获取工单失败: %w", instanceID, err)
 	}
 	return ticket, nil
 }
 
 func (s *ticketService) GetByID(ctx context.Context, id int64) (domain.Ticket, error) {
-	return s.repo.Detail(ctx, id)
+	ticket, err := s.repo.Detail(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrTicketNotFound) {
+			return domain.Ticket{}, errs.NotFound("TICKET_NOT_FOUND", fmt.Sprintf("工单不存在: %d", id)).WithCause(err)
+		}
+		return domain.Ticket{}, fmt.Errorf("获取工单详情失败: %w", err)
+	}
+	return ticket, nil
 }
 
 func (s *ticketService) UpdateStatusByProcessInstance(ctx context.Context, instanceID domain.ID, status uint8, wtime ...int64) error {
@@ -216,7 +227,7 @@ func (s *ticketService) RestartProcess(ctx context.Context, id int64) error {
 		return err
 	}
 	if !ticket.CanRestartProcess() {
-		return fmt.Errorf("工单 %d 当前不是可重新启动状态", id)
+		return errs.BadRequest("TICKET_NOT_RESTARTABLE", fmt.Sprintf("工单 %d 当前不是可重新启动状态", id))
 	}
 	if err = s.repo.PrepareProcessRestart(ctx, id); err != nil {
 		return err
@@ -252,6 +263,9 @@ func (s *ticketService) loadTaskContext(ctx context.Context, ticketId int64, tas
 	}
 	ticket, err := s.repo.Detail(ctx, ticketId)
 	if err != nil {
+		if errors.Is(err, repository.ErrTicketNotFound) {
+			return nil, errs.NotFound("TICKET_NOT_FOUND", fmt.Sprintf("工单不存在: %d", ticketId)).WithCause(err)
+		}
 		return nil, fmt.Errorf("查询工单实体关联失败 [ticketId=%d]: %w", ticketId, err)
 	}
 

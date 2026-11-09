@@ -1,9 +1,12 @@
 package workflow
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
+	"github.com/Duke1616/eflow/internal/repository"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eflow/pkg/contract/model"
 	"github.com/Duke1616/eflow/pkg/contract/permission"
@@ -174,6 +177,12 @@ func (h *Handler) AutomationNodes(ctx *ginx.Context, req AutomationNodesReq) (gi
 func (h *Handler) Deploy(ctx *ginx.Context, req DeployReq) (ginx.Result, error) {
 	flow, err := h.svc.Find(ctx.Context, req.Id)
 	if err != nil {
+		if errors.Is(err, repository.ErrWorkflowNotFound) {
+			return ErrWorkflowNotFound, nil
+		}
+		if bizErr, ok := errors.AsType[*errs.Error](err); ok {
+			return ginx.Result{Code: int(bizErr.Code), Msg: bizErr.Message}, nil
+		}
 		return SystemErrorResult, fmt.Errorf("查询流程定义元数据失败: %w", err)
 	}
 
@@ -198,11 +207,17 @@ func (h *Handler) Deploy(ctx *ginx.Context, req DeployReq) (ginx.Result, error) 
 func (h *Handler) Detail(ctx *ginx.Context) (ginx.Result, error) {
 	id, err := ctx.Param("id").AsInt64()
 	if err != nil {
-		return SystemErrorResult, fmt.Errorf("ID 格式错误: %w", err)
+		return ErrWorkflowInvalidID, err
 	}
 
 	flow, err := h.svc.Find(ctx.Context, id)
 	if err != nil {
+		if errors.Is(err, repository.ErrWorkflowNotFound) {
+			return ErrWorkflowNotFound, nil
+		}
+		if bizErr, ok := errors.AsType[*errs.Error](err); ok {
+			return ginx.Result{Code: int(bizErr.Code), Msg: bizErr.Message}, nil
+		}
 		return SystemErrorResult, fmt.Errorf("查询流程模板详情失败: %w", err)
 	}
 
@@ -227,7 +242,7 @@ func (h *Handler) Update(ctx *ginx.Context, req UpdateReq) (ginx.Result, error) 
 func (h *Handler) Delete(ctx *ginx.Context) (ginx.Result, error) {
 	id, err := ctx.Param("id").AsInt64()
 	if err != nil {
-		return SystemErrorResult, fmt.Errorf("ID 格式错误: %w", err)
+		return ErrWorkflowInvalidID, err
 	}
 
 	count, err := h.svc.Delete(ctx.Context, id)
@@ -244,6 +259,12 @@ func (h *Handler) Delete(ctx *ginx.Context) (ginx.Result, error) {
 func (h *Handler) FindOrderGraph(ctx *ginx.Context, req OrderGraphReq) (ginx.Result, error) {
 	flow, err := h.svc.GetHighlightedGraph(ctx.Context, req.Id, req.ProcessInstanceId, domain.Status(req.Status))
 	if err != nil {
+		if errors.Is(err, repository.ErrWorkflowNotFound) {
+			return ErrWorkflowNotFound, nil
+		}
+		if bizErr, ok := errors.AsType[*errs.Error](err); ok {
+			return ginx.Result{Code: int(bizErr.Code), Msg: bizErr.Message}, nil
+		}
 		return SystemErrorResult, err
 	}
 

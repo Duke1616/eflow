@@ -13,6 +13,8 @@ var (
 	ErrTemplateGroupInvalidId = ginx.Result{Code: 4010708, Msg: "工单模板分组 ID 非法"}
 	// ErrTemplateGroupNotEmpty 模板分组下存在模板时拒绝删除
 	ErrTemplateGroupNotEmpty = ginx.Result{Code: 4010709, Msg: "请先删除分组下的模板后再删除分组"}
+	// ErrTemplateNotFound 工单模板不存在或已删除
+	ErrTemplateNotFound = ginx.Result{Code: 4040701, Msg: "工单模板不存在或已删除"}
 )
 
 // ErrInvalidParameter 动态产生参数校验失败的 ginx.Result 响应结果

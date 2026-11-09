@@ -2,6 +2,7 @@ package ticket
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	usermocks "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1/mocks"
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
 	ratingmocks "github.com/Duke1616/eflow/internal/service/rating/mocks"
 	ticketmocks "github.com/Duke1616/eflow/internal/service/ticket/mocks"
 	withdrawalmocks "github.com/Duke1616/eflow/internal/service/withdrawal/mocks"
@@ -441,6 +443,65 @@ func TestHandler_Detail(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantCode, res.Code)
+		})
+	}
+}
+
+func TestHandleTaskOperationError_KratosError(t *testing.T) {
+	testCases := []struct {
+		name     string
+		inputErr error
+		wantCode int
+		wantMsg  string
+		wantErr  bool
+	}{
+		{
+			name:     "Kratos风格BadRequest错误自动映射为400",
+			inputErr: errs.BadRequest("COMMENT_EMPTY", "驳回原因不能为空"),
+			wantCode: 400,
+			wantMsg:  "驳回原因不能为空",
+			wantErr:  false,
+		},
+		{
+			name:     "Kratos风格Forbidden错误自动映射为403",
+			inputErr: errs.Forbidden("NOT_ASSIGNEE", "当前审批任务指派处理人与您账号不一致"),
+			wantCode: 403,
+			wantMsg:  "当前审批任务指派处理人与您账号不一致",
+			wantErr:  false,
+		},
+		{
+			name:     "Kratos风格NotFound错误自动映射为404",
+			inputErr: errs.NotFound("TASK_NOT_FOUND", "待审批任务不存在"),
+			wantCode: 404,
+			wantMsg:  "待审批任务不存在",
+			wantErr:  false,
+		},
+		{
+			name:     "多层包装的标准错误依然能精准识别",
+			inputErr: fmt.Errorf("dispatcher error: %w", errs.BadRequest("PARAM_ILLEGAL", "参数非法")),
+			wantCode: 400,
+			wantMsg:  "参数非法",
+			wantErr:  false,
+		},
+		{
+			name:     "未知底层裸错误按500系统错误兜底",
+			inputErr: errors.New("db connection failure"),
+			wantCode: 500,
+			wantMsg:  "系统内部错误",
+			wantErr:  true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := handleTaskOperationError(tc.inputErr)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tc.wantCode, res.Code)
+			assert.Equal(t, tc.wantMsg, res.Msg)
 		})
 	}
 }

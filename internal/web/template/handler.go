@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
 	"github.com/Duke1616/eflow/internal/pkg/rule"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	"github.com/Duke1616/eflow/pkg/contract/permission"
@@ -150,6 +151,12 @@ func (h *Handler) DetailTemplate(ctx *ginx.Context) (ginx.Result, error) {
 
 	t, err := h.svc.DetailTemplate(ctx.Context, id)
 	if err != nil {
+		if bizErr, ok := errors.AsType[*errs.Error](err); ok {
+			return ginx.Result{Code: int(bizErr.Code), Msg: bizErr.Message}, nil
+		}
+		if errors.Is(err, templateSvc.ErrTemplateNotFound) {
+			return ErrTemplateNotFound, nil
+		}
 		return SystemErrorResult, err
 	}
 
@@ -410,6 +417,9 @@ func (h *Handler) ListTemplateGroupSummary(ctx *ginx.Context) (ginx.Result, erro
 }
 
 func (h *Handler) translateGroupError(err error) ginx.Result {
+	if bizErr, ok := errors.AsType[*errs.Error](err); ok {
+		return ginx.Result{Code: int(bizErr.Code), Msg: bizErr.Message}
+	}
 	if errors.Is(err, templateSvc.ErrTemplateGroupNotEmpty) {
 		return ErrTemplateGroupNotEmpty
 	}
