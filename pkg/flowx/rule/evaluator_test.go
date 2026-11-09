@@ -122,3 +122,82 @@ func TestEvaluateRuleGroup_InWithSliceAndJSON(t *testing.T) {
 		},
 	}, varsSlice))
 }
+
+func TestEvaluateRuleGroup_SliceAdaptation(t *testing.T) {
+	vars := map[string]any{
+		"env_slice":   []any{"frontend", "backend"},
+		"env_empty":   []any{},
+		"env_json_empty": "[]",
+		"env_scalar":  "backend",
+	}
+
+	// 1. 等于 (OpEqual): 切片中包含即为 true
+	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "env_slice", Operator: model.OpEqual, Value: "backend"},
+		},
+	}, vars))
+	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "env_slice", Operator: model.OpEqual, Value: "frontend"},
+		},
+	}, vars))
+	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "env_slice", Operator: model.OpEqual, Value: "ocr"},
+		},
+	}, vars))
+
+	// 2. 不等于 (OpNotEqual): 切片中不包含才为 true
+	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "env_slice", Operator: model.OpNotEqual, Value: "ocr"},
+		},
+	}, vars))
+	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "env_slice", Operator: model.OpNotEqual, Value: "backend"},
+		},
+	}, vars))
+
+	// 3. 包含 (OpContains): 元素匹配
+	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "env_slice", Operator: model.OpContains, Value: "backend"},
+		},
+	}, vars))
+	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "env_slice", Operator: model.OpContains, Value: "ocr"},
+		},
+	}, vars))
+
+	// 4. 为空 (OpEmpty): 空切片被识别为空
+	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "env_empty", Operator: model.OpEmpty, Value: nil},
+		},
+	}, vars))
+	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "env_json_empty", Operator: model.OpEmpty, Value: nil},
+		},
+	}, vars))
+	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "env_slice", Operator: model.OpEmpty, Value: nil},
+		},
+	}, vars))
+
+	// 5. 非空 (OpNotEmpty):
+	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "env_slice", Operator: model.OpNotEmpty, Value: nil},
+		},
+	}, vars))
+	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+		Conditions: []model.Condition{
+			{Field: "env_empty", Operator: model.OpNotEmpty, Value: nil},
+		},
+	}, vars))
+}

@@ -24,6 +24,13 @@ func (o *equalOperator) Match(actual any, target any) bool {
 			return leftNum == rightNum
 		}
 	}
+
+	// 智能兼容表单多选切片与目标标量的匹配（如 $environment = 'backend'）
+	if actualSlice, isSlice := extractSlice(actual); isSlice {
+		targetStr := fmt.Sprintf("%v", target)
+		return lo.Contains(actualSlice, targetStr)
+	}
+
 	return fmt.Sprintf("%v", actual) == fmt.Sprintf("%v", target)
 }
 
@@ -59,8 +66,10 @@ func (o *inOperator) Match(actual any, target any) bool {
 		return false
 	}
 
-	actualSlice := extractActualSlice(actual)
-	if len(actualSlice) > 0 {
+	if actualSlice, isSlice := extractSlice(actual); isSlice {
+		if len(actualSlice) == 0 {
+			return false
+		}
 		return len(lo.Intersect(actualSlice, condSlice)) > 0
 	}
 
@@ -77,23 +86,32 @@ func (o *notInOperator) Match(actual any, target any) bool {
 	return !o.in.Match(actual, target)
 }
 
-// containsOperator 字符串子串包含算子
+// containsOperator 字符串子串包含算子（切片按元素精准包含，标量按子串匹配）
 type containsOperator struct{}
 
 func (o *containsOperator) Match(actual any, target any) bool {
 	if actual == nil || target == nil {
 		return false
 	}
-	actualStr := fmt.Sprintf("%v", actual)
 	targetStr := fmt.Sprintf("%v", target)
+	if actualSlice, isSlice := extractSlice(actual); isSlice {
+		return lo.Contains(actualSlice, targetStr)
+	}
+	actualStr := fmt.Sprintf("%v", actual)
 	return strings.Contains(actualStr, targetStr)
 }
 
-// emptyOperator 判空算子
+// emptyOperator 判空算子（支持标量为空与空切片判定）
 type emptyOperator struct{}
 
 func (o *emptyOperator) Match(actual any, _ any) bool {
-	return actual == nil || actual == ""
+	if actual == nil || actual == "" {
+		return true
+	}
+	if actualSlice, isSlice := extractSlice(actual); isSlice {
+		return len(actualSlice) == 0
+	}
+	return false
 }
 
 // notEmptyOperator 非空算子
@@ -120,28 +138,34 @@ var operatorRegistry = map[model.Op]IOperator{
 	model.OpNotEmpty:     &notEmptyOperator{},
 }
 
-// extractActualSlice 提取表单实际值的切片表示（支持 []string, []any, JSON array 字符串, 逗号分隔字符串）
-func extractActualSlice(val any) []string {
+// extractSlice 提取表单实际值的切片表示并指示其是否属于集合/切片类型（支持 []string, []any, JSON array 字符串, 逗号分隔字符串）
+func extractSlice(val any) ([]string, bool) {
 	if val == nil {
-		return nil
+		return nil, false
 	}
 	switch v := val.(type) {
 	case []string:
-		return v
+		return v, true
 	case []any:
-		return lo.Map(v, func(item any, _ int) string { return fmt.Sprintf("%v", item) })
+		return lo.Map(v, func(item any, _ int) string { return fmt.Sprintf("%v", item) }), true
 	case string:
 		str := strings.TrimSpace(v)
 		if strings.HasPrefix(str, "[") && strings.HasSuffix(str, "]") {
 			var slice []string
-			if err := json.Unmarshal([]byte(str), &slice); err == nil && len(slice) > 0 {
-				return slice
+			if err := json.Unmarshal([]byte(str), &slice); err == nil {
+				return slice, true
 			}
 		}
 		if strings.Contains(str, ",") {
 			parts := strings.Split(str, ",")
-			return lo.Map(parts, func(p string, _ int) string { return strings.TrimSpace(p) })
+			return lo.Map(parts, func(p string, _ int) string { return strings.TrimSpace(p) }), true
 		}
 	}
-	return nil
+	return nil, false
+}
+
+// extractActualSlice 兼容历史调用，返回切片
+func extractActualSlice(val any) []string {
+	slice, _ := extractSlice(val)
+	return slice
 }
