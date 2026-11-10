@@ -11,7 +11,6 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/notification"
 	"github.com/Duke1616/eflow/internal/pkg/notification/provider"
-	"github.com/Duke1616/eflow/internal/service/event/errs"
 	"github.com/Duke1616/enotify/notify/feishu/card"
 	"github.com/google/uuid"
 	"github.com/gotomicro/ego/core/elog"
@@ -55,15 +54,15 @@ func (f *grpcProvider) Send(ctx context.Context, src notification.Notification) 
 	var rawMap map[string]interface{}
 	bytes, err := json.Marshal(builder.Build())
 	if err != nil {
-		return notification.NewErrorResponse(string(errs.ErrorCodeBuildFailed), err.Error()), fmt.Errorf("%w: %v", errs.ErrBuildMessage, err)
+		return notification.NewErrorResponse(string(notification.ErrorCodeBuildFailed), err.Error()), fmt.Errorf("%w: %v", notification.ErrBuildMessage, err)
 	}
 	if err = json.Unmarshal(bytes, &rawMap); err != nil {
-		return notification.NewErrorResponse(string(errs.ErrorCodeParseFailed), err.Error()), fmt.Errorf("%w: %v", errs.ErrParseMessage, err)
+		return notification.NewErrorResponse(string(notification.ErrorCodeParseFailed), err.Error()), fmt.Errorf("%w: %v", notification.ErrParseMessage, err)
 	}
 
 	params, err := structpb.NewStruct(rawMap)
 	if err != nil {
-		return notification.NewErrorResponse(string(errs.ErrorCodeParseFailed), err.Error()), fmt.Errorf("%w: %v", errs.ErrParseMessage, err)
+		return notification.NewErrorResponse(string(notification.ErrorCodeParseFailed), err.Error()), fmt.Errorf("%w: %v", notification.ErrParseMessage, err)
 	}
 
 	// 这里的超时时间设置非常短 (3s)，目的是快速探测 gRPC 服务状态。
@@ -87,16 +86,16 @@ func (f *grpcProvider) Send(ctx context.Context, src notification.Notification) 
 	}})
 
 	if err != nil {
-		return notification.NewErrorResponse(string(errs.ErrorCodeServiceUnavailable), err.Error()), fmt.Errorf("%w: %v", errs.ErrNotificationUnavailable, err)
+		return notification.NewErrorResponse(string(notification.ErrorCodeServiceUnavailable), err.Error()), fmt.Errorf("%w: %v", notification.ErrNotificationUnavailable, err)
 	}
 
 	if msg.Status != notificationv1.SendStatus_SUCCEEDED {
 		return notification.NewErrorResponseWithID(
 			int64(msg.NotificationId),
 			msg.Status.String(),
-			string(errs.ErrorCodeUnknown),
+			string(notification.ErrorCodeUnknown),
 			"消息发送未成功",
-		), fmt.Errorf("%w: status=%v, code=%s, msg=%s", errs.ErrNotificationFailed, msg.Status, msg.ErrorCode, msg.ErrorMessage)
+		), fmt.Errorf("%w: status=%v, code=%s, msg=%s", notification.ErrNotificationFailed, msg.Status, msg.ErrorCode, msg.ErrorMessage)
 	}
 
 	return notification.NewSuccessResponse(int64(msg.NotificationId), msg.Status.String()), nil

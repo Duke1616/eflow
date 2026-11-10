@@ -1,15 +1,18 @@
 package workflow
 
+import "github.com/Duke1616/eflow/pkg/idx"
+
 // CreateReq 创建工作流流程模板请求参数封装
 type CreateReq struct {
-	TemplateId   int64      `json:"template_id"`         // 挂载绑定的工单模板 ID
-	Name         string     `json:"name"`                // 工作流展示名字
-	Icon         string     `json:"icon"`                // 画布展现图标
-	Owner        string     `json:"owner"`               // 流程负责人邮箱
-	Desc         string     `json:"desc"`                // 流程作用详细描述
-	IsNotify     bool       `json:"is_notify"`           // 节点流转时是否触发推送通知
-	NotifyMethod uint8      `json:"notify_method"`       // 流程的默认第一通知渠道类型
-	FlowData     *LogicFlow `json:"flow_data,omitempty"` // 画布原始图结构数据 (可选)
+	TemplateId   int64          `json:"template_id"`         // 挂载绑定的工单模板 ID
+	Name         string         `json:"name"`                // 工作流展示名字
+	Icon         string         `json:"icon"`                // 画布展现图标
+	Owner        string         `json:"owner"`               // 流程负责人邮箱
+	Desc         string         `json:"desc"`                // 流程作用详细描述
+	IsNotify     bool           `json:"is_notify"`           // 节点流转时是否触发推送通知
+	NotifyMethod uint8          `json:"notify_method"`       // 流程的默认第一通知渠道类型
+	EngineType   string         `json:"engine_type"`         // 工作流引擎类型 (easy-workflow / flowx)
+	FlowData     map[string]any `json:"flow_data,omitempty"` // 画布原始图结构数据 (可选，支持任意前端画布)
 }
 
 // Page 通用分页请求封装
@@ -57,13 +60,15 @@ type DeployReq struct {
 
 // UpdateReq 更新工作流流程配置请求参数封装
 type UpdateReq struct {
-	Id           int64      `json:"id"`                  // 更新的工作流唯一自增 ID
-	Name         string     `json:"name"`                // 流程名称
-	Desc         string     `json:"desc"`                // 流程描述
-	Owner        string     `json:"owner"`               // 流程管理员/设计者
-	IsNotify     bool       `json:"is_notify"`           // 是否支持流转通知推送
-	NotifyMethod uint8      `json:"notify_method"`       // 推送渠道
-	FlowData     *LogicFlow `json:"flow_data,omitempty"` // 图画布原始节点拓扑 json
+	Id           int64          `json:"id"`                  // 更新的工作流唯一自增 ID
+	Name         string         `json:"name"`                // 流程名称
+	Desc         string         `json:"desc"`                // 流程描述
+	Owner        string         `json:"owner"`               // 流程管理员/设计者
+	Icon         string         `json:"icon,omitempty"`      // 流程展示图标
+	IsNotify     bool           `json:"is_notify"`           // 是否支持流转通知推送
+	NotifyMethod uint8          `json:"notify_method"`       // 推送渠道
+	EngineType   string         `json:"engine_type"`         // 工作流引擎类型 (easy-workflow / flowx)
+	FlowData     map[string]any `json:"flow_data,omitempty"` // 图画布原始节点拓扑 json
 }
 
 // DeleteReq 删除流程定义请求参数
@@ -73,15 +78,16 @@ type DeleteReq struct {
 
 // Workflow 表现层统一输出的 Workflow 数据模型
 type Workflow struct {
-	Id           int64      `json:"id"`                  // 唯一 ID
-	TemplateId   int64      `json:"template_id"`         // 绑定的工单模板 ID
-	Name         string     `json:"name"`                // 展示名
-	Icon         string     `json:"icon"`                // 展示图标
-	Owner        string     `json:"owner"`               // 流程所有人
-	Desc         string     `json:"desc"`                // 描述
-	IsNotify     bool       `json:"is_notify"`           // 是否通知
-	NotifyMethod uint8      `json:"notify_method"`       // 默认渠道类型
-	FlowData     *LogicFlow `json:"flow_data,omitempty"` // 前端流程图画布数据
+	Id           int64          `json:"id"`                  // 唯一 ID
+	TemplateId   int64          `json:"template_id"`         // 绑定的工单模板 ID
+	Name         string         `json:"name"`                // 展示名
+	Icon         string         `json:"icon"`                // 展示图标
+	Owner        string         `json:"owner"`               // 流程所有人
+	Desc         string         `json:"desc"`                // 描述
+	IsNotify     bool           `json:"is_notify"`           // 是否通知
+	NotifyMethod uint8          `json:"notify_method"`       // 默认渠道类型
+	EngineType   string         `json:"engine_type"`         // 工作流引擎类型 (easy-workflow / flowx)
+	FlowData     map[string]any `json:"flow_data,omitempty"` // 前端流程图画布数据
 }
 
 // LogicFlow 前端 LogicFlow 画布对应的 Edge 与 Node 数据列表封装
@@ -98,9 +104,9 @@ type RetrieveWorkflows struct {
 
 // OrderGraphReq 工单流转地图查看请求参数
 type OrderGraphReq struct {
-	Id                int64 `json:"id"`                  // 流程定义 ID
-	Status            uint8 `json:"status"`              // 实例当前的状态
-	ProcessInstanceId int   `json:"process_instance_id"` // 底层流程引擎执行实例的 ProcessInstanceId
+	Id                int64  `json:"id"`                  // 流程定义 ID
+	Status            uint8  `json:"status"`              // 实例当前的状态
+	ProcessInstanceId idx.ID `json:"process_instance_id"` // 底层流程引擎执行实例的 ProcessInstanceId (自适应兼容 int 与 string)
 }
 
 // RetrieveOrderGraph 渲染工单流程轨迹流转地图所需的前端出参模型

@@ -55,9 +55,10 @@ func (d *taskDispatcher) Dispatch(ctx context.Context, attempt domain.TaskAttemp
 		return 0, fmt.Errorf("序列化自动化任务输入失败: %w", err)
 	}
 	response, err := d.client.RunRunner(ctx, &schedulerv1.RunRunnerRequest{
-		RequestId: attempt.RequestID,
-		RunnerId:  attempt.RunnerID,
-		Params:    map[string]string{"args": string(args)},
+		RequestId:           attempt.RequestID,
+		RunnerId:            attempt.RunnerID,
+		Params:              map[string]string{"args": string(args)},
+		MaxExecutionSeconds: attempt.MaxExecutionSeconds,
 	})
 	if err != nil {
 		if code := status.Code(err); code == codes.InvalidArgument || code == codes.FailedPrecondition {

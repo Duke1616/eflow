@@ -5,9 +5,8 @@ import (
 	"testing"
 
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
-	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
+	"github.com/Duke1616/eflow/internal/service/engine/easyflow"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
@@ -17,7 +16,7 @@ import (
 
 func TestCompensationPlannerBuildIsReadOnly(t *testing.T) {
 	taskRepo := &plannerTaskRepositoryStub{tasks: []domain.Task{{
-		ID: 1, TenantID: 7, TicketID: 42, ProcessInstanceID: 101,
+		ID: 1, TenantID: 7, TicketID: 42, InstanceID: domain.NewID(101),
 		Status: domain.TaskStatusSuccess, CompensationNodeID: "compensation",
 	}}}
 	tasks := &plannerTaskServiceStub{}
@@ -26,7 +25,7 @@ func TestCompensationPlannerBuildIsReadOnly(t *testing.T) {
 		taskRepo, withdrawals, tasks,
 		&plannerTicketServiceStub{ticket: domain.Ticket{Id: 42, TenantID: 7, WorkflowId: 9}},
 		&plannerEngineServiceStub{instance: domain.Instance{ProcID: 10, ProcVersion: 2}},
-		&plannerWorkflowServiceStub{property: easyflow.AutomationProperty{Name: "权限回收"}},
+		&plannerWorkflowServiceStub{nodeName: "权限回收"},
 	)
 
 	plan, err := planner.Build(context.Background(), 101)
@@ -63,7 +62,7 @@ type plannerTaskRepositoryStub struct {
 }
 
 func (s *plannerTaskRepositoryStub) ListByInstanceID(_ context.Context, offset, _ int64,
-	_ int) ([]domain.Task, error) {
+	_ int64) ([]domain.Task, error) {
 	if offset > 0 {
 		return nil, nil
 	}
@@ -77,7 +76,7 @@ type plannerWithdrawalRepositoryStub struct {
 }
 
 func (s *plannerWithdrawalRepositoryStub) ActivateCompensations(_ context.Context,
-	_ int, nodeIDs []string) error {
+	_ domain.ID, nodeIDs []string) error {
 	s.activateCalls++
 	s.nodeIDs = nodeIDs
 	return nil
@@ -90,8 +89,8 @@ type plannerTaskServiceStub struct {
 	tenantID int64
 }
 
-func (s *plannerTaskServiceStub) CreateTask(ctx context.Context, _ int64, _ int,
-	nodeID, _ string) (domain.Task, error) {
+func (s *plannerTaskServiceStub) CreateTask(ctx context.Context, _ int64, _ domain.ID,
+	nodeID, _ string, _ ...int) (domain.Task, error) {
 	s.calls++
 	s.nodeID = nodeID
 	s.tenantID = ctxutil.GetTenantID(ctx).Int64()
@@ -108,7 +107,7 @@ func (s *plannerTicketServiceStub) GetByID(context.Context, int64) (domain.Ticke
 }
 
 type plannerEngineServiceStub struct {
-	engineSvc.Service
+	easyflow.Service
 	instance domain.Instance
 }
 
@@ -118,14 +117,22 @@ func (s *plannerEngineServiceStub) GetInstanceByID(context.Context, int) (domain
 
 type plannerWorkflowServiceStub struct {
 	workflowSvc.Service
-	property easyflow.AutomationProperty
+	nodeName string
 }
 
-func (s *plannerWorkflowServiceStub) FindInstanceFlow(context.Context, int64, int, int) (domain.Workflow, error) {
-	return domain.Workflow{}, nil
-}
-
-func (s *plannerWorkflowServiceStub) GetAutomationProperty(easyflow.Workflow,
-	string) (easyflow.AutomationProperty, error) {
-	return s.property, nil
+func (s *plannerWorkflowServiceStub) FindInstanceFlow(context.Context, int64, int, int, ...domain.EngineType) (domain.Workflow, error) {
+	return domain.Workflow{
+		FlowData: map[string]any{
+			"nodes": []map[string]any{
+				{
+					"id":   "compensation",
+					"type": "automation",
+					"properties": map[string]any{
+						"name": s.nodeName,
+					},
+				},
+			},
+			"edges": []map[string]any{},
+		},
+	}, nil
 }

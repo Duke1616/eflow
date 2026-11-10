@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/samber/lo"
 )
 
@@ -60,21 +61,24 @@ func ValidateAll(ctx *Context) error {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // getNodeDisplayName 获取节点的用户可读名称，格式为 "节点名 (节点ID)" 或仅 "节点ID"
-func getNodeDisplayName(node Node) string {
-	if p, _ := ToNodeProperty[struct{ Name string }](node); p.Name != "" {
-		return fmt.Sprintf("%s (%s)", p.Name, node.ID)
+func getNodeDisplayName(node *flowdsl.Node) string {
+	if node == nil {
+		return ""
+	}
+	if node.Name != "" {
+		return fmt.Sprintf("%s (%s)", node.Name, node.ID)
 	}
 	return node.ID
 }
 
 // getAllEdges 扁平化获取流程图中所有的连线
-func getAllEdges(ctx *Context) []Edge {
+func getAllEdges(ctx *Context) []flowdsl.Edge {
 	return lo.Flatten(lo.Values(ctx.EdgesMap))
 }
 
 // isMergeGateway 判断节点是否为等待并发前置的聚合网关（parallel 或 inclusion）
-func isMergeGateway(nodeType string) bool {
-	return nodeType == NodeTypeParallel || nodeType == NodeTypeInclusion
+func isMergeGateway(nodeType flowdsl.NodeType) bool {
+	return nodeType == flowdsl.NodeGatewayParallel || nodeType == flowdsl.NodeGatewayInclusive
 }
 
 // intersectMany 计算多个切片的交集，并保证结果去重
@@ -112,6 +116,9 @@ func scanBranchDownstream(ctx *Context, startNodeID string, stopAtExclusiveJoin 
 		currID := queue[0]
 		queue = queue[1:]
 		currNode := ctx.GetNodeInfo(currID)
+		if currNode == nil {
+			continue
+		}
 
 		// 若到达聚合网关，记录该网关 ID，不再向该网关下游继续深入（已达汇聚边界）
 		if isMergeGateway(currNode.Type) {
@@ -120,21 +127,21 @@ func scanBranchDownstream(ctx *Context, startNodeID string, stopAtExclusiveJoin 
 		}
 
 		// 若为排他汇聚点（多入边的 condition 节点），说明多条互斥分支在此处已先合并为单线流转
-		if stopAtExclusiveJoin && currNode.Type == NodeTypeCondition && len(ctx.PrevNodesMap[currID]) > 1 {
+		if stopAtExclusiveJoin && currNode.Type == flowdsl.NodeGatewayCondition && len(ctx.PrevNodesMap[currID]) > 1 {
 			continue
 		}
 
 		// 若未经聚合网关直接流向了结束节点，标记并记录
-		if currNode.Type == NodeTypeEnd {
+		if currNode.Type == flowdsl.NodeEnd {
 			reachedEnd = true
 			endID = currID
 			continue
 		}
 
 		for _, edge := range ctx.GetTargetEdges(currID) {
-			if !visited[edge.TargetNodeId] {
-				visited[edge.TargetNodeId] = true
-				queue = append(queue, edge.TargetNodeId)
+			if !visited[edge.Target] {
+				visited[edge.Target] = true
+				queue = append(queue, edge.Target)
 			}
 		}
 	}
@@ -154,19 +161,19 @@ func scanBranchDownstream(ctx *Context, startNodeID string, stopAtExclusiveJoin 
 type validateSupportedNodeTypes struct{}
 
 func (v *validateSupportedNodeTypes) Validate(ctx *Context) error {
-	supportedTypes := map[string]bool{
-		NodeTypeStart:     true,
-		NodeTypeEnd:       true,
-		NodeTypeUser:      true,
-		NodeTypeCondition: true,
-		NodeTypeParallel:  true,
-		NodeTypeInclusion: true,
-		NodeTypeSelective: true,
-		NodeTypeAuto:      true,
-		NodeTypeChat:      true,
+	supportedTypes := map[flowdsl.NodeType]bool{
+		flowdsl.NodeStart:            true,
+		flowdsl.NodeEnd:              true,
+		flowdsl.NodeUserTask:         true,
+		flowdsl.NodeGatewayCondition: true,
+		flowdsl.NodeGatewayParallel:  true,
+		flowdsl.NodeGatewayInclusive: true,
+		flowdsl.NodeGatewayExclusive: true,
+		flowdsl.NodeAutoTask:         true,
+		flowdsl.NodeChatGroup:        true,
 	}
 
-	badNode, found := lo.Find(lo.Values(ctx.NodesMap), func(n Node) bool {
+	badNode, found := lo.Find(lo.Values(ctx.NodesMap), func(n *flowdsl.Node) bool {
 		return !supportedTypes[n.Type]
 	})
 	if found {
@@ -179,30 +186,30 @@ func (v *validateSupportedNodeTypes) Validate(ctx *Context) error {
 type validateEdgeEndpoints struct{}
 
 func (v *validateEdgeEndpoints) Validate(ctx *Context) error {
-	badEdge, found := lo.Find(getAllEdges(ctx), func(e Edge) bool {
-		_, srcOk := ctx.NodesMap[e.SourceNodeId]
-		_, dstOk := ctx.NodesMap[e.TargetNodeId]
+	badEdge, found := lo.Find(getAllEdges(ctx), func(e flowdsl.Edge) bool {
+		_, srcOk := ctx.NodesMap[e.Source]
+		_, dstOk := ctx.NodesMap[e.Target]
 		return !srcOk || !dstOk
 	})
 	if !found {
 		return nil
 	}
 
-	if _, ok := ctx.NodesMap[badEdge.SourceNodeId]; !ok {
-		return newValidateError("连线 [%s] 的起点节点 [%s] 不存在，请清理画布上的残留连线", badEdge.ID, badEdge.SourceNodeId)
+	if _, ok := ctx.NodesMap[badEdge.Source]; !ok {
+		return newValidateError("连线 [%s] 的起点节点 [%s] 不存在，请清理画布上的残留连线", badEdge.ID, badEdge.Source)
 	}
-	return newValidateError("连线 [%s] 的目标节点 [%s] 不存在，请清理画布上的残留连线", badEdge.ID, badEdge.TargetNodeId)
+	return newValidateError("连线 [%s] 的目标节点 [%s] 不存在，请清理画布上的残留连线", badEdge.ID, badEdge.Target)
 }
 
 // validateNoSelfLoops 检测禁止节点指向自身（自环）
 type validateNoSelfLoops struct{}
 
 func (v *validateNoSelfLoops) Validate(ctx *Context) error {
-	loopEdge, found := lo.Find(getAllEdges(ctx), func(e Edge) bool {
-		return e.SourceNodeId == e.TargetNodeId
+	loopEdge, found := lo.Find(getAllEdges(ctx), func(e flowdsl.Edge) bool {
+		return e.Source == e.Target
 	})
 	if found {
-		node := ctx.GetNodeInfo(loopEdge.SourceNodeId)
+		node := ctx.GetNodeInfo(loopEdge.Source)
 		return newValidateError("节点 [%s] 存在指向自身的连线（自环），请删除该连线", getNodeDisplayName(node))
 	}
 	return nil
@@ -219,8 +226,8 @@ type validateStartEnd struct{}
 
 func (v *validateStartEnd) Validate(ctx *Context) error {
 	allNodes := lo.Values(ctx.NodesMap)
-	startNodes := lo.Filter(allNodes, func(n Node, _ int) bool { return n.Type == NodeTypeStart })
-	endNodes := lo.Filter(allNodes, func(n Node, _ int) bool { return n.Type == NodeTypeEnd })
+	startNodes := lo.Filter(allNodes, func(n *flowdsl.Node, _ int) bool { return n.Type == flowdsl.NodeStart })
+	endNodes := lo.Filter(allNodes, func(n *flowdsl.Node, _ int) bool { return n.Type == flowdsl.NodeEnd })
 
 	if len(startNodes) == 0 {
 		return newValidateError("流程缺少开始节点，请添加一个 [start] 节点")
@@ -236,7 +243,7 @@ func (v *validateStartEnd) Validate(ctx *Context) error {
 	if len(endNodes) == 0 {
 		return newValidateError("流程缺少结束节点，请添加至少一个 [end] 节点")
 	}
-	badEnd, found := lo.Find(endNodes, func(end Node) bool {
+	badEnd, found := lo.Find(endNodes, func(end *flowdsl.Node) bool {
 		return len(ctx.EdgesMap[end.ID]) > 0
 	})
 	if found {
@@ -271,9 +278,9 @@ func (v *validateAcyclic) Validate(ctx *Context) error {
 		visitedCount++
 
 		for _, edge := range ctx.EdgesMap[curr] {
-			inDegree[edge.TargetNodeId]--
-			if inDegree[edge.TargetNodeId] == 0 {
-				queue = append(queue, edge.TargetNodeId)
+			inDegree[edge.Target]--
+			if inDegree[edge.Target] == 0 {
+				queue = append(queue, edge.Target)
 			}
 		}
 	}
@@ -302,7 +309,7 @@ func findCyclePath(ctx *Context, inDegree map[string]int) string {
 		path = append(path, u)
 
 		for _, edge := range ctx.EdgesMap[u] {
-			v := edge.TargetNodeId
+			v := edge.Target
 			if _, ok := cycleNodes[v]; !ok {
 				continue
 			}
@@ -345,7 +352,7 @@ func findCyclePath(ctx *Context, inDegree map[string]int) string {
 type validateReachability struct{}
 
 func (v *validateReachability) Validate(ctx *Context) error {
-	startNode, ok := lo.Find(lo.Values(ctx.NodesMap), func(n Node) bool { return n.Type == NodeTypeStart })
+	startNode, ok := lo.Find(lo.Values(ctx.NodesMap), func(n *flowdsl.Node) bool { return n.Type == flowdsl.NodeStart })
 	if !ok {
 		return nil // 由 validateStartEnd 统一报错
 	}
@@ -360,14 +367,14 @@ func (v *validateReachability) Validate(ctx *Context) error {
 		queue = queue[1:]
 
 		for _, edge := range ctx.EdgesMap[curr] {
-			if !reachableFromStart[edge.TargetNodeId] {
-				reachableFromStart[edge.TargetNodeId] = true
-				queue = append(queue, edge.TargetNodeId)
+			if !reachableFromStart[edge.Target] {
+				reachableFromStart[edge.Target] = true
+				queue = append(queue, edge.Target)
 			}
 		}
 	}
 
-	unreachableNode, found := lo.Find(lo.Values(ctx.NodesMap), func(n Node) bool {
+	unreachableNode, found := lo.Find(lo.Values(ctx.NodesMap), func(n *flowdsl.Node) bool {
 		return !reachableFromStart[n.ID]
 	})
 	if found {
@@ -379,8 +386,8 @@ func (v *validateReachability) Validate(ctx *Context) error {
 
 	// 2. 反向可达遍历（从所有 End 节点沿着入边反向追溯）
 	canReachEnd := make(map[string]bool, len(ctx.NodesMap))
-	endNodes := lo.Filter(lo.Values(ctx.NodesMap), func(n Node, _ int) bool { return n.Type == NodeTypeEnd })
-	endQueue := lo.Map(endNodes, func(n Node, _ int) string {
+	endNodes := lo.Filter(lo.Values(ctx.NodesMap), func(n *flowdsl.Node, _ int) bool { return n.Type == flowdsl.NodeEnd })
+	endQueue := lo.Map(endNodes, func(n *flowdsl.Node, _ int) string {
 		canReachEnd[n.ID] = true
 		return n.ID
 	})
@@ -397,7 +404,7 @@ func (v *validateReachability) Validate(ctx *Context) error {
 		}
 	}
 
-	deadEndNode, found := lo.Find(lo.Values(ctx.NodesMap), func(n Node) bool {
+	deadEndNode, found := lo.Find(lo.Values(ctx.NodesMap), func(n *flowdsl.Node) bool {
 		return !canReachEnd[n.ID]
 	})
 	if found {
@@ -415,21 +422,11 @@ func (v *validateReachability) Validate(ctx *Context) error {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // validateConditionParallelDeadlock 检测「条件网关直接汇聚并行网关」导致的死锁拓扑。
-//
-// 非法场景：一个 condition 节点有 ≥2 条出边（多个条件分支），
-// 且这些分支的目标节点在下游未经排他汇合就全部汇聚至同一个 parallel/inclusion 聚合网关。
-//
-// 死锁原因：条件网关（WaitForAllPrevNode=3）只激活1条满足条件的分支，
-// 其余分支无任何任务记录；而并行聚合网关（WaitForAllPrevNode=1）等待所有前置节点完成，
-// 非激活分支永久无法完成 → 死锁。
-//
-// 正确做法：使用 [selective] 节点作为分叉点，搭配多个 [condition] 子网关，
-// 由 EventSelectiveGatewaySplit 为未激活分支写入 skip 记录，聚合网关才能正常推进。
 type validateConditionParallelDeadlock struct{}
 
 func (v *validateConditionParallelDeadlock) Validate(ctx *Context) error {
 	for _, node := range ctx.NodesMap {
-		if node.Type != NodeTypeCondition {
+		if node.Type != flowdsl.NodeGatewayCondition {
 			continue
 		}
 
@@ -438,14 +435,10 @@ func (v *validateConditionParallelDeadlock) Validate(ctx *Context) error {
 			continue
 		}
 
-		// 利用 scanBranchDownstream 全链路深度搜索每个分支下游遇到的聚合网关
-		// stopAtExclusiveJoin=true: 若多条条件分支在下游先汇入了一个排他汇聚点（多入边的 condition 节点），
-		// 则流出该汇聚点时已闭合为单线，不再作为互斥分支误判死锁
-		branchGateways := lo.Map(outEdges, func(edge Edge, _ int) []string {
-			return scanBranchDownstream(ctx, edge.TargetNodeId, true).gateways
+		branchGateways := lo.Map(outEdges, func(edge flowdsl.Edge, _ int) []string {
+			return scanBranchDownstream(ctx, edge.Target, true).gateways
 		})
 
-		// 计算所有分支共同汇聚的聚合网关交集
 		commonGateways := intersectMany(branchGateways...)
 		if len(commonGateways) > 0 {
 			gwNode := ctx.GetNodeInfo(commonGateways[0])
@@ -461,31 +454,22 @@ func (v *validateConditionParallelDeadlock) Validate(ctx *Context) error {
 }
 
 // validateParallelForkJoinPairing 检测并行网关分叉必须与聚合网关成对闭合（Fork-Join 闭合规范）。
-//
-// 业务背景与原理：
-//  1. 并行网关（parallel）若有 ≥2 条出边，即为并发分叉点（Fork），同时激活所有分支。
-//  2. 所有并发分支必须在到达 End 节点前，统一汇聚到同一个并行/包容聚合网关（Join），
-//     严禁任何并发分支未聚合直接连到 End 节点。
-//     原因：在 EasyFlow 引擎中，任意分支先到达 End 节点会触发 EventNotify 立即将工单置为终态 END，
-//     导致其余尚未审批完成的分支直接被系统丢弃，破坏业务审批完整性。
 type validateParallelForkJoinPairing struct{}
 
 func (v *validateParallelForkJoinPairing) Validate(ctx *Context) error {
 	for _, node := range ctx.NodesMap {
-		if node.Type != NodeTypeParallel {
+		if node.Type != flowdsl.NodeGatewayParallel {
 			continue
 		}
 		forkEdges := ctx.GetTargetEdges(node.ID)
 		if len(forkEdges) < 2 {
-			continue // 出边 < 2 不是分叉点（可能是聚合网关或单线过渡），不在此规则约束范围
+			continue
 		}
 
-		// 全链路搜索每条并发分支的聚合网关候选列表及是否直连 End
-		branchScans := lo.Map(forkEdges, func(edge Edge, _ int) branchGatewayScan {
-			return scanBranchDownstream(ctx, edge.TargetNodeId, false)
+		branchScans := lo.Map(forkEdges, func(edge flowdsl.Edge, _ int) branchGatewayScan {
+			return scanBranchDownstream(ctx, edge.Target, false)
 		})
 
-		// 1. 若有并发分支未经过聚合网关就直接流向结束节点，立即拦截报错
 		if badScan, found := lo.Find(branchScans, func(s branchGatewayScan) bool { return s.reachedEnd }); found {
 			endNode := ctx.GetNodeInfo(badScan.endNodeID)
 			return newValidateError(
@@ -495,7 +479,6 @@ func (v *validateParallelForkJoinPairing) Validate(ctx *Context) error {
 			)
 		}
 
-		// 2. 检查所有并发分支是否最终汇聚到了同一个聚合网关（交集非空）
 		allGateways := lo.Map(branchScans, func(s branchGatewayScan, _ int) []string { return s.gateways })
 		commonJoins := intersectMany(allGateways...)
 		if len(commonJoins) == 0 {
@@ -510,31 +493,29 @@ func (v *validateParallelForkJoinPairing) Validate(ctx *Context) error {
 }
 
 // validateSelectiveTargetsMustBeCondition 检测 selective 作为分叉网关时的直接目标节点必须全部是 condition 子网关。
-//
-// 角色区分机制：
-// 1. 汇聚网关角色（Join）：当 selective 的入边 ≥ 2 且出边 ≤ 1 时，其扮演的是分支汇聚等待网关（底层具备 WaitForAllPrevNode=1 汇聚能力），
-// validateSelectiveTargetsMustBeCondition 检测 selective 节点的所有出边目标必须是 condition 网关。
-//
-// 语义说明：selective 属于「条件并行分叉网关」，仅用于向下发散分流（selective → condition → 业务节点）。
-// 它不能作为分支汇聚节点使用；多分支汇聚必须使用标准的【并行网关（parallel）】。
 type validateSelectiveTargetsMustBeCondition struct{}
 
 func (v *validateSelectiveTargetsMustBeCondition) Validate(ctx *Context) error {
 	for _, node := range ctx.NodesMap {
-		if node.Type != NodeTypeSelective {
+		if node.Type != flowdsl.NodeGatewayExclusive {
 			continue
 		}
 
-		badEdge, found := lo.Find(ctx.GetTargetEdges(node.ID), func(e Edge) bool {
-			return ctx.GetNodeInfo(e.TargetNodeId).Type != NodeTypeCondition
+		badEdge, found := lo.Find(ctx.GetTargetEdges(node.ID), func(e flowdsl.Edge) bool {
+			target := ctx.GetNodeInfo(e.Target)
+			return target == nil || target.Type != flowdsl.NodeGatewayCondition
 		})
 		if found {
-			target := ctx.GetNodeInfo(badEdge.TargetNodeId)
+			target := ctx.GetNodeInfo(badEdge.Target)
+			targetType := ""
+			if target != nil {
+				targetType = string(target.Type)
+			}
 			return newValidateError(
 				"selective（条件并行网关）节点 [%s] 的出边直接连接了非 condition 节点 [%s]（类型：%s）。\n"+
 					"selective 属于条件分叉网关，必须与 condition 子网关配合使用（selective → condition → 业务节点）。\n"+
 					"若此处用于多分支汇聚，请将其替换为【并行网关（parallel，纯加号图标）】",
-				getNodeDisplayName(node), getNodeDisplayName(target), target.Type,
+				getNodeDisplayName(node), getNodeDisplayName(target), targetType,
 			)
 		}
 	}
@@ -546,7 +527,7 @@ type validateSelectiveMinBranches struct{}
 
 func (v *validateSelectiveMinBranches) Validate(ctx *Context) error {
 	for _, node := range ctx.NodesMap {
-		if node.Type != NodeTypeSelective {
+		if node.Type != flowdsl.NodeGatewayExclusive {
 			continue
 		}
 		outCount := len(ctx.GetTargetEdges(node.ID))
@@ -566,16 +547,11 @@ func (v *validateSelectiveMinBranches) Validate(ctx *Context) error {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // validateConditionEdgeExpression 检测条件网关的连接线必须配置条件表达式。
-//
-//  1. 多分支分叉场景（出边 ≥ 2）：每条出边代表互斥的路由分支，必须配置表达式，否则条件恒真会导致多分支并发冲突。
-//  2. Selective 子网关场景（入边来自 selective）：selective 依赖 condition 上的表达式判定分支并对未命中分支写入 skip 记录，
-//     必须配置表达式，否则条件恒真导致 selective 失效退化为 parallel。
-//  3. 普通单出边过渡场景（入边非 selective 且出边 = 1）：允许使用系统底层默认 "1 = 1" 直通，不强制拦截。
 type validateConditionEdgeExpression struct{}
 
 func (v *validateConditionEdgeExpression) Validate(ctx *Context) error {
 	for _, node := range ctx.NodesMap {
-		if node.Type != NodeTypeCondition {
+		if node.Type != flowdsl.NodeGatewayCondition {
 			continue
 		}
 		outEdges := ctx.GetTargetEdges(node.ID)
@@ -584,7 +560,8 @@ func (v *validateConditionEdgeExpression) Validate(ctx *Context) error {
 		}
 
 		isSelectiveBranch := lo.SomeBy(ctx.PrevNodesMap[node.ID], func(prevID string) bool {
-			return ctx.GetNodeInfo(prevID).Type == NodeTypeSelective
+			prev := ctx.GetNodeInfo(prevID)
+			return prev != nil && prev.Type == flowdsl.NodeGatewayExclusive
 		})
 
 		mustHaveExpr := len(outEdges) >= 2 || isSelectiveBranch
@@ -592,12 +569,11 @@ func (v *validateConditionEdgeExpression) Validate(ctx *Context) error {
 			continue
 		}
 
-		badEdge, found := lo.Find(outEdges, func(e Edge) bool {
-			prop, _ := ToEdgeProperty(e)
-			return strings.TrimSpace(prop.Expression) == ""
+		badEdge, found := lo.Find(outEdges, func(e flowdsl.Edge) bool {
+			return strings.TrimSpace(e.Expression) == ""
 		})
 		if found {
-			target := ctx.GetNodeInfo(badEdge.TargetNodeId)
+			target := ctx.GetNodeInfo(badEdge.Target)
 			if isSelectiveBranch {
 				return newValidateError(
 					"条件网关节点 [%s] 作为 selective 的条件分支流向 [%s]，但未配置条件表达式。\n"+
@@ -618,35 +594,25 @@ func (v *validateConditionEdgeExpression) Validate(ctx *Context) error {
 }
 
 // validateNoDuplicateConditionExpressions 检测条件分支是否存在重复的条件表达式。
-//
-// 业务背景与原理：
-//  1. Selective 网关（条件并行网关）：其下游每个 condition 子分支必须具备互斥或区分度的条件表达式。
-//     若存在重复表达式（如分支A为 $env == 'prod'，分支B也为 $env == 'prod'），
-//     会导致两分支同时激活或同时跳过，通常属于设计者复制节点后未修改表达式的配置笔误。
-//  2. 多出边 Condition 网关（出边 ≥ 2）：同一个条件网关的多条出边若条件完全相同，
-//     违反条件分流路由语义，属于配置错误。
 type validateNoDuplicateConditionExpressions struct{}
 
 func (v *validateNoDuplicateConditionExpressions) Validate(ctx *Context) error {
 	for _, node := range ctx.NodesMap {
 		switch node.Type {
-		case NodeTypeSelective:
-			// 检查 selective 下所有 condition 分支的表达式
+		case flowdsl.NodeGatewayExclusive:
 			outEdges := ctx.GetTargetEdges(node.ID)
 			seenExpr := make(map[string]string) // normalizedExpr -> conditionNodeID
 			for _, e := range outEdges {
-				condNode := ctx.GetNodeInfo(e.TargetNodeId)
-				if condNode.Type != NodeTypeCondition {
+				condNode := ctx.GetNodeInfo(e.Target)
+				if condNode == nil || condNode.Type != flowdsl.NodeGatewayCondition {
 					continue
 				}
 				condOutEdges := ctx.GetTargetEdges(condNode.ID)
 				for _, ce := range condOutEdges {
-					prop, _ := ToEdgeProperty(ce)
-					rawExpr := strings.TrimSpace(prop.Expression)
+					rawExpr := strings.TrimSpace(ce.Expression)
 					if rawExpr == "" {
 						continue
 					}
-					// 空白归一化（将连续空格收敛为单空格，防止由于多打空格规避校验）
 					normExpr := strings.Join(strings.Fields(rawExpr), " ")
 					if prevCondID, exists := seenExpr[normExpr]; exists {
 						prevCondNode := ctx.GetNodeInfo(prevCondID)
@@ -661,22 +627,21 @@ func (v *validateNoDuplicateConditionExpressions) Validate(ctx *Context) error {
 				}
 			}
 
-		case NodeTypeCondition:
+		case flowdsl.NodeGatewayCondition:
 			outEdges := ctx.GetTargetEdges(node.ID)
 			if len(outEdges) < 2 {
 				continue
 			}
 			seenExpr := make(map[string]string) // normalizedExpr -> targetNodeID
 			for _, e := range outEdges {
-				prop, _ := ToEdgeProperty(e)
-				rawExpr := strings.TrimSpace(prop.Expression)
+				rawExpr := strings.TrimSpace(e.Expression)
 				if rawExpr == "" {
 					continue
 				}
 				normExpr := strings.Join(strings.Fields(rawExpr), " ")
 				if prevTargetID, exists := seenExpr[normExpr]; exists {
 					prevTarget := ctx.GetNodeInfo(prevTargetID)
-					currTarget := ctx.GetNodeInfo(e.TargetNodeId)
+					currTarget := ctx.GetNodeInfo(e.Target)
 					return newValidateError(
 						"条件网关节点 [%s] 流向不同目标的分支配置了重复的条件表达式: '%s'（流向 [%s] 与 [%s] 重复）。\n"+
 							"多分支条件网关的各个分支表达式不能相同，请检查是否存在配置错误",
@@ -684,7 +649,7 @@ func (v *validateNoDuplicateConditionExpressions) Validate(ctx *Context) error {
 						getNodeDisplayName(prevTarget), getNodeDisplayName(currTarget),
 					)
 				}
-				seenExpr[normExpr] = e.TargetNodeId
+				seenExpr[normExpr] = e.Target
 			}
 		}
 	}

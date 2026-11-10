@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Duke1616/eflow/internal/callback"
 	"github.com/Duke1616/eflow/internal/event"
 	templateEvent "github.com/Duke1616/eflow/internal/event/template"
-	ticketEvent "github.com/Duke1616/eflow/internal/event/ticket"
 	"github.com/ecodeclub/ekit/retry"
 	"github.com/ecodeclub/mq-api"
 	"github.com/ecodeclub/mq-api/kafka"
@@ -34,7 +34,7 @@ var RequiredTopics = []TopicSpec{
 	{Name: event.OrderStatusModifyEventName, Partitions: 1},      // 工单状态变更 (order_status_modify_events)
 	{Name: templateEvent.WechatTicketEventName, Partitions: 1},   // 企业微信工单事件 (wechat_order_events)
 	{Name: templateEvent.WechatCallbackEventName, Partitions: 1}, // 企业微信 OA 回调 (wechat_callback_events)
-	{Name: ticketEvent.LarkCallbackEventName, Partitions: 1},     // 飞书卡片回调 (lark_callback_events)
+	{Name: callback.LarkCallbackEventName, Partitions: 1},      // 飞书卡片回调 (lark_callback_events)
 }
 
 func InitMQ() mq.MQ {

@@ -16,21 +16,23 @@ type TransitionResult struct {
 
 // StepDecision 步骤转移综合决策（包含汇聚屏障裁决与跨网关穿透）
 type StepDecision struct {
-	ReadyNodes   []model.NodeSpec // 本轮最终就绪、需派发生成待办的目标节点列表
-	SkippedNodes []model.NodeSpec // 条件未满足、需标记为 TaskSkipped 的节点列表
-	IsBlocked    bool             // 是否存在汇聚网关屏障未全部就绪而需保持等待
+	ReadyNodes     []model.NodeSpec // 本轮最终就绪、需派发生成待办的目标节点列表
+	SkippedNodes   []model.NodeSpec // 条件未满足、需标记为 TaskSkipped 的节点列表
+	SkippedTaskIDs []string         // 因排他汇聚竞争放行需联动跳过/作废的未决前置任务 ID 列表
+	IsBlocked      bool             // 是否存在汇聚网关屏障未全部就绪而需保持等待
 }
 
 // ResolveNextStep 综合求解下一步流转决策：网关分流 + 自动Skip识别 + 汇聚屏障过滤 + 跨汇聚网关下游递归穿透 (支持多层级联网关)
-func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables map[string]any, allTasks []*model.Task, batchCode int) (*StepDecision, error) {
+func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables model.Variables, allTasks []*model.Task, batchCode int) (StepDecision, error) {
 	transRes, err := p.CalculateTransition(currentNodeID, variables)
 	if err != nil {
-		return nil, err
+		return StepDecision{}, err
 	}
 
-	decision := &StepDecision{
-		ReadyNodes:   make([]model.NodeSpec, 0, len(transRes.Targets)),
-		SkippedNodes: transRes.SkippedTargets,
+	decision := StepDecision{
+		ReadyNodes:     make([]model.NodeSpec, 0, len(transRes.Targets)),
+		SkippedNodes:   transRes.SkippedTargets,
+		SkippedTaskIDs: make([]string, 0),
 	}
 
 	if len(transRes.Targets) == 0 {
@@ -55,42 +57,76 @@ func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables map[stri
 		}
 
 		// 2. 若目标是网关节点，先检查是否存在多路汇聚屏障阻断
-		if !p.IsJoinSatisfied(nextNode, allTasks, batchCode) {
+		if !p.IsJoinSatisfied(nextNode, allTasks) {
 			decision.IsBlocked = true
 			continue // 该网关前置尚未全部就绪，保持阻断等待
 		}
 
-		// 3. 防环检查，避免网关循环互连导致死循环
+		// 3. 排他汇聚网关 (NodeGatewayExclusive 且入边 > 1)：首到即放行，自动收集其他竞争失败分支上的未决待办任务
+		if nextNode.Type == model.NodeGatewayExclusive && len(p.InEdges[nextNode.ID]) > 1 {
+			decision.SkippedTaskIDs = append(decision.SkippedTaskIDs, p.collectExclusiveJoinSkippedTasks(nextNode, allTasks)...)
+		}
+
+		// 4. 防环检查，避免网关循环互连导致死循环
 		if _, visited := visitedGateways[nextNode.ID]; visited {
 			continue
 		}
 		visitedGateways[nextNode.ID] = struct{}{}
 
-		// 4. 网关满足流转条件，递归穿透获取下游目标
+		// 5. 网关满足流转条件，递归穿透获取下游目标
 		subRes, err := p.CalculateTransition(nextNode.ID, variables)
 		if err != nil {
-			return nil, err
+			return StepDecision{}, err
 		}
 		decision.SkippedNodes = append(decision.SkippedNodes, subRes.SkippedTargets...)
 		queue = append(queue, subRes.Targets...)
 	}
 
+	decision.SkippedTaskIDs = lo.Uniq(decision.SkippedTaskIDs)
 	return decision, nil
 }
 
-// CalculateTransition 结合网关分类（或/并/包容）计算下一阶段的目标节点与自动跳过节点
-func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables map[string]any) (*TransitionResult, error) {
+// collectExclusiveJoinSkippedTasks 排他网关竞争放行后，收集竞争失败分支上待取消的未决任务
+func (p *ExecutionPlan) collectExclusiveJoinSkippedTasks(joinNode model.NodeSpec, allTasks []*model.Task) []string {
+	branchStates := p.extractBranchStates(joinNode, allTasks)
+	hasPassedBranch := lo.SomeBy(branchStates, func(b BranchState) bool { return b.IsPassed })
+	if !hasPassedBranch {
+		return nil
+	}
+
+	unpassedNodeIDs := lo.FilterMap(branchStates, func(b BranchState, _ int) (string, bool) {
+		return b.NodeID, !b.IsPassed && !b.IsSkipped && b.HasTask
+	})
+	if len(unpassedNodeIDs) == 0 {
+		return nil
+	}
+
+	unpassedSet := lo.SliceToMap(unpassedNodeIDs, func(id string) (string, struct{}) {
+		return id, struct{}{}
+	})
+
+	var skippedIDs []string
+	for _, t := range allTasks {
+		if _, ok := unpassedSet[t.NodeID]; ok && t.IsPending() {
+			skippedIDs = append(skippedIDs, t.ID)
+		}
+	}
+	return skippedIDs
+}
+
+// CalculateTransition 结合网关分类（或/并/包容）计算下一阶段的目标节点与自动跳过节点 (Value Semantics 优先)
+func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables model.Variables) (TransitionResult, error) {
 	edges := p.OutEdges[currentNodeID]
 	if len(edges) == 0 {
-		return &TransitionResult{}, nil
+		return TransitionResult{}, nil
 	}
 
 	currNode, exists := p.NodesMap[currentNodeID]
 	if !exists {
-		return nil, fmt.Errorf("当前节点未定义: %s", currentNodeID)
+		return TransitionResult{}, fmt.Errorf("当前节点未定义: %s", currentNodeID)
 	}
 
-	result := &TransitionResult{
+	result := TransitionResult{
 		Targets:        make([]model.NodeSpec, 0),
 		SkippedTargets: make([]model.NodeSpec, 0),
 	}
@@ -98,7 +134,7 @@ func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables map[
 	for _, edge := range edges {
 		targetNode, ok := p.NodesMap[edge.Target]
 		if !ok {
-			return nil, fmt.Errorf("目标节点未定义: %s", edge.Target)
+			return TransitionResult{}, fmt.Errorf("目标节点未定义: %s", edge.Target)
 		}
 
 		// 并行网关无条件并发放行；其余网关或普通节点按规则条件求值
@@ -113,153 +149,27 @@ func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables map[
 			}
 		} else if currNode.Type == model.NodeGatewayInclusive {
 			// 包容网关 (OR / 条件并行)：未满足条件的分支自动标记为跳过 (Skip)
-			result.SkippedTargets = append(result.SkippedTargets, targetNode)
+			// 注意：仅当目标是非网关节点时才记录为跳过目标，网关属于纯拓扑控制节点，严禁持久化 TaskSkipped 记录
+			if !targetNode.IsGateway() {
+				result.SkippedTargets = append(result.SkippedTargets, targetNode)
+			}
 		}
 	}
 
 	return result, nil
 }
 
-// evaluateEdge 纯粹面向标准 RuleGroup 规则组进行求值，消除运行时文本动态解析与双轨兼容
-func (p *ExecutionPlan) evaluateEdge(edge model.EdgeSpec, variables map[string]any) bool {
-	if edge.RuleGroup == nil {
-		return true // 无规则约束，默认放行
+// evaluateEdge 优先面向标准 RuleGroup 规则组进行求值；若无 RuleGroup 但配置了文本表达式，则委托表达式引擎求值
+func (p *ExecutionPlan) evaluateEdge(edge model.EdgeSpec, variables model.Variables) bool {
+	if edge.RuleGroup != nil {
+		return rule.EvaluateRuleGroup(edge.RuleGroup, variables)
 	}
-	return rule.EvaluateRuleGroup(edge.RuleGroup, variables)
-}
-
-// FindEffectivePrecedingTaskNodes 逆向递归溯源指定节点的有效任务前置节点（穿透纯路由性质的网关）
-func (p *ExecutionPlan) FindEffectivePrecedingTaskNodes(nodeID string) []model.NodeSpec {
-	inEdges := p.InEdges[nodeID]
-	if len(inEdges) == 0 {
-		return nil
+	if edge.Condition != "" {
+		res, err := rule.GetDefaultEngine().Evaluate(edge.Condition, variables)
+		if err != nil {
+			return false
+		}
+		return res
 	}
-
-	res := lo.FlatMap(inEdges, func(edge model.EdgeSpec, _ int) []model.NodeSpec {
-		src, ok := p.NodesMap[edge.Source]
-		if !ok {
-			return nil
-		}
-		if src.IsActivity() {
-			return []model.NodeSpec{src}
-		}
-		if src.IsGateway() {
-			return p.FindEffectivePrecedingTaskNodes(src.ID)
-		}
-		return nil
-	})
-
-	return lo.UniqBy(res, func(n model.NodeSpec) string { return n.ID })
-}
-
-// IsJoinSatisfied 裁决汇聚网关（Join）的上游前置分支是否全部就绪
-// 支持递归穿透非任务型网关，并支持各分支以最大批次独立裁决（规避分支驳回重审批次脱节导致的死锁）
-func (p *ExecutionPlan) IsJoinSatisfied(joinNode model.NodeSpec, allTasks []*model.Task, batchCode int) bool {
-	// 只有显式声明为并行 (PARALLEL) 或包容 (INCLUSIVE) 的网关，才执行多分支同步汇聚屏障
-	// 排他网关 (EXCLUSIVE) 或普通节点直接放行 (首到即走)
-	if joinNode.Type != model.NodeGatewayParallel && joinNode.Type != model.NodeGatewayInclusive {
-		return true
-	}
-
-	inEdges := p.InEdges[joinNode.ID]
-	if len(inEdges) <= 1 {
-		return true // 非多路汇聚点，直接放行
-	}
-
-	var (
-		checkedNodeCount int
-		passedNodeCount  int
-	)
-
-	// 针对汇聚网关的每条入边分支，提取其有效前置任务节点集
-	for _, edge := range inEdges {
-		srcNode, ok := p.NodesMap[edge.Source]
-		if !ok {
-			continue
-		}
-
-		var checkNodes []model.NodeSpec
-		if srcNode.IsActivity() {
-			checkNodes = []model.NodeSpec{srcNode}
-		} else if srcNode.IsGateway() {
-			checkNodes = p.FindEffectivePrecedingTaskNodes(srcNode.ID)
-		}
-
-		// 若该前置分支没有包含任何物理任务节点（例如直接连自 Start 节点），则视为已就绪
-		if len(checkNodes) == 0 {
-			continue
-		}
-
-		for _, node := range checkNodes {
-			checkedNodeCount++
-			// 查找该前置节点产生的所有物理任务
-			nodeTasks := lo.Filter(allTasks, func(t *model.Task, _ int) bool {
-				return t.NodeID == node.ID
-			})
-			if len(nodeTasks) == 0 {
-				// 该分支尚未到达，未产生任何任务，汇聚屏障阻断
-				return false
-			}
-
-			// 核心防卫：取该节点最新产生的最大批次号任务进行流转状态裁决，避免不同分支因驳回重审导致批次号不相等而死锁
-			maxBatch := lo.MaxBy(nodeTasks, func(a, b *model.Task) bool {
-				return a.BatchCode > b.BatchCode
-			}).BatchCode
-
-			srcTasks := lo.Filter(nodeTasks, func(t *model.Task, _ int) bool {
-				return t.BatchCode == maxBatch
-			})
-
-			isPassed := IsNodeSatisfiedToAdvance(node, srcTasks)
-			if isPassed {
-				passedNodeCount++
-			}
-
-			if joinNode.Type == model.NodeGatewayParallel {
-				// 并行网关：必须全部分支的审批人都已满足该前置节点的流转规则 (或签需1人通过，会签需全部通过)
-				if !isPassed {
-					return false
-				}
-			} else if joinNode.Type == model.NodeGatewayInclusive {
-				// 包容网关：前置分支必须已定态 (节点满足流转通过条件 或 任务已被标记为跳过)
-				isResolved := isPassed || lo.SomeBy(srcTasks, func(t *model.Task) bool {
-					return t.Status == model.TaskSkipped
-				})
-				if !isResolved {
-					return false
-				}
-			}
-		}
-	}
-
-	// 安全防卫：包容汇聚网关如果所有前置分支 100% 全部都是 Skipped（没有任何一个真实节点通过）
-	// 则意味着本轮没有任何有效业务分支被激活，汇聚网关绝不能盲目开闸放行，必须阻断
-	if joinNode.Type == model.NodeGatewayInclusive && checkedNodeCount > 0 && passedNodeCount == 0 {
-		return false
-	}
-
-	return true
-}
-
-// FindUpstreamApprovalNode 逆向查找上一个可驳回的人工审批节点
-func (p *ExecutionPlan) FindUpstreamApprovalNode(currentNodeID string) (model.NodeSpec, error) {
-	inEdges := p.InEdges[currentNodeID]
-	if len(inEdges) == 0 {
-		return model.NodeSpec{}, fmt.Errorf("节点 [%s] 无上游前置节点", currentNodeID)
-	}
-
-	// 向上回溯
-	for _, edge := range inEdges {
-		prevNode, ok := p.NodesMap[edge.Source]
-		if !ok {
-			continue
-		}
-		if prevNode.Type == model.NodeApproval {
-			return prevNode, nil
-		}
-		if prevNode.IsGateway() {
-			return p.FindUpstreamApprovalNode(prevNode.ID)
-		}
-	}
-	return model.NodeSpec{}, fmt.Errorf("未找到有效的前置审批节点")
+	return true // 无任何规则约束，默认放行
 }

@@ -72,6 +72,23 @@ func (s *Storage) GetDefinition(ctx context.Context, key string, version int) (m
 	return toDefinitionDO(po)
 }
 
+// GetLatestVersion 根据流程业务唯一标识查询已发布的最大版本号，尚未发布过任何版本时返回 0, nil
+func (s *Storage) GetLatestVersion(ctx context.Context, key string) (int, error) {
+	var maxVersion *int
+	err := s.db.WithContext(ctx).
+		Model(&FlowDefinitionPO{}).
+		Where("proc_key = ?", key).
+		Select("MAX(version)").
+		Scan(&maxVersion).Error
+	if err != nil {
+		return 0, err
+	}
+	if maxVersion == nil {
+		return 0, nil
+	}
+	return *maxVersion, nil
+}
+
 func (s *Storage) SaveInstance(ctx context.Context, inst *model.Instance) error {
 	po, err := toInstancePO(inst)
 	if err != nil {
@@ -167,6 +184,57 @@ func (s *Storage) ListTasksByInstance(ctx context.Context, instID string) ([]*mo
 	}), nil
 }
 
+func (s *Storage) ListPendingTasksByInstances(ctx context.Context, instIDs []string) ([]*model.Task, error) {
+	if len(instIDs) == 0 {
+		return []*model.Task{}, nil
+	}
+
+	var pos []FlowTaskPO
+	err := s.db.WithContext(ctx).
+		Where("status = ? AND instance_id IN ?", uint8(model.TaskPending), instIDs).
+		Order("batch_code ASC, ctime ASC").
+		Find(&pos).Error
+	if err != nil {
+		return nil, err
+	}
+	return lo.Map(pos, func(po FlowTaskPO, _ int) *model.Task {
+		return toTaskDO(po)
+	}), nil
+}
+
+func (s *Storage) buildListPendingTasksQuery(tx *gorm.DB, assignee string) *gorm.DB {
+	query := tx.Model(&FlowTaskPO{}).Where("status = ?", uint8(model.TaskPending))
+	if assignee != "" {
+		query = query.Where("assignee = ?", assignee)
+	}
+	return query
+}
+
+func (s *Storage) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
+	var (
+		pos   []FlowTaskPO
+		total int64
+	)
+	query := s.buildListPendingTasksQuery(s.db.WithContext(ctx), assignee)
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return nil, 0, nil
+	}
+
+	err := query.Order("ctime DESC").Offset(offset).Limit(limit).Find(&pos).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	tasks := lo.Map(pos, func(po FlowTaskPO, _ int) *model.Task {
+		return toTaskDO(po)
+	})
+	return tasks, total, nil
+}
+
 func (s *Storage) UpdateTask(ctx context.Context, task *model.Task) error {
 	po := toTaskPO(task)
 	res := s.db.WithContext(ctx).Model(&FlowTaskPO{}).
@@ -194,9 +262,9 @@ func (s *Storage) UpdateTasksStatus(ctx context.Context, taskIDs []string, statu
 	updates := map[string]any{
 		"status": uint8(status),
 	}
-	// 终态任务同步持久化完成时间，防止重新从 DB 加载时丢失审计完成时间戳
+	// 终态任务同步持久化完成时间，防止重新从 DB 加载时丢失审计完成时间戳 (毫秒时间戳)
 	if status != model.TaskPending {
-		updates["ftime"] = now
+		updates["ftime"] = now.UnixMilli()
 	}
 	return s.db.WithContext(ctx).Model(&FlowTaskPO{}).
 		Where("id IN ?", taskIDs).

@@ -3,6 +3,7 @@ package flowx
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Duke1616/eflow/pkg/flowx/kernel"
@@ -20,30 +21,49 @@ func newDefaultExecutors(e *flowEngine) map[model.NodeType]nodeExecutor {
 	return map[model.NodeType]nodeExecutor{
 		model.NodeApproval:   &approvalNodeExecutor{engine: e},
 		model.NodeCarbonCopy: &carbonCopyNodeExecutor{engine: e},
+		model.NodeChatGroup:  &chatGroupNodeExecutor{engine: e},
 		model.NodeTask:       &taskNodeExecutor{engine: e},
 		model.NodeEnd:        &endNodeExecutor{},
 	}
 }
 
 // applyStepDecision 统一调度应用内核推导决策（保存Skip任务、汇聚等待、办结或派发新待办）
-func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession, dec *kernel.StepDecision, batchCode int, operator string) error {
+func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession, dec kernel.StepDecision, batchCode int, operator string) error {
 	inst := session.Instance()
 
 	// 1. 持久化未命中分支的 TaskSkipped 占位记录，供时间线渲染与汇聚感知
 	if len(dec.SkippedNodes) > 0 {
-		skippedTasks := lo.Map(dec.SkippedNodes, func(n model.NodeSpec, idx int) *model.Task {
+		skippedTasks := lo.FilterMap(dec.SkippedNodes, func(n model.NodeSpec, idx int) (*model.Task, bool) {
+			if n.IsGateway() {
+				return nil, false // 网关非物理审批节点，绝不生成 Task 记录
+			}
 			t := model.NewTask(e.idGen.GenTaskID(n.ID, "system_skip", batchCode, idx+1), inst.ID, n, batchCode, "system", model.TaskPending)
 			t.Skip("分支条件未满足，系统自动跳过")
-			return t
+			return t, true
 		})
-		_ = session.SaveTasks(ctx, skippedTasks)
+		if len(skippedTasks) > 0 {
+			_ = session.SaveTasks(ctx, skippedTasks)
 
-		for _, t := range skippedTasks {
-			e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, nil, t, "system", t.Comment))
+			for _, t := range skippedTasks {
+				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, nil, t, "system", t.Comment))
+			}
 		}
 	}
 
-	// 2. 若汇聚网关尚未全部就绪，流程实例保存当前流转上下文，等待其他兄弟分支推进
+	// 2. 联动更新排他汇聚竞争胜出后被跳过的兄弟分支未决待办
+	if len(dec.SkippedTaskIDs) > 0 {
+		if err := session.UpdateTasksStatus(ctx, dec.SkippedTaskIDs, model.TaskSkipped); err != nil {
+			return fmt.Errorf("批量更新排他汇聚竞争跳过任务失败: %w", err)
+		}
+		for _, taskID := range dec.SkippedTaskIDs {
+			if t, ok := session.GetTask(taskID); ok {
+				node := session.Plan().NodesMap[t.NodeID]
+				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, &node, t, "system", "排他分支竞争胜出，系统自动跳过"))
+			}
+		}
+	}
+
+	// 3. 若汇聚网关尚未全部就绪，流程实例保存当前流转上下文，等待其他兄弟分支推进
 	if dec.IsBlocked {
 		return session.SaveInstance(ctx)
 	}
@@ -53,7 +73,7 @@ func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession
 		return ErrNoAvailablePath
 	}
 
-	// 3. 统一激活就绪节点（按节点类型多态分发：办结、自动执行或派发待办任务）
+	// 4. 统一激活就绪节点（按节点类型多态分发：办结、自动执行或派发待办任务）
 	if err := e.activateNodes(ctx, session, dec.ReadyNodes, batchCode, operator); err != nil {
 		return err
 	}
@@ -73,9 +93,25 @@ func (e *flowEngine) activateNodes(ctx context.Context, session *flowSession, no
 	for _, node := range nodes {
 		inst.CurrentNode = node.ID
 
+		// 广播节点激活进入事件 (便于抄送知会、群通知及流程点亮追踪)
+		e.eventBus.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &node, operator, ""))
+
 		// 若当前节点为 End 且当前流转中已无任何等待态节点，全单圆满办结
 		if node.Type == model.NodeEnd {
 			if !hasActiveNodes {
+				// 终态防卫清理：流程全单办结时，确保所有残留的在途 Pending 任务全部置为 TaskSkipped
+				pendingTasks := lo.Filter(session.AllTasks(), func(t *model.Task, _ int) bool {
+					return t.IsPending()
+				})
+				if len(pendingTasks) > 0 {
+					pendingIDs := lo.Map(pendingTasks, func(t *model.Task, _ int) string { return t.ID })
+					_ = session.UpdateTasksStatus(ctx, pendingIDs, model.TaskSkipped)
+					for _, pt := range pendingTasks {
+						nodeSpec := session.Plan().NodesMap[pt.NodeID]
+						e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, &nodeSpec, pt, "system", "流程办结，系统自动跳过"))
+					}
+				}
+
 				inst.Finish(node.ID)
 				e.eventBus.Publish(ctx, NewNodeEvent(EventProcessFinished, inst, &node, operator, ""))
 			}
@@ -95,15 +131,32 @@ func (e *flowEngine) activateNodes(ctx context.Context, session *flowSession, no
 	return nil
 }
 
-// resolveAssignees 统一解析节点候选人列表（融合静态配置与同步Hook动态算人）
+// resolveAssignees 统一解析节点候选人列表（融合上下文内置占位符展开与同步Hook业务守卫）
 func (e *flowEngine) resolveAssignees(ctx context.Context, session *flowSession, node *model.NodeSpec, operator string) ([]string, error) {
-	assignees := lo.Uniq(append([]string{}, node.Assignees...))
+	inst := session.Instance()
+
+	// 1. 内置上下文占位符就地展开 (支持 starter / initiator 等自动映射为工单发起人)
+	rawAssignees := lo.Map(node.Assignees, func(assignee string, _ int) string {
+		trimmed := strings.TrimSpace(assignee)
+		switch trimmed {
+		case model.AssigneeStarter, model.AssigneeInitiator, "starter", "founder":
+			if inst != nil && inst.Starter != "" {
+				return inst.Starter
+			}
+		}
+		return trimmed
+	})
+
+	assignees := lo.Uniq(lo.Filter(rawAssignees, func(a string, _ int) bool {
+		return a != ""
+	}))
+
+	// 2. 触发节点声明的同步业务守卫 Hook (如有)
 	if len(node.Hooks) == 0 {
 		return assignees, nil
 	}
 
-	inst := session.Instance()
-	hookCtx := NewHookContext(inst, node, operator, inst.Variables, assignees)
+	hookCtx := NewHookContext(inst, node, operator, assignees)
 	if err := e.hooks.Execute(ctx, node.Hooks, hookCtx); err != nil {
 		return nil, err
 	}
@@ -270,4 +323,33 @@ type endNodeExecutor struct{}
 
 func (x *endNodeExecutor) Execute(ctx context.Context, session *flowSession, node model.NodeSpec, batchCode int, operator string) error {
 	return nil
+}
+
+// chatGroupNodeExecutor 群聊通知节点执行器 (职责明确：记录任务快照、广播群聊通知事件、瞬时穿透推进下一节点)
+type chatGroupNodeExecutor struct {
+	engine *flowEngine
+}
+
+func (x *chatGroupNodeExecutor) Execute(ctx context.Context, session *flowSession, node model.NodeSpec, batchCode int, operator string) error {
+	inst := session.Instance()
+
+	// 1. 生成并落库已通过的任务快照，供拓扑高亮推导 (traverser) 与上层通知链路消费
+	taskID := x.engine.idGen.GenTaskID(node.ID, "chat_group", batchCode, 1)
+	chatTask := model.NewTask(taskID, inst.ID, node, batchCode, "chat_group", model.TaskPending)
+	chatTask.Pass("群聊通知自动完成")
+	if err := session.SaveTasks(ctx, []*model.Task{chatTask}); err != nil {
+		return err
+	}
+
+	// 2. 广播群聊通知节点激活与任务通过事件
+	x.engine.eventBus.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &node, operator, "群聊通知自动穿透"))
+	x.engine.eventBus.Publish(ctx, NewTaskEvent(EventTaskPassed, inst, &node, chatTask, operator, "群聊通知自动完成"))
+
+	// 3. 瞬时自动穿透推进：驱动群聊通知节点下一步流转决策
+	nextDec, err := session.Plan().ResolveNextStep(node.ID, inst.Variables, session.AllTasks(), batchCode)
+	if err != nil {
+		return err
+	}
+
+	return x.engine.applyStepDecision(ctx, session, nextDec, batchCode, operator)
 }

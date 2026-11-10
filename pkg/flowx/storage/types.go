@@ -8,8 +8,8 @@ import (
 )
 
 var (
-	ErrInstanceNotFound = errors.New("流程实例不存在")
-	ErrTaskNotFound     = errors.New("流程任务不存在")
+	ErrInstanceNotFound   = errors.New("流程实例不存在")
+	ErrTaskNotFound       = errors.New("流程任务不存在")
 	ErrDefinitionNotFound = errors.New("流程定义未找到")
 )
 
@@ -20,9 +20,12 @@ type IDefinitionStorage interface {
 
 	// GetDefinition 根据业务唯一标识与版本号加载流程图定义，不存在时返回 ErrDefinitionNotFound
 	GetDefinition(ctx context.Context, key string, version int) (model.ProcessDefinition, error)
+
+	// GetLatestVersion 根据流程业务唯一标识查询已发布的最大版本号，尚未发布过任何版本时返回 0, nil
+	GetLatestVersion(ctx context.Context, key string) (int, error)
 }
 
-// IInstanceStorage 流程实例运行态存储接口，负责实例生命周期推进与状态快照管理
+// IInstanceStorage 流程实例运行态存储接口，负责实例生命周期推进与状态快照管理（聚合根实体指针）
 type IInstanceStorage interface {
 	// SaveInstance 保存或更新流程实例状态与变量快照，在节点转移、变量合并或流程办结时同步最新上下文
 	SaveInstance(ctx context.Context, inst *model.Instance) error
@@ -34,7 +37,7 @@ type IInstanceStorage interface {
 	GetInstanceForUpdate(ctx context.Context, id string) (*model.Instance, error)
 }
 
-// ITaskStorage 审批与任务明细存储接口，负责高频任务流转、状态批量变更及并发锁控制
+// ITaskStorage 审批与任务明细存储接口，负责高频任务流转、状态批量变更及并发锁控制（流转任务实体指针）
 type ITaskStorage interface {
 	// SaveTasks 批量持久化新生成的节点审批任务，保证同批次（BatchCode）任务原子写入
 	SaveTasks(ctx context.Context, tasks []*model.Task) error
@@ -47,6 +50,12 @@ type ITaskStorage interface {
 
 	// ListTasksByInstance 查询指定流程实例下的所有历史与待办任务列表，用于会签仲裁与组装审计时间线
 	ListTasksByInstance(ctx context.Context, instID string) ([]*model.Task, error)
+
+	// ListPendingTasksByInstances 批量获取多个流程实例列表中当前处于待办状态的审批任务（一条 SQL 批量 IN 查询）
+	ListPendingTasksByInstances(ctx context.Context, instIDs []string) ([]*model.Task, error)
+
+	// ListPendingTasksByAssignee 分页查询指派给当前用户的待办任务列表，按创建时间倒序返回
+	ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error)
 
 	// UpdateTask 更新单条审批任务的处理结果（状态、实际处理人、审批意见及完成时间）
 	UpdateTask(ctx context.Context, task *model.Task) error

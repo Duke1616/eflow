@@ -1,0 +1,151 @@
+package strategy
+
+import (
+	"context"
+
+	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
+	"github.com/Duke1616/eflow/internal/pkg/notification"
+)
+
+type NodeName string
+
+const (
+	Start      NodeName = "START"       // 开始节点
+	Automation NodeName = "AUTOMATION"  // 自动化节点
+	User       NodeName = "USER"        // 用户审批节点
+	CarbonCopy NodeName = "CARBON_COPY" // 抄送节点 (Carbon Copy)
+	ChatGroup  NodeName = "CHAT_GROUP"  // 群通知节点
+)
+
+type Channel string
+
+const (
+	ChannelLarkCard Channel = "LARK_CARD"
+	ChannelWechat   Channel = "WECHAT"
+	ChannelEmail    Channel = "EMAIL"
+	ChannelInApp    Channel = "IN_APP"
+)
+
+// CurrentNode 承载当前触发通知事件的节点基本信息（纯领域轻量结构，杜绝第三方模型渗透）
+type CurrentNode struct {
+	NodeID   string   // 节点唯一标识
+	NodeName string   // 节点名称
+	UserIDs  []string // 候选/分配的用户标识列表
+}
+
+// Task 承载通知策略所需处理的流转任务概要信息
+type Task struct {
+	EngineType domain.EngineType // 所属工作流底层引擎类型
+	TaskID     domain.ID         // 任务全局统一强类型自适应标识 (兼容数字与现代字符串形态)
+	UserID     string            // 任务分配的处理人
+	IsCosigned int               // 是否会签任务 (1: 会签, 0: 或签/普通)
+}
+
+type FlowContext struct {
+	InstID      int             // 流程实例 ID
+	Ticket      domain.Ticket   // 工单实体
+	Workflow    domain.Workflow // 流程定义快照
+	Instance    domain.Instance // 引擎实例状态
+	CurrentNode *CurrentNode    // 当前触发事件的节点
+	Nodes       []*flowdsl.Node // 解析后的流程节点
+}
+
+// ResolveInstanceID 返回自适应的流程实例唯一标识（优先取工单关联标识，兜底使用整型 ID）
+func (f FlowContext) ResolveInstanceID() domain.ID {
+	if !f.Ticket.Process.InstanceID.IsZero() {
+		return f.Ticket.Process.InstanceID
+	}
+	if f.InstID > 0 {
+		return domain.NewID(f.InstID)
+	}
+	return ""
+}
+
+type Info struct {
+	NodeName    NodeName `json:"node_name"` // 节点名称
+	Channel     Channel  `json:"channel"`   // 通知渠道
+	FlowContext          // 嵌入流程上下文
+}
+
+// SendStrategy 针对不同节点的策略接口
+type SendStrategy interface {
+	Send(ctx context.Context, info Info) (notification.Response, error)
+}
+
+type Dispatcher struct {
+	strategies      map[NodeName]SendStrategy
+	defaultStrategy SendStrategy
+	base            Service
+}
+
+// NewDispatcher 构建策略分发器，内部基于策略注册表模式组织各节点处理策略，遵循开闭原则 (OCP)
+func NewDispatcher(user SendStrategy, auto SendStrategy,
+	start SendStrategy, chat SendStrategy, carbonCopy SendStrategy, base Service) *Dispatcher {
+	strategies := make(map[NodeName]SendStrategy, 5)
+	if start != nil {
+		strategies[Start] = start
+	}
+	if auto != nil {
+		strategies[Automation] = auto
+	}
+	if user != nil {
+		strategies[User] = user
+	}
+	if carbonCopy != nil {
+		strategies[CarbonCopy] = carbonCopy
+	}
+	if chat != nil {
+		strategies[ChatGroup] = chat
+	}
+
+	return &Dispatcher{
+		strategies:      strategies,
+		defaultStrategy: user,
+		base:            base,
+	}
+}
+
+// Register 动态注册或覆盖指定节点名称对应的通知发送策略
+func (d *Dispatcher) Register(name NodeName, s SendStrategy) {
+	if d.strategies == nil {
+		d.strategies = make(map[NodeName]SendStrategy)
+	}
+	d.strategies[name] = s
+}
+
+func (d *Dispatcher) Send(ctx context.Context, info Info) (notification.Response, error) {
+	strategy := d.selectStrategy(info)
+
+	// 1. 预解析流程节点，避免策略内重复解析
+	if nodes, err := UnmarshalNodes(info.Workflow); err == nil {
+		info.Nodes = nodes
+	}
+
+	// 2. 分发器根据流程属性注入通知渠道类型
+	if info.Channel == "" {
+		info.Channel = getChannel(info.Workflow)
+	}
+
+	return strategy.Send(ctx, info)
+}
+
+// GetChannel 根据流程配置获取通知渠道
+func getChannel(wf domain.Workflow) Channel {
+	// 这里 wf.NotifyMethod 为 2 则为微信，1 为飞书
+	switch wf.NotifyMethod {
+	case 1:
+		return ChannelLarkCard
+	case 2:
+		return ChannelWechat
+	default:
+		return ChannelLarkCard
+	}
+}
+
+func (d *Dispatcher) selectStrategy(not Info) SendStrategy {
+	if s, ok := d.strategies[not.NodeName]; ok && s != nil {
+		return s
+	}
+	return d.defaultStrategy
+}

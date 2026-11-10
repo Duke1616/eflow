@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 )
 
 const (
@@ -18,7 +18,7 @@ const (
 	localShortTimeLayout    = "15:04"
 )
 
-func (s *taskService) calculateScheduledAt(automation easyflow.AutomationProperty,
+func (s *taskService) calculateScheduledAt(automation flowdsl.AutoTaskConfig,
 	input domain.TaskArgs, ticketTemplateID int64) (int64, error) {
 	schedule, err := resolveAutomationSchedule(automation)
 	if err != nil {
@@ -27,9 +27,9 @@ func (s *taskService) calculateScheduledAt(automation easyflow.AutomationPropert
 
 	now := time.Now()
 	switch schedule.Type {
-	case easyflow.ScheduleImmediate:
+	case flowdsl.ScheduleImmediate:
 		return now.UnixMilli(), nil
-	case easyflow.ScheduleDelay:
+	case flowdsl.ScheduleDelay:
 		quantity, quantityErr := resolveDelayQuantity(schedule, input, ticketTemplateID)
 		if quantityErr != nil {
 			return 0, quantityErr
@@ -39,7 +39,7 @@ func (s *taskService) calculateScheduledAt(automation easyflow.AutomationPropert
 			return 0, durationErr
 		}
 		return now.Add(duration).UnixMilli(), nil
-	case easyflow.ScheduleAt:
+	case flowdsl.ScheduleAt:
 		if err = validateTemplateSource(schedule.Source, ticketTemplateID); err != nil {
 			return 0, err
 		}
@@ -60,21 +60,21 @@ func (s *taskService) calculateScheduledAt(automation easyflow.AutomationPropert
 	}
 }
 
-// resolveAutomationSchedule 统一当前调度模型与历史节点配置的读取入口。
-func resolveAutomationSchedule(automation easyflow.AutomationProperty) (easyflow.ScheduleConfig, error) {
+// resolveAutomationSchedule 提取自动化执行调度规格（若未显式配置则为立即执行）
+func resolveAutomationSchedule(automation flowdsl.AutoTaskConfig) (flowdsl.ScheduleConfig, error) {
 	if automation.Schedule != nil {
 		return *automation.Schedule, nil
 	}
-	return adaptLegacySchedule(automation)
+	return flowdsl.ScheduleConfig{Type: flowdsl.ScheduleImmediate}, nil
 }
 
-func resolveDelayQuantity(schedule easyflow.ScheduleConfig, input domain.TaskArgs,
+func resolveDelayQuantity(schedule flowdsl.ScheduleConfig, input domain.TaskArgs,
 	ticketTemplateID int64) (int64, error) {
 	var quantity int64
 	switch schedule.Source.Type {
-	case easyflow.ScheduleSourceFixed:
+	case flowdsl.ScheduleSourceFixed:
 		quantity = schedule.Source.Value
-	case easyflow.ScheduleSourceTemplateField:
+	case flowdsl.ScheduleSourceTemplateField:
 		if err := validateTemplateSource(schedule.Source, ticketTemplateID); err != nil {
 			return 0, err
 		}
@@ -92,8 +92,8 @@ func resolveDelayQuantity(schedule easyflow.ScheduleConfig, input domain.TaskArg
 	return quantity, nil
 }
 
-func validateTemplateSource(source easyflow.ScheduleSource, ticketTemplateID int64) error {
-	if source.Type != easyflow.ScheduleSourceTemplateField {
+func validateTemplateSource(source flowdsl.ScheduleSource, ticketTemplateID int64) error {
+	if source.Type != flowdsl.ScheduleSourceTemplateField {
 		return fmt.Errorf("指定时间必须来自模板字段")
 	}
 	if source.Field == "" {
@@ -105,13 +105,13 @@ func validateTemplateSource(source easyflow.ScheduleSource, ticketTemplateID int
 	return nil
 }
 
-func scheduleDuration(quantity int64, unit easyflow.ScheduleUnit) (time.Duration, error) {
+func scheduleDuration(quantity int64, unit flowdsl.ScheduleUnit) (time.Duration, error) {
 	switch unit {
-	case easyflow.ScheduleUnitMinute:
+	case flowdsl.ScheduleUnitMinute:
 		return time.Duration(quantity) * time.Minute, nil
-	case easyflow.ScheduleUnitHour:
+	case flowdsl.ScheduleUnitHour:
 		return time.Duration(quantity) * time.Hour, nil
-	case easyflow.ScheduleUnitDay:
+	case flowdsl.ScheduleUnitDay:
 		return time.Duration(quantity) * 24 * time.Hour, nil
 	default:
 		return 0, fmt.Errorf("不支持的延迟时间单位: %s", unit)
@@ -129,14 +129,14 @@ func scheduleLocation(name string) (*time.Location, error) {
 	return location, nil
 }
 
-func scheduleSourceLabel(source easyflow.ScheduleSource) string {
+func scheduleSourceLabel(source flowdsl.ScheduleSource) string {
 	if source.TimeField == "" {
 		return source.Field
 	}
 	return source.Field + " + " + source.TimeField
 }
 
-func resolveScheduledTime(source easyflow.ScheduleSource, input domain.TaskArgs, location *time.Location) (time.Time, error) {
+func resolveScheduledTime(source flowdsl.ScheduleSource, input domain.TaskArgs, location *time.Location) (time.Time, error) {
 	if source.TimeField == "" {
 		return parseScheduledTime(input[source.Field], location)
 	}
@@ -159,87 +159,77 @@ func parseScheduledClock(value any, location *time.Location) (time.Time, error) 
 	if value == nil {
 		return time.Time{}, fmt.Errorf("不能为空")
 	}
-	switch current := value.(type) {
+	switch raw := value.(type) {
 	case time.Time:
-		return current.In(location), nil
-	case int:
-		return time.UnixMilli(int64(current)).In(location), nil
-	case int64:
-		return time.UnixMilli(current).In(location), nil
-	case float64:
-		if current != float64(int64(current)) {
-			return time.Time{}, fmt.Errorf("必须是有效时间")
-		}
-		return time.UnixMilli(int64(current)).In(location), nil
+		return raw.In(location), nil
 	case string:
-		normalized := strings.TrimSpace(current)
-		if normalized == "" {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
 			return time.Time{}, fmt.Errorf("不能为空")
 		}
-		for _, layout := range []string{localTimeLayout, localShortTimeLayout} {
-			if parsed, err := time.ParseInLocation(layout, normalized, location); err == nil {
-				return parsed, nil
-			}
-		}
-		if parsed, err := time.Parse(time.RFC3339, normalized); err == nil {
-			return parsed.In(location), nil
-		}
-		if parsed, err := time.ParseInLocation(localDateTimeLayout, normalized, location); err == nil {
+		if parsed, err := time.ParseInLocation(localTimeLayout, trimmed, location); err == nil {
 			return parsed, nil
 		}
+		if parsed, err := time.ParseInLocation(localShortTimeLayout, trimmed, location); err == nil {
+			return parsed, nil
+		}
+		return time.Time{}, fmt.Errorf("格式必须是 HH:mm:ss 或 HH:mm")
+	default:
+		return time.Time{}, fmt.Errorf("类型必须是时间字符串")
 	}
-	return time.Time{}, fmt.Errorf("必须是 HH:mm:ss、HH:mm 或日期时间格式")
 }
 
 func parseScheduledTime(value any, location *time.Location) (time.Time, error) {
-	switch current := value.(type) {
+	if value == nil {
+		return time.Time{}, fmt.Errorf("不能为空")
+	}
+	switch raw := value.(type) {
 	case time.Time:
-		return current, nil
-	case int:
-		return time.UnixMilli(int64(current)), nil
-	case int64:
-		return time.UnixMilli(current), nil
-	case float64:
-		if current != float64(int64(current)) {
-			return time.Time{}, fmt.Errorf("时间戳必须是整数")
-		}
-		return time.UnixMilli(int64(current)), nil
+		return raw.In(location), nil
 	case string:
-		normalized := strings.TrimSpace(current)
-		if normalized == "" {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
 			return time.Time{}, fmt.Errorf("不能为空")
 		}
-		if parsed, err := time.Parse(time.RFC3339, normalized); err == nil {
+		if parsed, err := time.Parse(time.RFC3339, trimmed); err == nil {
+			return parsed.In(location), nil
+		}
+		if parsed, err := time.ParseInLocation(localDateTimeLayout, trimmed, location); err == nil {
 			return parsed, nil
 		}
-		if parsed, err := time.ParseInLocation(localDateTimeLayout, normalized, location); err == nil {
+		if parsed, err := time.ParseInLocation(localDateLayout, trimmed, location); err == nil {
 			return parsed, nil
 		}
-		if parsed, err := time.ParseInLocation(localDateLayout, normalized, location); err == nil {
-			return parsed, nil
-		}
-		return time.Time{}, fmt.Errorf("必须是 RFC3339、YYYY-MM-DD HH:mm:ss 或 YYYY-MM-DD 格式")
+		return time.Time{}, fmt.Errorf("无法解析为有效时间格式")
 	default:
-		return time.Time{}, fmt.Errorf("必须是日期时间或毫秒时间戳")
+		return time.Time{}, fmt.Errorf("类型必须是时间字符串")
 	}
 }
 
 func parseQuantity(value any) (int64, error) {
-	switch current := value.(type) {
-	case int:
-		return int64(current), nil
-	case int64:
-		return current, nil
-	case float64:
-		if current != float64(int64(current)) {
-			return 0, fmt.Errorf("必须是整数")
-		}
-		return int64(current), nil
-	case string:
-		parsed, err := strconv.ParseInt(strings.TrimSpace(current), 10, 64)
-		if err == nil {
-			return parsed, nil
-		}
+	if value == nil {
+		return 0, fmt.Errorf("不能为空")
 	}
-	return 0, fmt.Errorf("必须是有效整数")
+	switch raw := value.(type) {
+	case int:
+		return int64(raw), nil
+	case int32:
+		return int64(raw), nil
+	case int64:
+		return raw, nil
+	case float64:
+		return int64(raw), nil
+	case string:
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			return 0, fmt.Errorf("不能为空")
+		}
+		parsed, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("必须是有效整数: %w", err)
+		}
+		return parsed, nil
+	default:
+		return 0, fmt.Errorf("无法识别的数字类型: %T", value)
+	}
 }

@@ -27,3 +27,26 @@ func NewETASKClient(cc ETASKConn) *ETASKClient {
 		SchedulerClient: schedulerv1.NewSchedulerServiceClient(cc),
 	}
 }
+
+// Client 统一汇聚 eflow 对 etask 系统的执行调度、日志查询与执行单元编排能力。
+type Client interface {
+	RunnerCatalog
+	TaskDispatcher
+	ExecutionReader
+}
+
+type compositeClient struct {
+	RunnerCatalog
+	TaskDispatcher
+	ExecutionReader
+}
+
+// NewClient 创建统一的 etask 客户端门面，消减分散依赖。
+func NewClient(gateway *ETASKClient) Client {
+	return &compositeClient{
+		RunnerCatalog:   NewRunnerCatalog(gateway),
+		TaskDispatcher:  NewTaskDispatcher(gateway),
+		ExecutionReader: NewExecutionReader(gateway),
+	}
+}
+

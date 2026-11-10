@@ -1,0 +1,703 @@
+package strategy
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"runtime/debug"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	notificationv1 "github.com/Duke1616/eflow/api/proto/gen/ealert/notification/v1"
+	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
+	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
+	"github.com/Duke1616/eflow/internal/pkg/notification"
+	"github.com/Duke1616/eflow/internal/pkg/rule"
+	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
+	"github.com/Duke1616/eflow/internal/service/engine/easyflow"
+	taskSvc "github.com/Duke1616/eflow/internal/service/task"
+	templateSvc "github.com/Duke1616/eflow/internal/service/template"
+	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
+	"github.com/ecodeclub/ekit/retry"
+	"github.com/gotomicro/ego/core/elog"
+	"github.com/samber/lo"
+	"golang.org/x/sync/errgroup"
+)
+
+// Service 提供所有通知策略共用的基础服务和辅助方法
+//
+//go:generate mockgen -source=./base.go -package=strategymocks -destination=../mocks/strategy.mock.go -typed Service
+type Service interface {
+	// FetchRequiredData 并行获取流程运行的基础通知元数据
+	FetchRequiredData(ctx context.Context, info Info, nodes []*flowdsl.Node) (*NotificationData, error)
+	// FetchTasksWithRetry 在引擎异步落库任务时重试查询任务信息
+	FetchTasksWithRetry(ctx context.Context, info Info) ([]Task, error)
+	// GetNode 查询获取指定流程节点的统一 DSL 节点模型
+	GetNode(info Info, nodeID string) ([]*flowdsl.Node, *flowdsl.Node, error)
+	// IsGlobalNotify 校验全局消息通知开关配置是否开启
+	IsGlobalNotify(wf domain.Workflow) bool
+	// PrepareCommonFields 解析工单数据构建通用属性公示字段
+	PrepareCommonFields(info Info, data *NotificationData) []notification.Field
+	// ResolveAssignees 并发解析当前节点的审批人名单并自动同步注入
+	ResolveAssignees(ctx context.Context, info *Info, assignees []flowdsl.Assignee) ([]domain.User, error)
+	// QueryUsersByUsernames 根据用户名批量获取用户领域实体（优先 EIAM 查询，失败时降级兜底）
+	QueryUsersByUsernames(ctx context.Context, usernames []string) []domain.User
+	// SafeGo 安全执行带 Panic 恢复机制的异步延时任务
+	SafeGo(ctx context.Context, timeout time.Duration, fn func(ctx context.Context))
+	// PassTask 调用工作流引擎接口物理流转推进指定任务
+	PassTask(ctx context.Context, engineType domain.EngineType, taskId domain.ID, remark string) error
+	// FindTaskForms 获取指定工单下所有审批节点填写的表单快照历史
+	FindTaskForms(ctx context.Context, ticketId int64) ([]domain.FormValue, error)
+	// Logger 获取系统日志输出句柄
+	Logger() *elog.Component
+}
+
+type service struct {
+	templateSvc     templateSvc.Service
+	userSvc         userv1.UserServiceClient
+	taskSvc         taskSvc.Service
+	orderSvc        ticketSvc.Service
+	engine          engineSvc.IEngine
+	engineSvc       easyflow.Service
+	recipientClient notificationv1.NotificationServiceClient
+	logger          *elog.Component
+
+	InitialInterval time.Duration
+	MaxInterval     time.Duration
+	MaxRetries      int32
+}
+
+// NewService 创建流程通知策略共享服务，并注入 EAlert 通用接收人解析客户端。
+func NewService(userSvc userv1.UserServiceClient, templateSvc templateSvc.Service,
+	taskSvc taskSvc.Service, orderSvc ticketSvc.Service, engine engineSvc.IEngine, engineSvc easyflow.Service,
+	recipientClient notificationv1.NotificationServiceClient) Service {
+	return &service{
+		templateSvc:     templateSvc,
+		userSvc:         userSvc,
+		taskSvc:         taskSvc,
+		orderSvc:        orderSvc,
+		engine:          engine,
+		engineSvc:       engineSvc,
+		recipientClient: recipientClient,
+		logger:          elog.DefaultLogger,
+		InitialInterval: 5 * time.Second,
+		MaxInterval:     15 * time.Second,
+		MaxRetries:      3,
+	}
+}
+
+func (s *service) PassTask(ctx context.Context, engineType domain.EngineType, taskId domain.ID, remark string) error {
+	return s.engine.Pass(ctx, domain.TaskPassReq{
+		EngineType: engineType,
+		TaskId:     taskId,
+		Operator:   "SYSTEM",
+		Comment:    remark,
+	})
+}
+
+func (s *service) FindTaskForms(ctx context.Context, ticketId int64) ([]domain.FormValue, error) {
+	return s.orderSvc.ListTaskFormsByTicketID(ctx, ticketId)
+}
+
+func (s *service) ResolveAssignees(ctx context.Context, info *Info, assignees []flowdsl.Assignee) ([]domain.User, error) {
+	if info == nil {
+		return nil, fmt.Errorf("流程上下文不能为空")
+	}
+
+	selectors, err := s.buildRecipientSelectors(ctx, info, assignees)
+	if err != nil {
+		s.logger.Warn("构建审批人选择器失败", elog.FieldErr(err))
+		return nil, nil
+	}
+	if len(selectors) == 0 {
+		return nil, nil
+	}
+
+	nodeID := lo.Ternary(info.CurrentNode != nil, info.CurrentNode.NodeID, "")
+
+	// 1. 尝试动态解析 (3 秒短超时，避免阻断主流程)
+	// 仅当选择器包含非静态直属用户（如部门主管、值班组等动态规则）时才请求 EAlert 服务
+	hasDynamicSelector := lo.SomeBy(selectors, func(s *notificationv1.RecipientSelector) bool {
+		return s.Type != notificationv1.RecipientSelectorType_RECIPIENT_USER
+	})
+	var userIDs []int64
+	if hasDynamicSelector {
+		userIDs = s.resolveDynamicUserIDs(ctx, selectors, nodeID, info.Workflow.Name)
+	} else {
+		// 纯静态用户选择器直接提取已绑定的用户 ID，无需调用外部动态服务
+		userIDs = lo.FlatMap(selectors, func(item *notificationv1.RecipientSelector, _ int) []int64 {
+			return item.TargetIds
+		})
+	}
+
+	// 2. 查询用户实体 (动态用户优先，静态指定与提单人降级兜底)
+	staticNames := extractStaticUsernames(assignees, info.Ticket.CreateBy)
+	users := s.queryDomainUsers(ctx, userIDs, staticNames, info.Ticket.CreateBy, nodeID)
+
+	// 3. 将有效处理人注入节点上下文，供引擎生成审批任务
+	if info.CurrentNode != nil && len(users) > 0 {
+		info.CurrentNode.UserIDs = lo.Map(users, func(u domain.User, _ int) string {
+			return u.Username
+		})
+	}
+
+	return users, nil
+}
+
+// resolveDynamicUserIDs 调用 EAlert 服务解析动态审批人（3s 短超时）
+func (s *service) resolveDynamicUserIDs(ctx context.Context, selectors []*notificationv1.RecipientSelector, nodeID, wfName string) []int64 {
+	if s.recipientClient == nil {
+		return nil
+	}
+
+	rpcCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	resp, err := s.recipientClient.ResolveRecipients(rpcCtx, &notificationv1.ResolveRecipientsRequest{
+		Recipients: selectors,
+	})
+	if err != nil {
+		s.logger.Warn("EAlert 审批人解析服务不可用或超时，跳过动态解析",
+			elog.FieldErr(err),
+			elog.String("nodeID", nodeID),
+			elog.String("workflow", wfName))
+		return nil
+	}
+	if resp == nil || resp.GetErrorCode() != notificationv1.ErrorCode_ERROR_CODE_UNSPECIFIED {
+		return nil
+	}
+	return resp.GetUserIds()
+}
+
+// queryDomainUsers 统一获取用户实体（按 ID 查询 -> 按用户名查询 -> 提单人/基础实体兜底）
+func (s *service) queryDomainUsers(ctx context.Context, userIDs []int64, staticNames []string, createBy, nodeID string) []domain.User {
+	// 动态解析成功时按 ID 查 EIAM
+	if len(userIDs) > 0 {
+		if resp, err := s.userSvc.QueryByIds(ctx, &userv1.QueryByIdsReq{Ids: userIDs}); err == nil && resp != nil {
+			if users := toDomainUsers(resp.GetUsers()); len(users) > 0 {
+				return users
+			}
+		}
+	}
+
+	// 动态解析无结果时，使用静态指定人员或提单人兜底
+	candidates := staticNames
+	if len(candidates) == 0 && createBy != "" {
+		candidates = []string{createBy}
+		s.logger.Warn("动态审批人解析失效，自动降级由提单人承接",
+			elog.String("nodeID", nodeID),
+			elog.String("fallbackUser", createBy))
+	}
+
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	if resp, err := s.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{Usernames: candidates}); err == nil && resp != nil {
+		if users := toDomainUsers(resp.GetUsers()); len(users) > 0 {
+			return users
+		}
+	}
+
+	// EIAM 不可用时直接以用户名构建基础实体，保障流程引擎正常运转
+	return lo.Map(candidates, func(name string, _ int) domain.User {
+		return domain.User{Username: name, DisplayName: name}
+	})
+}
+
+// QueryUsersByUsernames 根据用户名列表批量获取用户领域实体（优先 EIAM，不可用时降级为基础实体）
+func (s *service) QueryUsersByUsernames(ctx context.Context, usernames []string) []domain.User {
+	candidates := lo.Filter(usernames, func(name string, _ int) bool {
+		return strings.TrimSpace(name) != ""
+	})
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	if s.userSvc != nil {
+		if resp, err := s.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{Usernames: candidates}); err == nil && resp != nil {
+			if users := toDomainUsers(resp.GetUsers()); len(users) > 0 {
+				return users
+			}
+		}
+	}
+
+	return lo.Map(candidates, func(name string, _ int) domain.User {
+		return domain.User{Username: name, DisplayName: name}
+	})
+}
+
+// extractStaticUsernames 提取审批规则中明确指定的直接用户名或发起人
+func extractStaticUsernames(assignees []flowdsl.Assignee, createBy string) []string {
+	names := lo.FlatMap(assignees, func(a flowdsl.Assignee, _ int) []string {
+		switch a.Rule {
+		case flowdsl.APPOINT:
+			return a.Values
+		case flowdsl.FOUNDER:
+			if len(a.Values) > 0 && strings.TrimSpace(a.Values[0]) != "" {
+				return []string{a.Values[0]}
+			}
+			return lo.Ternary(createBy != "", []string{createBy}, nil)
+		default:
+			return nil
+		}
+	})
+	return lo.Uniq(lo.Filter(names, func(name string, _ int) bool {
+		return strings.TrimSpace(name) != ""
+	}))
+}
+
+func (s *service) SafeGo(ctx context.Context, timeout time.Duration, fn func(ctx context.Context)) {
+	// 继承外层上下文的所有键值（租户、链路追踪等），同时切断外层请求结束导致的取消信号
+	var baseCtx context.Context
+	if ctx != nil {
+		baseCtx = context.WithoutCancel(ctx)
+	} else {
+		baseCtx = context.Background()
+	}
+
+	go func() {
+		sendCtx, cancel := context.WithTimeout(baseCtx, timeout)
+		defer cancel()
+		defer func() {
+			if r := recover(); r != nil {
+				s.Logger().Error("异步任务执行发生 panic",
+					elog.Any("recover", r),
+					elog.FieldStack(debug.Stack()))
+			}
+		}()
+		fn(sendCtx)
+	}()
+}
+
+func (s *service) Logger() *elog.Component {
+	return s.logger
+}
+
+type NotificationData struct {
+	AutomationOutput map[string]interface{}
+	Rules            []rule.Rule
+	StartUser        domain.User
+	TName            string
+}
+
+func (s *service) FetchRequiredData(ctx context.Context, info Info, nodes []*flowdsl.Node) (*NotificationData, error) {
+	var data NotificationData
+	errGroup, ctx := errgroup.WithContext(ctx)
+
+	errGroup.Go(func() error {
+		var err error
+		data.AutomationOutput, err = s.automationOutput(ctx, info.ResolveInstanceID(), nodes)
+		return err
+	})
+
+	errGroup.Go(func() error {
+		var err error
+		data.Rules, data.TName, err = s.getRules(ctx, info.Ticket)
+		return err
+	})
+
+	errGroup.Go(func() error {
+		resp, err := s.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{
+			Usernames: []string{info.Ticket.CreateBy},
+		})
+		if err != nil {
+			return err
+		}
+		if len(resp.Users) > 0 {
+			data.StartUser = domain.User{
+				Id:           resp.Users[0].Id,
+				Username:     resp.Users[0].Username,
+				DisplayName:  resp.Users[0].DisplayName,
+				Email:        resp.Users[0].Email,
+				Phone:        resp.Users[0].Phone,
+				LarkUserId:   resp.Users[0].LarkUserId,
+				WechatUserId: resp.Users[0].WechatUserId,
+				DepartmentId: resp.Users[0].DepartmentId,
+			}
+		}
+		return nil
+	})
+
+	if err := errGroup.Wait(); err != nil {
+		return nil, err
+	}
+	return &data, nil
+}
+
+func (s *service) FetchTasksWithRetry(ctx context.Context, info Info) ([]Task, error) {
+	strategy, err := retry.NewExponentialBackoffRetryStrategy(s.InitialInterval, s.MaxInterval, s.MaxRetries)
+	if err != nil {
+		return nil, err
+	}
+
+	for {
+		d, ok := strategy.Next()
+		if !ok {
+			return nil, fmt.Errorf("获取执行任务超过最大重试次数")
+		}
+
+		// 优先通过统一多态 IEngine 检索（自适应 easyflow 与 flowx），缺失时回退到 engineSvc
+		engineType := info.Ticket.Process.EngineType
+		if engineType == "" {
+			engineType = info.Workflow.ResolveEngineType()
+		}
+		var tasks []domain.TaskRecord
+		var taskErr error
+		if s.engine != nil {
+			instanceID := info.ResolveInstanceID()
+			tasks, taskErr = s.engine.GetTasksByCurrentNode(ctx, engineType, instanceID, info.CurrentNode.NodeID)
+		} else if s.engineSvc != nil {
+			tasks, taskErr = s.engineSvc.GetTasksByCurrentNodeId(ctx, info.InstID, info.CurrentNode.NodeID)
+		}
+
+		if taskErr == nil && len(tasks) > 0 {
+			s.logger.Debug("成功获取到节点任务信息",
+				elog.String("nodeId", info.CurrentNode.NodeID),
+				elog.Int("taskCount", len(tasks)))
+			return lo.Map(tasks, func(t domain.TaskRecord, _ int) Task {
+				return Task{
+					EngineType: engineType,
+					TaskID:     t.TaskID,
+					UserID:     t.ApprovedBy,
+					IsCosigned: t.IsCosigned,
+				}
+			}), nil
+		}
+
+		s.logger.Debug("尚未查询到节点任务，准备重试",
+			elog.Int("instId", info.InstID),
+			elog.String("nodeId", info.CurrentNode.NodeID),
+			elog.Duration("nextRetry", d))
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(d):
+			continue
+		}
+	}
+}
+
+func (s *service) getRules(ctx context.Context, oInfo domain.Ticket) ([]rule.Rule, string, error) {
+	t, err := s.templateSvc.DetailTemplate(ctx, oInfo.TemplateId)
+	if err != nil {
+		return nil, "", err
+	}
+
+	rules, err := rule.ParseRules(t.Rules)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return rules, t.Name, nil
+}
+
+func (s *service) automationOutput(ctx context.Context, instanceID domain.ID, nodes []*flowdsl.Node) (map[string]interface{}, error) {
+	mergedResult := make(map[string]interface{})
+	for _, node := range nodes {
+		if node.Type != flowdsl.NodeAutoTask {
+			continue
+		}
+		if result, err := s.fetchResult(ctx, instanceID, node.ID); err == nil {
+			for k, v := range result {
+				mergedResult[k] = v
+			}
+		}
+	}
+	return mergedResult, nil
+}
+
+func (s *service) fetchResult(ctx context.Context, instanceID domain.ID, nodeID string) (map[string]interface{}, error) {
+	result, err := s.taskSvc.FindTaskByNodeID(ctx, instanceID.Int64(), nodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	if result.Output == "" {
+		return nil, fmt.Errorf("返回值为空, 不做任何数据处理")
+	}
+
+	var data map[string]interface{}
+	if err = json.Unmarshal([]byte(result.Output), &data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (s *service) GetNode(info Info, nodeID string) ([]*flowdsl.Node, *flowdsl.Node, error) {
+	nodes := info.Nodes
+	var err error
+	if len(nodes) == 0 {
+		nodes, err = UnmarshalNodes(info.Workflow)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	node, ok := lo.Find(nodes, func(src *flowdsl.Node) bool {
+		return src != nil && src.ID == nodeID
+	})
+	if ok {
+		return nodes, node, nil
+	}
+	return nodes, nil, fmt.Errorf("未找到节点 %s", nodeID)
+}
+
+func (s *service) IsGlobalNotify(wf domain.Workflow) bool {
+	if !wf.IsNotify {
+		s.logger.Warn("流程全局消息通知已关闭", elog.Any("wfId", wf.Id))
+		return false
+	}
+	return true
+}
+
+// buildRecipientSelectors 将 EFlow 的审批规则转换为 EAlert 通用接收对象。
+// 工单模板字段、流程发起人等仅在这里处理，EAlert 不感知这些业务概念。
+func (s *service) buildRecipientSelectors(ctx context.Context, info *Info,
+	assignees []flowdsl.Assignee) ([]*notificationv1.RecipientSelector, error) {
+	if info == nil {
+		return nil, fmt.Errorf("流程上下文不能为空")
+	}
+	selectors := make([]*notificationv1.RecipientSelector, 0, len(assignees))
+	for _, assignee := range assignees {
+		if assignee.Rule == "" {
+			return nil, fmt.Errorf("审批规则类型不能为空")
+		}
+
+		switch assignee.Rule {
+		case flowdsl.APPOINT:
+			ids, err := s.userIDsByUsernames(ctx, assignee.Values)
+			if err != nil {
+				return nil, err
+			}
+			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_USER, ids)
+		case flowdsl.TEMPLATE:
+			usernames := lo.FlatMap(assignee.Values, func(field string, _ int) []string {
+				if value, ok := info.Ticket.Data[field]; ok {
+					return s.extractUsernamesFromField(field, value)
+				}
+				return nil
+			})
+			ids, err := s.userIDsByUsernames(ctx, usernames)
+			if err != nil {
+				return nil, err
+			}
+			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_USER, ids)
+		case flowdsl.FOUNDER, flowdsl.LEADER, flowdsl.MainLeader:
+			username := info.Ticket.CreateBy
+			if len(assignee.Values) > 0 && strings.TrimSpace(assignee.Values[0]) != "" {
+				username = assignee.Values[0]
+			}
+			if strings.TrimSpace(username) == "" {
+				return nil, fmt.Errorf("审批规则 %s 缺少发起人信息", assignee.Rule)
+			}
+			ids, err := s.userIDsByUsernames(ctx, []string{username})
+			if err != nil {
+				return nil, fmt.Errorf("解析发起人失败: %w", err)
+			}
+			typeName := notificationv1.RecipientSelectorType_RECIPIENT_USER
+			switch assignee.Rule {
+			case flowdsl.LEADER:
+				typeName = notificationv1.RecipientSelectorType_RECIPIENT_DEPARTMENT_LEADER
+			case flowdsl.MainLeader:
+				typeName = notificationv1.RecipientSelectorType_RECIPIENT_SUPERVISING_LEADER
+			}
+			selectors = appendUserSelector(selectors, typeName, ids)
+		case flowdsl.DEPARTMENT:
+			ids, err := parseRecipientIDs(assignee.Values)
+			if err != nil {
+				return nil, fmt.Errorf("解析部门 ID 失败: %w", err)
+			}
+			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_DEPARTMENT, ids)
+		case flowdsl.TEAM:
+			ids, err := parseRecipientIDs(assignee.Values)
+			if err != nil {
+				return nil, fmt.Errorf("解析团队 ID 失败: %w", err)
+			}
+			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_TEAM, ids)
+		case flowdsl.OnCall:
+			ids, err := parseRecipientIDs(assignee.Values)
+			if err != nil {
+				return nil, fmt.Errorf("解析值班计划 ID 失败: %w", err)
+			}
+			selectors = appendUserSelector(selectors, notificationv1.RecipientSelectorType_RECIPIENT_ONCALL, ids)
+		default:
+			return nil, fmt.Errorf("不支持的审批规则类型: %s", assignee.Rule)
+		}
+	}
+	return selectors, nil
+}
+
+func appendUserSelector(selectors []*notificationv1.RecipientSelector,
+	typeName notificationv1.RecipientSelectorType, ids []int64) []*notificationv1.RecipientSelector {
+	if len(ids) == 0 {
+		return selectors
+	}
+	return append(selectors, &notificationv1.RecipientSelector{Type: typeName, TargetIds: ids})
+}
+
+func (s *service) userIDsByUsernames(ctx context.Context, usernames []string) ([]int64, error) {
+	validNames := lo.Uniq(lo.FilterMap(usernames, func(u string, _ int) (string, bool) {
+		trimmed := strings.TrimSpace(u)
+		return trimmed, trimmed != ""
+	}))
+	if len(validNames) == 0 {
+		return nil, nil
+	}
+	response, err := s.userSvc.QueryByUsernames(ctx, &userv1.QueryByUsernamesReq{Usernames: validNames})
+	if err != nil {
+		return nil, fmt.Errorf("按用户名查询用户失败: %w", err)
+	}
+	if response == nil || response.GetErrorCode() != userv1.ErrorCode_ERROR_CODE_UNSPECIFIED {
+		return nil, fmt.Errorf("按用户名查询用户失败: %s", response.GetErrorMessage())
+	}
+	return lo.FilterMap(response.GetUsers(), func(user *userv1.User, _ int) (int64, bool) {
+		if user == nil || user.GetId() <= 0 {
+			return 0, false
+		}
+		return user.GetId(), true
+	}), nil
+}
+
+func parseRecipientIDs(values []string) ([]int64, error) {
+	ids := make([]int64, 0, len(values))
+	for _, value := range values {
+		id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil || id <= 0 {
+			return nil, fmt.Errorf("无效 ID [%s]", value)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func toDomainUsers(src []*userv1.User) []domain.User {
+	return lo.FilterMap(src, func(user *userv1.User, _ int) (domain.User, bool) {
+		if user == nil || user.GetId() <= 0 {
+			return domain.User{}, false
+		}
+		return domain.User{
+			Id: user.GetId(), DepartmentId: user.GetDepartmentId(), Username: user.GetUsername(),
+			DisplayName: user.GetDisplayName(), Email: user.GetEmail(), Phone: user.GetPhone(),
+			LarkUserId: user.GetLarkUserId(), WechatUserId: user.GetWechatUserId(),
+		}, true
+	})
+}
+
+func (s *service) extractUsernamesFromField(fieldName string, value interface{}) []string {
+	switch v := value.(type) {
+	case []string:
+		return v
+	case string:
+		return []string{v}
+	case []interface{}:
+		return lo.FilterMap(v, func(item interface{}, _ int) (string, bool) {
+			str, ok := item.(string)
+			return str, ok
+		})
+	default:
+		s.logger.Warn("模版字段类型不支持",
+			elog.String("field", fieldName),
+			elog.Any("type", fmt.Sprintf("%T", value)),
+			elog.Any("value", value))
+		return nil
+	}
+}
+
+func UnmarshalNodes(wf domain.Workflow) ([]*flowdsl.Node, error) {
+	graph, err := flowdsl.Parse(wf.FlowData)
+	if err != nil {
+		return nil, err
+	}
+	return graph.GetOrderedNodes(), nil
+}
+
+type RecipientMap struct {
+	users   map[string]domain.User
+	channel Channel
+}
+
+func NewRecipientMap(users []domain.User, channel Channel) RecipientMap {
+	return RecipientMap{
+		users:   lo.KeyBy(users, func(u domain.User) string { return u.Username }),
+		channel: channel,
+	}
+}
+
+func (rm RecipientMap) GetID(username string) string {
+	u, ok := rm.users[username]
+	if !ok {
+		return ""
+	}
+	return lo.Ternary(rm.channel == ChannelWechat, u.WechatUserId, u.LarkUserId)
+}
+
+// ConvertRuleFields 将 rule.Field 转换为 notification.Field
+func ConvertRuleFields(fields []rule.Field) []notification.Field {
+	return lo.Map(fields, func(src rule.Field, _ int) notification.Field {
+		return notification.Field{
+			IsShort: src.IsShort,
+			Tag:     src.Tag,
+			Content: src.Content,
+		}
+	})
+}
+
+// BuildAutomationOutputFields 构建自动化任务输出字段。
+func BuildAutomationOutputFields(output map[string]interface{}) []notification.Field {
+	keys := lo.Keys(output)
+	sort.Strings(keys)
+
+	fields := lo.Map(keys, func(k string, _ int) notification.Field {
+		return notification.Field{
+			IsShort: true,
+			Tag:     "lark_md",
+			Content: fmt.Sprintf("**%s:**\n%v", k, output[k]),
+		}
+	})
+	return notification.AddRowSpacers(fields)
+}
+
+// PrepareCommonFields 统一解析工单数据的公示字段
+func (s *service) PrepareCommonFields(info Info, data *NotificationData) []notification.Field {
+	ruleFields := rule.GetFields(data.Rules, info.Ticket.Provide.ToUint8(), info.Ticket.Data)
+	fields := lo.Map(ruleFields, func(src rule.Field, _ int) notification.Field {
+		return notification.Field{
+			IsShort: src.IsShort,
+			Tag:     src.Tag,
+			Content: src.Content,
+		}
+	})
+
+	for field, value := range data.AutomationOutput {
+		fields = append(fields, notification.Field{
+			IsShort: true,
+			Tag:     "lark_md",
+			Content: fmt.Sprintf(`**%s:**\n%v`, field, value),
+		})
+	}
+	return fields
+}
+
+// GetChatChannel 映射字符串渠道为 notification.Channel 类型
+func GetChatChannel(channel string) notification.Channel {
+	switch channel {
+	case "FEISHU", "LARK_CARD":
+		return notification.ChannelLarkCard
+	case "WECHAT":
+		return notification.ChannelWechat
+	default:
+		return notification.ChannelLarkCard
+	}
+}
+
+func (rm RecipientMap) GetIDs() []string {
+	return lo.FilterMap(lo.Values(rm.users), func(u domain.User, _ int) (string, bool) {
+		id := lo.Ternary(rm.channel == ChannelWechat, u.WechatUserId, u.LarkUserId)
+		return id, id != ""
+	})
+}

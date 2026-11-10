@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
 	"github.com/Duke1616/eflow/internal/repository"
 	"golang.org/x/sync/errgroup"
 )
@@ -38,10 +39,10 @@ type service struct {
 func (s *service) ReplaceFromTemplate(ctx context.Context, targetTemplateID,
 	sourceTemplateID int64) (int64, error) {
 	if targetTemplateID <= 0 || sourceTemplateID <= 0 {
-		return 0, fmt.Errorf("来源模板和目标模板必须有效")
+		return 0, errs.BadRequest("INVALID_TEMPLATE_ID", "来源模板和目标模板必须有效")
 	}
 	if targetTemplateID == sourceTemplateID {
-		return 0, fmt.Errorf("不能从当前模板复制路由规则")
+		return 0, errs.BadRequest("SAME_TEMPLATE", "不能从当前模板复制路由规则")
 	}
 	target, err := s.templates.DetailTemplate(ctx, targetTemplateID)
 	if err != nil {
@@ -52,7 +53,7 @@ func (s *service) ReplaceFromTemplate(ctx context.Context, targetTemplateID,
 		return 0, fmt.Errorf("查询来源模板失败: %w", err)
 	}
 	if target.WorkflowId <= 0 || target.WorkflowId != source.WorkflowId {
-		return 0, fmt.Errorf("只能复制同一工作流下的执行单元路由规则")
+		return 0, errs.BadRequest("DIFFERENT_WORKFLOW", "只能复制同一工作流下的执行单元路由规则")
 	}
 	rules, err := s.repo.ListAllByTemplateID(ctx, sourceTemplateID)
 	if err != nil {
@@ -65,7 +66,7 @@ func (s *service) ReplaceFromTemplate(ctx context.Context, targetTemplateID,
 		}
 		key := rules[i].AutomationNodeID + "\x00" + rules[i].Field + "\x00" + rules[i].Value
 		if _, exists := conditions[key]; exists {
-			return 0, fmt.Errorf("来源模板的自动化节点 %s 包含重复匹配条件", rules[i].AutomationNodeID)
+			return 0, errs.Conflict("DUPLICATE_CONDITION", fmt.Sprintf("来源模板的自动化节点 %s 包含重复匹配条件", rules[i].AutomationNodeID))
 		}
 		conditions[key] = struct{}{}
 	}
@@ -91,7 +92,7 @@ func (s *service) Create(ctx context.Context, req domain.Dispatch) (int64, error
 // Update 修改路由规则。
 func (s *service) Update(ctx context.Context, req domain.Dispatch) (int64, error) {
 	if req.Id <= 0 {
-		return 0, fmt.Errorf("路由规则 ID 非法")
+		return 0, errs.BadRequest("INVALID_DISPATCH_ID", "路由规则 ID 非法")
 	}
 	if err := normalizeAndValidate(&req, true); err != nil {
 		return 0, err
@@ -109,7 +110,7 @@ func (s *service) ensureConditionAvailable(ctx context.Context, req domain.Dispa
 		return fmt.Errorf("检查路由规则冲突失败: %w", err)
 	}
 	if exists {
-		return fmt.Errorf("当前自动化节点已经存在相同匹配条件")
+		return errs.Conflict("DISPATCH_CONDITION_CONFLICT", "当前自动化节点已经存在相同匹配条件")
 	}
 	return nil
 }
@@ -119,7 +120,7 @@ func normalizeAndValidate(req *domain.Dispatch, requireTemplate bool) error {
 	req.Field = strings.TrimSpace(req.Field)
 	req.Value = strings.TrimSpace(req.Value)
 	if requireTemplate && req.TemplateId <= 0 {
-		return fmt.Errorf("路由规则必须关联有效工单模板")
+		return errs.BadRequest("INVALID_TEMPLATE_ID", "路由规则必须关联有效工单模板")
 	}
 	if err := validateRunnerID(req.RunnerId); err != nil {
 		return err
@@ -128,13 +129,13 @@ func normalizeAndValidate(req *domain.Dispatch, requireTemplate bool) error {
 		return err
 	}
 	if req.Field == "" {
-		return fmt.Errorf("路由规则必须选择匹配字段")
+		return errs.BadRequest("INVALID_FIELD", "路由规则必须选择匹配字段")
 	}
 	if req.Value == "" {
-		return fmt.Errorf("路由规则必须填写匹配值")
+		return errs.BadRequest("INVALID_VALUE", "路由规则必须填写匹配值")
 	}
 	if len([]rune(req.Value)) > 255 {
-		return fmt.Errorf("路由规则匹配值不能超过 255 个字符")
+		return errs.BadRequest("VALUE_TOO_LONG", "路由规则匹配值不能超过 255 个字符")
 	}
 	if req.Priority <= 0 {
 		req.Priority = domain.DefaultDispatchPriority
@@ -144,14 +145,14 @@ func normalizeAndValidate(req *domain.Dispatch, requireTemplate bool) error {
 
 func validateAutomationNodeID(nodeID string) error {
 	if nodeID == "" {
-		return fmt.Errorf("路由规则必须关联自动化节点")
+		return errs.BadRequest("INVALID_NODE_ID", "路由规则必须关联自动化节点")
 	}
 	return nil
 }
 
 func validateRunnerID(runnerID int64) error {
 	if runnerID <= 0 {
-		return fmt.Errorf("路由规则必须选择有效的执行单元")
+		return errs.BadRequest("INVALID_RUNNER_ID", "路由规则必须选择有效的执行单元")
 	}
 	return nil
 }

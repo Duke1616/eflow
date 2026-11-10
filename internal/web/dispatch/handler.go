@@ -1,17 +1,31 @@
 package dispatch
 
 import (
-	etaskperm "github.com/Duke1616/etask/pkg/contract/permission"
+	"errors"
+
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	"github.com/Duke1616/eflow/pkg/contract/permission"
 	"github.com/Duke1616/eiam/pkg/web/capability"
+	etaskperm "github.com/Duke1616/etask/pkg/contract/permission"
 	"github.com/ecodeclub/ginx"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 )
 
 var systemErrorResult = ginx.Result{Code: 500, Msg: "系统内部错误"}
+
+// handleDispatchError 统一提取执行单元路由中的业务结构化错误，避免参数或冲突错误被兜底为系统内部错误
+func handleDispatchError(err error) (ginx.Result, error) {
+	if err == nil {
+		return ginx.Result{}, nil
+	}
+	if bizErr, ok := errors.AsType[*errs.Error](err); ok {
+		return ginx.Result{Code: int(bizErr.Code), Msg: bizErr.Message}, nil
+	}
+	return systemErrorResult, err
+}
 
 type Handler struct {
 	capability.IRegistry
@@ -56,7 +70,7 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 func (h *Handler) Create(ctx *ginx.Context, req CreateDispatchReq) (ginx.Result, error) {
 	id, err := h.svc.Create(ctx.Context, h.toDomain(req))
 	if err != nil {
-		return systemErrorResult, err
+		return handleDispatchError(err)
 	}
 
 	return ginx.Result{
@@ -68,7 +82,7 @@ func (h *Handler) Create(ctx *ginx.Context, req CreateDispatchReq) (ginx.Result,
 func (h *Handler) Delete(ctx *ginx.Context, req DeleteDispatchReq) (ginx.Result, error) {
 	id, err := h.svc.Delete(ctx.Context, req.Id)
 	if err != nil {
-		return systemErrorResult, err
+		return handleDispatchError(err)
 	}
 
 	return ginx.Result{
@@ -80,7 +94,7 @@ func (h *Handler) Delete(ctx *ginx.Context, req DeleteDispatchReq) (ginx.Result,
 func (h *Handler) ListByTemplateId(ctx *ginx.Context, req ListByTemplateId) (ginx.Result, error) {
 	rts, total, err := h.svc.ListByTemplateId(ctx.Context, req.Offset, req.Limit, req.TemplateId)
 	if err != nil {
-		return systemErrorResult, err
+		return handleDispatchError(err)
 	}
 
 	return ginx.Result{
@@ -97,7 +111,7 @@ func (h *Handler) ListByTemplateId(ctx *ginx.Context, req ListByTemplateId) (gin
 func (h *Handler) Sync(ctx *ginx.Context, req SyncDispatchReq) (ginx.Result, error) {
 	count, err := h.svc.ReplaceFromTemplate(ctx.Context, req.TemplateId, req.SyncTemplateId)
 	if err != nil {
-		return systemErrorResult, err
+		return handleDispatchError(err)
 	}
 	return ginx.Result{
 		Msg:  "复制成功",
@@ -108,7 +122,7 @@ func (h *Handler) Sync(ctx *ginx.Context, req SyncDispatchReq) (ginx.Result, err
 func (h *Handler) Update(ctx *ginx.Context, req UpdateDispatchReq) (ginx.Result, error) {
 	id, err := h.svc.Update(ctx.Context, h.toUpdateDomain(req))
 	if err != nil {
-		return systemErrorResult, err
+		return handleDispatchError(err)
 	}
 
 	return ginx.Result{

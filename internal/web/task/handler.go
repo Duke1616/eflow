@@ -1,16 +1,18 @@
 package task
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
-	etaskperm "github.com/Duke1616/etask/pkg/contract/permission"
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	"github.com/Duke1616/eflow/pkg/contract/model"
 	"github.com/Duke1616/eflow/pkg/contract/permission"
 	"github.com/Duke1616/eiam/pkg/web/capability"
+	etaskperm "github.com/Duke1616/etask/pkg/contract/permission"
 	"github.com/ecodeclub/ginx"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
@@ -40,9 +42,11 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 	group.POST("/list", h.Define("自动化任务列表", "view").
 		Bind(ginx.B[ListTaskReq](h.ListTask)))
 
-	group.POST("/list/by_instance_id", h.For(model.Manager).Define("关联自动化任务", "view_tasks").
+	listByTicket := h.For(model.Manager).Define("关联自动化任务", "view_tasks").
 		Group("工单中心/工单详情").
-		Bind(ginx.B[ListTaskByInstanceIDReq](h.ListTaskByInstanceID)))
+		Bind(ginx.B[ListTaskByTicketIDReq](h.ListTaskByTicketID))
+	group.POST("/list/by_ticket_id", listByTicket)
+	group.POST("/list/by_instance_id", listByTicket)
 
 	group.POST("/retry", h.Define("重试自动化任务", "retry").
 		Bind(ginx.B[RetryReq](h.Retry)))
@@ -69,15 +73,15 @@ func (h *Handler) ListTask(ctx *ginx.Context, req ListTaskReq) (ginx.Result, err
 	return ginx.Result{Msg: "success", Data: RetrieveTasks{Total: total, Tasks: mapTasks(tasks)}}, nil
 }
 
-func (h *Handler) ListTaskByInstanceID(ctx *ginx.Context,
-	req ListTaskByInstanceIDReq) (ginx.Result, error) {
-	if req.InstanceID <= 0 {
-		return invalidParameterResult(fmt.Errorf("流程实例 ID 非法")), nil
+func (h *Handler) ListTaskByTicketID(ctx *ginx.Context,
+	req ListTaskByTicketIDReq) (ginx.Result, error) {
+	if req.TicketID <= 0 {
+		return invalidParameterResult(fmt.Errorf("工单 ID 不能为空")), nil
 	}
 	if err := normalizePage(&req.Page); err != nil {
 		return invalidParameterResult(err), nil
 	}
-	tasks, total, err := h.svc.ListTaskByInstanceID(ctx, req.Offset, req.Limit, req.InstanceID)
+	tasks, total, err := h.svc.ListTaskByTicketID(ctx, req.Offset, req.Limit, req.TicketID)
 	if err != nil {
 		return systemErrorResult, err
 	}
@@ -89,7 +93,7 @@ func (h *Handler) Retry(ctx *ginx.Context, req RetryReq) (ginx.Result, error) {
 		return invalidParameterResult(fmt.Errorf("自动化任务 ID 非法")), nil
 	}
 	if err := h.svc.RetryTask(ctx, req.ID); err != nil {
-		return systemErrorResult, err
+		return handleTaskError(err)
 	}
 	return ginx.Result{Msg: "success"}, nil
 }
@@ -100,9 +104,20 @@ func (h *Handler) Terminate(ctx *ginx.Context, req TerminateReq) (ginx.Result, e
 		return invalidParameterResult(fmt.Errorf("自动化任务 ID 非法或终止原因为空/超过 500 字")), nil
 	}
 	if err := h.svc.TerminateTask(ctx, req.ID, req.Reason); err != nil {
-		return systemErrorResult, err
+		return handleTaskError(err)
 	}
 	return ginx.Result{Msg: "success"}, nil
+}
+
+// handleTaskError 统一映射自动化任务运维中的领域业务错误
+func handleTaskError(err error) (ginx.Result, error) {
+	if err == nil {
+		return ginx.Result{}, nil
+	}
+	if bizErr, ok := errors.AsType[*errs.Error](err); ok {
+		return ginx.Result{Code: int(bizErr.Code), Msg: bizErr.Message}, nil
+	}
+	return systemErrorResult, err
 }
 
 func (h *Handler) ListAttempts(ctx *ginx.Context, req ListAttemptsReq) (ginx.Result, error) {
@@ -156,14 +171,17 @@ func normalizePage(page *Page) error {
 func mapTasks(tasks []domain.Task) []Task {
 	return lo.Map(tasks, func(task domain.Task, _ int) Task {
 		return Task{
-			ID: task.ID, TicketID: task.TicketID, ProcessInstanceID: task.ProcessInstanceID,
-			NodeID: task.NodeID, NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
-			Status: task.Status.ToUint8(), Phase: string(task.Phase),
-			ScheduledAt: task.ScheduledAt, OriginalScheduledAt: task.OriginalScheduledAt,
-			CompensationNodeID: task.CompensationNodeID,
-			IsCompensation:     task.ExecutionKind == domain.TaskExecutionCompensation,
-			CurrentAttemptID:   task.CurrentAttemptID, AdvancedAt: task.AdvancedAt,
-			CancelledAt: task.CancelledAt, LastError: task.LastError,
+			ID: task.ID, TicketID: task.TicketID,
+			ProcessInstanceID: task.InstanceID.Int64(),
+			NodeID:            task.NodeID, NodeName: task.NodeName, ProcessVersion: task.ProcessVersion,
+			Status:              task.Status.ToUint8(),
+			Phase:               string(task.Status.ToPhase()),
+			ScheduledAt:         task.ScheduledAt,
+			OriginalScheduledAt: task.ScheduledAt,
+			CompensationNodeID:  task.CompensationNodeID,
+			IsCompensation:      task.ExecutionKind == domain.TaskExecutionCompensation,
+			CurrentAttemptID:    task.CurrentAttemptID, AdvancedAt: task.AdvancedAt,
+			CancelledAt: 0, LastError: task.LastError,
 			CTime: task.CTime, UTime: task.UTime,
 		}
 	})

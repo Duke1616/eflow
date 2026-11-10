@@ -72,8 +72,13 @@ func assigneePreset() pbac.AccessScopePreset {
 
 const (
 	historyRelatedUsersSQL = "(ticket.create_by = ? OR " +
+		"(ticket.engine_type = 'flowx' AND EXISTS (" +
+		"SELECT 1 FROM flow_task pbac_ft WHERE pbac_ft.instance_id = ticket.process_instance_key AND pbac_ft.assignee = ?" +
+		")) OR " +
+		"(ticket.engine_type = 'easy-workflow' AND (" +
 		"EXISTS (SELECT 1 FROM proc_task pbac_pt WHERE pbac_pt.proc_inst_id = ticket.process_instance_id AND pbac_pt.user_id = ?) OR " +
-		"EXISTS (SELECT 1 FROM hist_proc_task pbac_ht WHERE pbac_ht.proc_inst_id = ticket.process_instance_id AND pbac_ht.user_id = ?))"
+		"EXISTS (SELECT 1 FROM hist_proc_task pbac_ht WHERE pbac_ht.proc_inst_id = ticket.process_instance_id AND pbac_ht.user_id = ?)" +
+		")))"
 	todoRelatedUsersSQL = "(t.create_by = ? OR " +
 		"EXISTS (SELECT 1 FROM proc_task pbac_pt WHERE pbac_pt.proc_inst_id = t.process_instance_id AND pbac_pt.user_id = ?) OR " +
 		"EXISTS (SELECT 1 FROM hist_proc_task pbac_ht WHERE pbac_ht.proc_inst_id = t.process_instance_id AND pbac_ht.user_id = ?))"
@@ -129,11 +134,14 @@ func membership(operator pbac.Operator, values []any, fragment string) (pbacgorm
 	if operator != pbac.ForAnyValueStringEquals {
 		return pbacgorm.Expression{}, fmt.Errorf("operator %q is not allowed for membership", operator)
 	}
+	placeholderCount := strings.Count(fragment, "?")
 	clauses := make([]string, 0, len(values))
-	args := make([]any, 0, len(values)*3)
+	args := make([]any, 0, len(values)*placeholderCount)
 	for _, value := range values {
 		clauses = append(clauses, fragment)
-		args = append(args, value, value, value)
+		for i := 0; i < placeholderCount; i++ {
+			args = append(args, value)
+		}
 	}
 	return pbacgorm.Expression{
 		SQL:  strings.Join(clauses, " OR "),

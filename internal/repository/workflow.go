@@ -8,7 +8,11 @@ import (
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/pkg/sqlx"
 	"github.com/samber/lo"
+	"gorm.io/gorm"
 )
+
+// ErrWorkflowNotFound 工作流定义不存在
+var ErrWorkflowNotFound = gorm.ErrRecordNotFound
 
 // IWorkflowCoreRepository 工作流核心定义仓储子接口
 type IWorkflowCoreRepository interface {
@@ -40,6 +44,10 @@ type ISnapshotRepository interface {
 	CreateSnapshot(ctx context.Context, workflow domain.Workflow, processID, processVersion int) error
 	// FindSnapshot 根据引擎分配的唯一流程模板 ID 和具体部署版本号检索对应的流程设计原始画布快照
 	FindSnapshot(ctx context.Context, processID, processVersion int) (domain.Workflow, error)
+	// FindSnapshotByWorkflowVersion 根据工作流 ID、引擎类型及版本精确加载物理快照
+	FindSnapshotByWorkflowVersion(ctx context.Context, workflowID int64, engineType domain.EngineType, version int) (domain.Workflow, error)
+	// GetMaxSnapshotVersion 获取指定工作流在特定引擎类型下当前最大的快照发布版本号
+	GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...domain.EngineType) (int, error)
 }
 
 // IWorkflowRepository 工作流仓储层大组合接口 (采用接口隔离原则拆分，再经由嵌入优雅组合，兼具内聚与拓展特性)
@@ -130,13 +138,11 @@ func (repo *workflowRepository) CreateSnapshot(ctx context.Context, workflow dom
 		WorkflowId:     workflow.Id,
 		ProcessId:      processID,
 		ProcessVersion: processVersion,
+		EngineType:     workflow.ResolveEngineType().String(),
 		Name:           workflow.Name,
-		FlowData: sqlx.JsonField[dao.LogicFlow]{
-			Val: dao.LogicFlow{
-				Edges: workflow.FlowData.Edges,
-				Nodes: workflow.FlowData.Nodes,
-			},
-			Valid: true,
+		FlowData: sqlx.JsonField[domain.CanvasData]{
+			Val:   workflow.FlowData,
+			Valid: len(workflow.FlowData) > 0,
 		},
 	})
 }
@@ -148,14 +154,34 @@ func (repo *workflowRepository) FindSnapshot(ctx context.Context, processID, pro
 	}
 
 	return domain.Workflow{
-		Id:        s.WorkflowId,
-		ProcessId: s.ProcessId,
-		Name:      s.Name,
-		FlowData: domain.LogicFlow{
-			Edges: s.FlowData.Val.Edges,
-			Nodes: s.FlowData.Val.Nodes,
-		},
+		Id:         s.WorkflowId,
+		ProcessId:  s.ProcessId,
+		EngineType: domain.EngineType(s.EngineType),
+		Name:       s.Name,
+		FlowData:   s.FlowData.Val,
 	}, nil
+}
+
+func (repo *workflowRepository) FindSnapshotByWorkflowVersion(ctx context.Context, workflowID int64, engineType domain.EngineType, version int) (domain.Workflow, error) {
+	s, err := repo.dao.FindSnapshotByWorkflowVersion(ctx, workflowID, engineType.String(), version)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+
+	return domain.Workflow{
+		Id:         s.WorkflowId,
+		ProcessId:  s.ProcessId,
+		EngineType: domain.EngineType(s.EngineType),
+		Name:       s.Name,
+		FlowData:   s.FlowData.Val,
+	}, nil
+}
+
+func (repo *workflowRepository) GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...domain.EngineType) (int, error) {
+	if len(engineType) > 0 && engineType[0] != "" {
+		return repo.dao.GetMaxSnapshotVersion(ctx, workflowID, engineType[0].String())
+	}
+	return repo.dao.GetMaxSnapshotVersion(ctx, workflowID)
 }
 
 // --- 实体与领域模型双向防腐转换辅助函数 ---
@@ -169,14 +195,12 @@ func (repo *workflowRepository) toEntity(req domain.Workflow) dao.Workflow {
 		Owner:        req.Owner,
 		Desc:         req.Desc,
 		ProcessId:    req.ProcessId,
+		EngineType:   req.ResolveEngineType().String(),
 		NotifyMethod: req.NotifyMethod.ToUint8(),
 		IsNotify:     req.IsNotify,
-		FlowData: sqlx.JsonField[dao.LogicFlow]{
-			Val: dao.LogicFlow{
-				Edges: req.FlowData.Edges,
-				Nodes: req.FlowData.Nodes,
-			},
-			Valid: true,
+		FlowData: sqlx.JsonField[domain.CanvasData]{
+			Val:   req.FlowData,
+			Valid: len(req.FlowData) > 0,
 		},
 	}
 }
@@ -190,11 +214,9 @@ func (repo *workflowRepository) toDomain(w dao.Workflow) domain.Workflow {
 		Owner:        w.Owner,
 		Desc:         w.Desc,
 		ProcessId:    w.ProcessId,
+		EngineType:   domain.EngineType(w.EngineType),
 		NotifyMethod: domain.NotifyMethod(w.NotifyMethod),
 		IsNotify:     w.IsNotify,
-		FlowData: domain.LogicFlow{
-			Edges: w.FlowData.Val.Edges,
-			Nodes: w.FlowData.Val.Nodes,
-		},
+		FlowData:     w.FlowData.Val,
 	}
 }

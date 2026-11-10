@@ -2,8 +2,6 @@ package model
 
 import (
 	"time"
-
-	"github.com/samber/lo"
 )
 
 // TaskStatus 任务流转执行状态 (与 ecmdb-web 前端状态码 0, 1, 2, 3, 4, 5 严格绝对对齐)
@@ -21,7 +19,7 @@ const (
 	TaskCancelled = TaskSystemRejected
 )
 
-// Task 流转中的任务明细 (每个指派人一条记录)
+// Task 流转中的任务明细 (每个指派人一条记录，Value Semantics 优先)
 type Task struct {
 	ID         string     `json:"id"`
 	InstanceID string     `json:"instance_id"`
@@ -33,17 +31,17 @@ type Task struct {
 	Status     TaskStatus `json:"status"`
 	Comment    string     `json:"comment"`
 	CreateTime time.Time  `json:"create_time"`
-	FinishTime *time.Time `json:"finish_time,omitempty"`
+	FinishTime time.Time  `json:"finish_time,omitempty"`
 }
 
-// NewTask 构建标准任务实体（承载节点+实例+批次绑定关系的骨架）
+// NewTask 构建标准任务实体（承载节点+实例+批次绑定关系的骨架，返回领域实体指针）
 func NewTask(id, instanceID string, node NodeSpec, batchCode int, assignee string, status TaskStatus) *Task {
 	return &Task{
 		ID: id, InstanceID: instanceID,
 		NodeID: node.ID, NodeName: node.Name,
 		BatchCode: batchCode, Assignee: assignee,
 		SignRule: node.SignRule,
-		Status: status, CreateTime: time.Now(),
+		Status:   status, CreateTime: time.Now(),
 	}
 }
 
@@ -51,28 +49,28 @@ func NewTask(id, instanceID string, node NodeSpec, batchCode int, assignee strin
 func (t *Task) Pass(comment string) {
 	t.Status = TaskPassed
 	t.Comment = comment
-	t.FinishTime = lo.ToPtr(time.Now())
+	t.FinishTime = time.Now()
 }
 
 // Reject 审批人驳回当前任务
 func (t *Task) Reject(comment string) {
 	t.Status = TaskRejected
 	t.Comment = comment
-	t.FinishTime = lo.ToPtr(time.Now())
+	t.FinishTime = time.Now()
 }
 
 // Skip 系统自动跳过当前任务 (分支条件未满足或或签竞争通过联动)
 func (t *Task) Skip(comment string) {
 	t.Status = TaskSkipped
 	t.Comment = comment
-	t.FinishTime = lo.ToPtr(time.Now())
+	t.FinishTime = time.Now()
 }
 
 // Cancel 系统或发起人取消废弃当前任务
 func (t *Task) Cancel(comment string) {
 	t.Status = TaskCancelled
 	t.Comment = comment
-	t.FinishTime = lo.ToPtr(time.Now())
+	t.FinishTime = time.Now()
 }
 
 // IsPending 判断任务是否处于等待处理态
@@ -95,12 +93,32 @@ func (t *Task) IsTerminal() bool {
 	return t.Status != TaskPending
 }
 
+// FilterLatestBatchTasks 纯函数：从任务切片中提取出属于最新执行批次 (Max BatchCode) 的任务快照集合
+func FilterLatestBatchTasks(tasks []*Task) []*Task {
+	if len(tasks) == 0 {
+		return nil
+	}
+	maxBatch := tasks[0].BatchCode
+	for _, t := range tasks[1:] {
+		if t.BatchCode > maxBatch {
+			maxBatch = t.BatchCode
+		}
+	}
+	var res []*Task
+	for _, t := range tasks {
+		if t.BatchCode == maxBatch {
+			res = append(res, t)
+		}
+	}
+	return res
+}
+
 // TimelineEvent 面向前端展示的聚合流转时间线事件
 type TimelineEvent struct {
 	NodeID     string    `json:"node_id"`
 	NodeName   string    `json:"node_name"`
 	BatchCode  int       `json:"batch_code"`
 	OccurredAt time.Time `json:"occurred_at"`
-	Tasks      []Task    `json:"tasks"` // 本批次该节点的所有处理人记录
+	Tasks      []*Task   `json:"tasks"` // 本批次该节点的所有处理人记录
 	IsFinished bool      `json:"is_finished"`
 }

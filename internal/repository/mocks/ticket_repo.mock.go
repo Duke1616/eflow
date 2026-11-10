@@ -41,21 +41,6 @@ func (m *MockTicketRepository) EXPECT() *MockTicketRepositoryMockRecorder {
 	return m.recorder
 }
 
-// AccessibleDetailByProcessInstId mocks base method.
-func (m *MockTicketRepository) AccessibleDetailByProcessInstId(ctx context.Context, instanceId int) (domain.Ticket, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AccessibleDetailByProcessInstId", ctx, instanceId)
-	ret0, _ := ret[0].(domain.Ticket)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// AccessibleDetailByProcessInstId indicates an expected call of AccessibleDetailByProcessInstId.
-func (mr *MockTicketRepositoryMockRecorder) AccessibleDetailByProcessInstId(ctx, instanceId any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AccessibleDetailByProcessInstId", reflect.TypeOf((*MockTicketRepository)(nil).AccessibleDetailByProcessInstId), ctx, instanceId)
-}
-
 // CountHistory mocks base method.
 func (m *MockTicketRepository) CountHistory(ctx context.Context, userId string, status []int) (int64, error) {
 	m.ctrl.T.Helper()
@@ -117,7 +102,7 @@ func (mr *MockTicketRepositoryMockRecorder) CreateBizTicket(ctx, ticket any) *go
 }
 
 // CreateTaskForm mocks base method.
-func (m *MockTicketRepository) CreateTaskForm(ctx context.Context, taskId int, ticketId int64, fields []domain.FormValue) error {
+func (m *MockTicketRepository) CreateTaskForm(ctx context.Context, taskId domain.ID, ticketId int64, fields []domain.FormValue) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateTaskForm", ctx, taskId, ticketId, fields)
 	ret0, _ := ret[0].(error)
@@ -160,19 +145,34 @@ func (mr *MockTicketRepositoryMockRecorder) Detail(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Detail", reflect.TypeOf((*MockTicketRepository)(nil).Detail), ctx, id)
 }
 
-// DetailByProcessInstId mocks base method.
-func (m *MockTicketRepository) DetailByProcessInstId(ctx context.Context, instanceId int) (domain.Ticket, error) {
+// DetailByEngineInstance mocks base method.
+func (m *MockTicketRepository) DetailByEngineInstance(ctx context.Context, engineType domain.EngineType, instanceID domain.ID) (domain.Ticket, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DetailByProcessInstId", ctx, instanceId)
+	ret := m.ctrl.Call(m, "DetailByEngineInstance", ctx, engineType, instanceID)
 	ret0, _ := ret[0].(domain.Ticket)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// DetailByProcessInstId indicates an expected call of DetailByProcessInstId.
-func (mr *MockTicketRepositoryMockRecorder) DetailByProcessInstId(ctx, instanceId any) *gomock.Call {
+// DetailByEngineInstance indicates an expected call of DetailByEngineInstance.
+func (mr *MockTicketRepositoryMockRecorder) DetailByEngineInstance(ctx, engineType, instanceID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DetailByProcessInstId", reflect.TypeOf((*MockTicketRepository)(nil).DetailByProcessInstId), ctx, instanceId)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DetailByEngineInstance", reflect.TypeOf((*MockTicketRepository)(nil).DetailByEngineInstance), ctx, engineType, instanceID)
+}
+
+// DetailByProcessInstance mocks base method.
+func (m *MockTicketRepository) DetailByProcessInstance(ctx context.Context, instanceID domain.ID) (domain.Ticket, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DetailByProcessInstance", ctx, instanceID)
+	ret0, _ := ret[0].(domain.Ticket)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DetailByProcessInstance indicates an expected call of DetailByProcessInstance.
+func (mr *MockTicketRepositoryMockRecorder) DetailByProcessInstance(ctx, instanceID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DetailByProcessInstance", reflect.TypeOf((*MockTicketRepository)(nil).DetailByProcessInstance), ctx, instanceID)
 }
 
 // FindByBizIdAndKey mocks base method.
@@ -265,19 +265,19 @@ func (mr *MockTicketRepositoryMockRecorder) ListTicket(ctx, userId, status, offs
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTicket", reflect.TypeOf((*MockTicketRepository)(nil).ListTicket), ctx, userId, status, offset, limit)
 }
 
-// ListTicketByProcessInstanceIds mocks base method.
-func (m *MockTicketRepository) ListTicketByProcessInstanceIds(ctx context.Context, instanceIds []int) ([]domain.Ticket, error) {
+// ListTicketByProcessInstances mocks base method.
+func (m *MockTicketRepository) ListTicketByProcessInstances(ctx context.Context, instanceIDs []string) ([]domain.Ticket, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListTicketByProcessInstanceIds", ctx, instanceIds)
+	ret := m.ctrl.Call(m, "ListTicketByProcessInstances", ctx, instanceIDs)
 	ret0, _ := ret[0].([]domain.Ticket)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// ListTicketByProcessInstanceIds indicates an expected call of ListTicketByProcessInstanceIds.
-func (mr *MockTicketRepositoryMockRecorder) ListTicketByProcessInstanceIds(ctx, instanceIds any) *gomock.Call {
+// ListTicketByProcessInstances indicates an expected call of ListTicketByProcessInstances.
+func (mr *MockTicketRepositoryMockRecorder) ListTicketByProcessInstances(ctx, instanceIDs any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTicketByProcessInstanceIds", reflect.TypeOf((*MockTicketRepository)(nil).ListTicketByProcessInstanceIds), ctx, instanceIds)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTicketByProcessInstances", reflect.TypeOf((*MockTicketRepository)(nil).ListTicketByProcessInstances), ctx, instanceIDs)
 }
 
 // MarkProcessStartFailed mocks base method.
@@ -322,30 +322,30 @@ func (mr *MockTicketRepositoryMockRecorder) PrepareProcessRestart(ctx, id any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PrepareProcessRestart", reflect.TypeOf((*MockTicketRepository)(nil).PrepareProcessRestart), ctx, id)
 }
 
-// RegisterProcessInstanceId mocks base method.
-func (m *MockTicketRepository) RegisterProcessInstanceId(ctx context.Context, id int64, instanceId int) error {
+// RegisterProcess mocks base method.
+func (m *MockTicketRepository) RegisterProcess(ctx context.Context, id int64, engineType domain.EngineType, instanceID domain.ID) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RegisterProcessInstanceId", ctx, id, instanceId)
+	ret := m.ctrl.Call(m, "RegisterProcess", ctx, id, engineType, instanceID)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// RegisterProcessInstanceId indicates an expected call of RegisterProcessInstanceId.
-func (mr *MockTicketRepositoryMockRecorder) RegisterProcessInstanceId(ctx, id, instanceId any) *gomock.Call {
+// RegisterProcess indicates an expected call of RegisterProcess.
+func (mr *MockTicketRepositoryMockRecorder) RegisterProcess(ctx, id, engineType, instanceID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterProcessInstanceId", reflect.TypeOf((*MockTicketRepository)(nil).RegisterProcessInstanceId), ctx, id, instanceId)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterProcess", reflect.TypeOf((*MockTicketRepository)(nil).RegisterProcess), ctx, id, engineType, instanceID)
 }
 
-// UpdateStatusByInstanceId mocks base method.
-func (m *MockTicketRepository) UpdateStatusByInstanceId(ctx context.Context, instanceId int, status uint8) error {
+// UpdateStatusByProcessInstance mocks base method.
+func (m *MockTicketRepository) UpdateStatusByProcessInstance(ctx context.Context, instanceID domain.ID, status uint8, wtime int64) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpdateStatusByInstanceId", ctx, instanceId, status)
+	ret := m.ctrl.Call(m, "UpdateStatusByProcessInstance", ctx, instanceID, status, wtime)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// UpdateStatusByInstanceId indicates an expected call of UpdateStatusByInstanceId.
-func (mr *MockTicketRepositoryMockRecorder) UpdateStatusByInstanceId(ctx, instanceId, status any) *gomock.Call {
+// UpdateStatusByProcessInstance indicates an expected call of UpdateStatusByProcessInstance.
+func (mr *MockTicketRepositoryMockRecorder) UpdateStatusByProcessInstance(ctx, instanceID, status, wtime any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateStatusByInstanceId", reflect.TypeOf((*MockTicketRepository)(nil).UpdateStatusByInstanceId), ctx, instanceId, status)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateStatusByProcessInstance", reflect.TypeOf((*MockTicketRepository)(nil).UpdateStatusByProcessInstance), ctx, instanceID, status, wtime)
 }

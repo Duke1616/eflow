@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/stretchr/testify/require"
 )
@@ -47,7 +48,7 @@ func TestRevokeCoordinatesStateTransitions(t *testing.T) {
 			revoker := &processRevokerStub{err: testCase.revokeErr}
 			svc := newService(repo, planner, revoker)
 
-			err := svc.Revoke(context.Background(), 101, true, "starter", "不再需要该申请")
+			err := svc.Revoke(context.Background(), domain.EngineTypeEasyFlow, domain.NewID(101), true, "starter", "不再需要该申请")
 
 			if testCase.wantErr == "" {
 				require.NoError(t, err)
@@ -71,9 +72,9 @@ func TestRevokeCoordinatesStateTransitions(t *testing.T) {
 func TestRevokeValidatesIdentity(t *testing.T) {
 	svc := newService(&withdrawalRepositoryStub{}, &compensationPlannerStub{}, &processRevokerStub{})
 
-	require.Error(t, svc.Revoke(context.Background(), 0, false, "starter", "不再需要"))
-	require.Error(t, svc.Revoke(context.Background(), 1, false, "", "不再需要"))
-	require.ErrorIs(t, svc.Revoke(context.Background(), 1, false, "starter", " "), ErrInvalidRevokeReason)
+	require.Error(t, svc.Revoke(context.Background(), domain.EngineTypeEasyFlow, "", false, "starter", "不再需要"))
+	require.Error(t, svc.Revoke(context.Background(), domain.EngineTypeEasyFlow, domain.NewID(1), false, "", "不再需要"))
+	require.ErrorIs(t, svc.Revoke(context.Background(), domain.EngineTypeEasyFlow, domain.NewID(1), false, "starter", " "), ErrInvalidRevokeReason)
 }
 
 type withdrawalRepositoryStub struct {
@@ -85,19 +86,19 @@ type withdrawalRepositoryStub struct {
 	reason        string
 }
 
-func (s *withdrawalRepositoryStub) Prepare(_ context.Context, _ int, reason string) error {
+func (s *withdrawalRepositoryStub) Prepare(_ context.Context, _ domain.ID, reason string) error {
 	if s.prepareErr == nil {
 		s.reason = reason
 	}
 	return s.prepareErr
 }
 
-func (s *withdrawalRepositoryStub) TryFinalize(context.Context, int) (bool, error) {
+func (s *withdrawalRepositoryStub) TryFinalize(context.Context, domain.ID) (bool, error) {
 	s.finalizeCalls++
 	return s.finalizeErr == nil, s.finalizeErr
 }
 
-func (s *withdrawalRepositoryStub) Rollback(context.Context, int) error {
+func (s *withdrawalRepositoryStub) Rollback(context.Context, domain.ID) error {
 	s.rollbackCalls++
 	return nil
 }
@@ -124,7 +125,7 @@ func (s *compensationPlannerStub) Apply(context.Context, int, CompensationPlan) 
 	return s.applyErr
 }
 
-func (s *processRevokerStub) Revoke(int, bool, string) error {
+func (s *processRevokerStub) Revoke(_ context.Context, _ domain.EngineType, _ domain.ID, _ bool, _ string) error {
 	s.calls++
 	return s.err
 }

@@ -7,7 +7,8 @@ import (
 	processConsumer "github.com/Duke1616/eflow/internal/event/process"
 	taskConsumer "github.com/Duke1616/eflow/internal/event/task"
 	templateConsumer "github.com/Duke1616/eflow/internal/event/template"
-	ticketConsumer "github.com/Duke1616/eflow/internal/event/ticket"
+	feishuCallback "github.com/Duke1616/eflow/internal/callback/feishu"
+	wechatConsumerPkg "github.com/Duke1616/eflow/internal/event/wechat"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	serviceTask "github.com/Duke1616/eflow/internal/service/task"
@@ -21,11 +22,11 @@ func InitTasks(
 	taskSvc serviceTask.Service,
 	withdrawalRepo repository.WithdrawalRepository,
 	compensationPlanner withdrawalSvc.CompensationPlanner,
-	engineSvc engine.Service,
+	engine engine.IEngine,
 	executeResultConsumer *taskConsumer.ExecuteResultConsumer,
 	processConsumer *processConsumer.ProcessEventConsumer,
-	wechatConsumer *ticketConsumer.WechatTicketConsumer,
-	larkWsServer *ticketConsumer.LarkCallbackTicketServer,
+	wechatConsumer *wechatConsumerPkg.WechatTicketConsumer,
+	larkWsServer *feishuCallback.LarkCallbackServer,
 	wechatCallbackConsumer *templateConsumer.WechatApprovalCallbackConsumer,
 	templateClient templatev1.TemplateServiceClient,
 ) []Task {
@@ -33,7 +34,7 @@ func InitTasks(
 		executeResultConsumer,
 		serviceTask.NewStartTaskJob(taskSvc, 100, 8, 10*time.Second, 30*time.Second),
 		serviceTask.NewTaskRecoveryJob(taskSvc, 100, time.Minute, time.Minute),
-		serviceTask.NewPassProcessTaskJob(taskSvc, engineSvc, 100, 10*time.Second),
+		serviceTask.NewPassProcessTaskJob(taskSvc, engine, 100, 10*time.Second),
 		withdrawalSvc.NewRecoveryJob(withdrawalRepo, compensationPlanner, 100, time.Minute, 5*time.Minute),
 		processConsumer,
 		wechatConsumer,

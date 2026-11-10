@@ -2,16 +2,20 @@ package domain
 
 import "github.com/samber/lo"
 
-// TaskRecord 任务执行记录领域模型
+// TaskRecord 任务执行记录领域模型，承载时间线与流转历史中各节点的审批明细
 type TaskRecord struct {
-	Nodename     string
-	ApprovedBy   string
-	IsCosigned   int
-	Status       int
-	Comment      string
-	IsFinished   int
-	FinishedTime interface{}
-	FormValues   []FormValue
+	TaskID       ID          // 任务实例全局强类型自适应标识 (兼容整型自增与现代字符串形态)
+	NodeID       string      // 流程节点定义标识
+	PrevNodeID   string      // 上游前驱节点标识
+	BatchCode    string      // 同节点流转批次号（用于会签/循环聚合）
+	NodeName     string      // 流程节点展示名称
+	ApprovedBy   string      // 任务指派人或审批人标识
+	IsCosigned   int         // 是否会签任务（0: 否, 1: 是）
+	Status       int         // 审批裁决状态（0: 待办, 1: 通过, 2: 驳回）
+	Comment      string      // 审批意见或流转批注
+	IsFinished   int         // 任务是否已物理办结（0: 否, 1: 是）
+	FinishedTime interface{} // 审批完结时间快照
+	FormValues   []FormValue // 当前节点填写的动态表单数据快照
 }
 
 // IsAudited 断言该流转步骤是否已由处理人执行实际审批裁决（1: 通过, 2: 驳回）

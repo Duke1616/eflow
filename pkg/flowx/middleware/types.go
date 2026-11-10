@@ -1,6 +1,10 @@
 package middleware
 
-import "context"
+import (
+	"context"
+
+	"github.com/Duke1616/eflow/pkg/mapx"
+)
 
 // ActionType 引擎核心流转动作类型
 type ActionType string
@@ -20,7 +24,7 @@ type ActionContext struct {
 	TaskID     string         // 当前操作的物理任务 ID (仅审批与驳回生效)
 	Operator   string         // 当前操作人账号
 	Comment    string         // 处理意见
-	Variables  map[string]any // 表单业务变量
+	Variables  mapx.Map       // 表单业务变量
 	Extra      map[string]any // 允许在不同拦截器间传递的元数据 (如链路追踪 TraceID、租户编号)
 }
 

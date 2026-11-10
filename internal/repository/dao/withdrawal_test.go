@@ -17,7 +17,7 @@ func TestWithdrawalPendingStatusesExpandAsSQLList(t *testing.T) {
 
 	sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
 		return tx.Model(&Task{}).
-			Where("process_instance_id = ? AND status IN ?", 2663, withdrawalPendingStatuses()).
+			Where("ticket_id = ? AND status IN ?", 2663, withdrawalPendingStatuses()).
 			Update("status", 7)
 	})
 

@@ -8,7 +8,7 @@ import (
 
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	"github.com/stretchr/testify/require"
@@ -51,7 +51,7 @@ func TestResolveRunnerByDispatch(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			svc := &taskService{
 				dispatches: &dispatchServiceStub{dispatches: testCase.dispatches, err: testCase.listErr},
-				runners:    &runnerCatalogStub{runners: testCase.runners},
+				etask:      &runnerCatalogStub{runners: testCase.runners},
 			}
 			runner, ruleID, err := svc.resolveRunnerByDispatch(context.Background(), 1, "node-1",
 				20, domain.TaskArgs{"environment": "test"})
@@ -75,16 +75,16 @@ func TestResolveRunnerUsesDefaultRunner(t *testing.T) {
 		dispatches: &dispatchServiceStub{dispatches: []domain.Dispatch{{
 			AutomationNodeID: "node-1", Field: "environment", Value: "test", RunnerId: 10,
 		}}},
-		runners: runners,
+		etask: runners,
 	}
 
 	decision, err := svc.resolveRunner(context.Background(), 1, "node-1",
-		easyflow.AutomationProperty{CodebookId: 20, RunnerID: 20},
+		flowdsl.AutoTaskConfig{CodebookID: 20, RunnerID: 20, MaxExecutionSeconds: 7200},
 		domain.TaskArgs{"environment": "test"})
 
 	require.NoError(t, err)
 	require.Equal(t, domain.RunnerRouteDecision{
-		DefaultRunnerID: 20, SelectedRunnerID: 20,
+		DefaultRunnerID: 20, SelectedRunnerID: 20, MaxExecutionSeconds: 7200,
 	}, decision)
 }
 
@@ -93,13 +93,13 @@ func TestResolveRunnerUsesDynamicRouteWithoutDefaultRunner(t *testing.T) {
 		dispatches: &dispatchServiceStub{dispatches: []domain.Dispatch{{
 			Id: 21, AutomationNodeID: "node-1", Field: "environment", Value: "test", RunnerId: 10,
 		}}},
-		runners: &runnerCatalogStub{runners: map[int64]etaskclient.Runner{
+		etask: &runnerCatalogStub{runners: map[int64]etaskclient.Runner{
 			10: {ID: 10, CodebookID: 20},
 		}},
 	}
 
 	decision, err := svc.resolveRunner(context.Background(), 1, "node-1",
-		easyflow.AutomationProperty{CodebookId: 20}, domain.TaskArgs{"environment": "test"})
+		flowdsl.AutoTaskConfig{CodebookID: 20}, domain.TaskArgs{"environment": "test"})
 
 	require.NoError(t, err)
 	require.Equal(t, domain.RunnerRouteDecision{SelectedRunnerID: 10, RuleID: 21}, decision)
@@ -110,13 +110,13 @@ func TestResolveRunnerDoesNotLoadDefaultWhenDynamicRouteMatches(t *testing.T) {
 		dispatches: &dispatchServiceStub{dispatches: []domain.Dispatch{{
 			Id: 21, AutomationNodeID: "node-1", Field: "environment", Value: "test", RunnerId: 10,
 		}}},
-		runners: &runnerCatalogStub{runners: map[int64]etaskclient.Runner{
+		etask: &runnerCatalogStub{runners: map[int64]etaskclient.Runner{
 			10: {ID: 10, CodebookID: 20},
 		}},
 	}
 
 	decision, err := svc.resolveRunner(context.Background(), 1, "node-1",
-		easyflow.AutomationProperty{CodebookId: 20, RunnerID: 99}, domain.TaskArgs{"environment": "test"})
+		flowdsl.AutoTaskConfig{CodebookID: 20, RunnerID: 99}, domain.TaskArgs{"environment": "test"})
 
 	require.NoError(t, err)
 	require.Equal(t, domain.RunnerRouteDecision{
@@ -127,22 +127,22 @@ func TestResolveRunnerDoesNotLoadDefaultWhenDynamicRouteMatches(t *testing.T) {
 func TestResolveRunnerRequiresFallbackWhenNoRuleMatches(t *testing.T) {
 	svc := &taskService{
 		dispatches: &dispatchServiceStub{},
-		runners:    &runnerCatalogStub{},
+		etask:      &runnerCatalogStub{},
 	}
 
 	_, err := svc.resolveRunner(context.Background(), 1, "node-1",
-		easyflow.AutomationProperty{CodebookId: 20}, nil)
+		flowdsl.AutoTaskConfig{CodebookID: 20}, nil)
 
 	require.ErrorContains(t, err, "未命中动态路由，且自动化节点未配置默认执行单元")
 }
 
 func TestResolveRunnerRejectsDifferentCodebook(t *testing.T) {
-	svc := &taskService{runners: &runnerCatalogStub{
+	svc := &taskService{etask: &runnerCatalogStub{
 		runner: etaskclient.Runner{ID: 20, CodebookID: 99},
 	}}
 
 	_, err := svc.resolveRunner(context.Background(), 0, "node-1",
-		easyflow.AutomationProperty{CodebookId: 20, RunnerID: 20}, nil)
+		flowdsl.AutoTaskConfig{CodebookID: 20, RunnerID: 20}, nil)
 
 	require.ErrorContains(t, err, "未绑定自动化节点脚本 20")
 }
@@ -158,7 +158,7 @@ func TestCalculateScheduledAt(t *testing.T) {
 
 	testCases := []struct {
 		name       string
-		automation easyflow.AutomationProperty
+		automation flowdsl.AutoTaskConfig
 		input      domain.TaskArgs
 		templateID int64
 		wantDelay  time.Duration
@@ -166,59 +166,44 @@ func TestCalculateScheduledAt(t *testing.T) {
 		wantErr    string
 	}{
 		{name: "非定时任务立即执行"},
-		{name: "手动分钟配置", automation: easyflow.AutomationProperty{
-			IsTiming: true, ExecMethod: "hand", Unit: 1, Quantity: 3,
-		}, wantDelay: 3 * time.Minute},
-		{name: "动态字段按小时计算", automation: easyflow.AutomationProperty{
-			IsTiming: true, ExecMethod: "template", TemplateField: "delay",
-		}, input: domain.TaskArgs{"delay": "2"}, wantDelay: 2 * time.Hour},
-		{name: "新配置固定延迟", automation: easyflow.AutomationProperty{Schedule: &easyflow.ScheduleConfig{
-			Type: easyflow.ScheduleDelay, Unit: easyflow.ScheduleUnitMinute,
-			Source: easyflow.ScheduleSource{Type: easyflow.ScheduleSourceFixed, Value: 15},
+		{name: "新配置固定延迟", automation: flowdsl.AutoTaskConfig{Schedule: &flowdsl.ScheduleConfig{
+			Type: flowdsl.ScheduleDelay, Unit: flowdsl.ScheduleUnitMinute,
+			Source: flowdsl.ScheduleSource{Type: flowdsl.ScheduleSourceFixed, Value: 15},
 		}}, wantDelay: 15 * time.Minute},
-		{name: "新配置模板数字字段", automation: easyflow.AutomationProperty{Schedule: &easyflow.ScheduleConfig{
-			Type: easyflow.ScheduleDelay, Unit: easyflow.ScheduleUnitDay,
-			Source: easyflow.ScheduleSource{Type: easyflow.ScheduleSourceTemplateField,
+		{name: "新配置模板数字字段", automation: flowdsl.AutoTaskConfig{Schedule: &flowdsl.ScheduleConfig{
+			Type: flowdsl.ScheduleDelay, Unit: flowdsl.ScheduleUnitDay,
+			Source: flowdsl.ScheduleSource{Type: flowdsl.ScheduleSourceTemplateField,
 				TemplateID: 10, Field: "delay"},
 		}}, input: domain.TaskArgs{"delay": 2}, templateID: 10, wantDelay: 48 * time.Hour},
-		{name: "模板日期字段指定执行时间", automation: easyflow.AutomationProperty{Schedule: &easyflow.ScheduleConfig{
-			Type: easyflow.ScheduleAt, Timezone: defaultScheduleTimezone,
-			Source: easyflow.ScheduleSource{Type: easyflow.ScheduleSourceTemplateField,
+		{name: "模板日期字段指定执行时间", automation: flowdsl.AutoTaskConfig{Schedule: &flowdsl.ScheduleConfig{
+			Type: flowdsl.ScheduleAt, Timezone: defaultScheduleTimezone,
+			Source: flowdsl.ScheduleSource{Type: flowdsl.ScheduleSourceTemplateField,
 				TemplateID: 10, Field: "execute_at"},
 		}}, input: domain.TaskArgs{"execute_at": future.Format(localDateTimeLayout)}, templateID: 10, wantAt: future},
-		{name: "模板日期字段支持日期格式", automation: easyflow.AutomationProperty{Schedule: &easyflow.ScheduleConfig{
-			Type: easyflow.ScheduleAt, Timezone: defaultScheduleTimezone,
-			Source: easyflow.ScheduleSource{Type: easyflow.ScheduleSourceTemplateField,
+		{name: "模板日期字段支持日期格式", automation: flowdsl.AutoTaskConfig{Schedule: &flowdsl.ScheduleConfig{
+			Type: flowdsl.ScheduleAt, Timezone: defaultScheduleTimezone,
+			Source: flowdsl.ScheduleSource{Type: flowdsl.ScheduleSourceTemplateField,
 				TemplateID: 10, Field: "execute_at"},
 		}}, input: domain.TaskArgs{"execute_at": futureDate}, templateID: 10, wantAt: parsedFutureDate},
-		{name: "组合模板日期与时间字段", automation: easyflow.AutomationProperty{Schedule: &easyflow.ScheduleConfig{
-			Type: easyflow.ScheduleAt, Timezone: defaultScheduleTimezone,
-			Source: easyflow.ScheduleSource{Type: easyflow.ScheduleSourceTemplateField,
+		{name: "组合模板日期与时间字段", automation: flowdsl.AutoTaskConfig{Schedule: &flowdsl.ScheduleConfig{
+			Type: flowdsl.ScheduleAt, Timezone: defaultScheduleTimezone,
+			Source: flowdsl.ScheduleSource{Type: flowdsl.ScheduleSourceTemplateField,
 				TemplateID: 10, Field: "execute_date", TimeField: "execute_time"},
 		}}, input: domain.TaskArgs{
 			"execute_date": combinedFuture.Format(localDateLayout),
 			"execute_time": combinedFuture.Format(localTimeLayout),
 		}, templateID: 10, wantAt: combinedFuture},
-		{name: "组合日期时间拒绝空时间字段", automation: easyflow.AutomationProperty{Schedule: &easyflow.ScheduleConfig{
-			Type: easyflow.ScheduleAt, Timezone: defaultScheduleTimezone,
-			Source: easyflow.ScheduleSource{Type: easyflow.ScheduleSourceTemplateField,
+		{name: "组合日期时间拒绝空时间字段", automation: flowdsl.AutoTaskConfig{Schedule: &flowdsl.ScheduleConfig{
+			Type: flowdsl.ScheduleAt, Timezone: defaultScheduleTimezone,
+			Source: flowdsl.ScheduleSource{Type: flowdsl.ScheduleSourceTemplateField,
 				TemplateID: 10, Field: "execute_date", TimeField: "execute_time"},
 		}}, input: domain.TaskArgs{"execute_date": combinedFuture.Format(localDateLayout)},
 			templateID: 10, wantErr: "时间字段 execute_time 不能为空"},
-		{name: "拒绝模板不一致", automation: easyflow.AutomationProperty{Schedule: &easyflow.ScheduleConfig{
-			Type: easyflow.ScheduleDelay, Unit: easyflow.ScheduleUnitHour,
-			Source: easyflow.ScheduleSource{Type: easyflow.ScheduleSourceTemplateField,
+		{name: "拒绝模板不一致", automation: flowdsl.AutoTaskConfig{Schedule: &flowdsl.ScheduleConfig{
+			Type: flowdsl.ScheduleDelay, Unit: flowdsl.ScheduleUnitHour,
+			Source: flowdsl.ScheduleSource{Type: flowdsl.ScheduleSourceTemplateField,
 				TemplateID: 10, Field: "delay"},
 		}}, input: domain.TaskArgs{"delay": 2}, templateID: 11, wantErr: "模板不一致"},
-		{name: "拒绝未知配置方式", automation: easyflow.AutomationProperty{
-			IsTiming: true, ExecMethod: "legacy",
-		}, wantErr: "不支持的定时配置方式"},
-		{name: "拒绝无效动态字段", automation: easyflow.AutomationProperty{
-			IsTiming: true, ExecMethod: "template", TemplateField: "delay",
-		}, input: domain.TaskArgs{"delay": "abc"}, wantErr: "必须是有效整数"},
-		{name: "拒绝未知时间单位", automation: easyflow.AutomationProperty{
-			IsTiming: true, ExecMethod: "hand", Unit: 9, Quantity: 1,
-		}, wantErr: "不支持的定时时间单位"},
 	}
 
 	for _, testCase := range testCases {
@@ -299,9 +284,9 @@ func TestApplyTemplateScheduleOverrideSupportsSharedWorkflow(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			automation := easyflow.AutomationProperty{Schedule: &easyflow.ScheduleConfig{
-				Type: easyflow.ScheduleDelay, Unit: easyflow.ScheduleUnitHour,
-				Source: easyflow.ScheduleSource{Type: easyflow.ScheduleSourceFixed, Value: 1},
+			automation := flowdsl.AutoTaskConfig{Schedule: &flowdsl.ScheduleConfig{
+				Type: flowdsl.ScheduleDelay, Unit: flowdsl.ScheduleUnitHour,
+				Source: flowdsl.ScheduleSource{Type: flowdsl.ScheduleSourceFixed, Value: 1},
 			}}
 			err = svc.applyTemplateScheduleOverride(context.Background(), "automation-1", testCase.templateID, &automation)
 			require.NoError(t, err)
@@ -311,26 +296,29 @@ func TestApplyTemplateScheduleOverrideSupportsSharedWorkflow(t *testing.T) {
 		})
 	}
 
-	fallback := easyflow.AutomationProperty{Schedule: &easyflow.ScheduleConfig{
-		Type: easyflow.ScheduleDelay, Unit: easyflow.ScheduleUnitMinute,
-		Source: easyflow.ScheduleSource{Type: easyflow.ScheduleSourceFixed, Value: 30},
+	fallback := flowdsl.AutoTaskConfig{Schedule: &flowdsl.ScheduleConfig{
+		Type: flowdsl.ScheduleDelay, Unit: flowdsl.ScheduleUnitMinute,
+		Source: flowdsl.ScheduleSource{Type: flowdsl.ScheduleSourceFixed, Value: 30},
 	}}
 	require.NoError(t, svc.applyTemplateScheduleOverride(context.Background(), "automation-1", 40, &fallback))
-	require.Equal(t, easyflow.ScheduleSourceFixed, fallback.Schedule.Source.Type)
+	require.Equal(t, flowdsl.ScheduleSourceFixed, fallback.Schedule.Source.Type)
 	require.Equal(t, int64(30), fallback.Schedule.Source.Value)
 
-	formDelay := easyflow.AutomationProperty{IsTiming: true, ExecMethod: "hand", Unit: 2, Quantity: 1}
+	formDelay := flowdsl.AutoTaskConfig{Schedule: &flowdsl.ScheduleConfig{
+		Type: flowdsl.ScheduleDelay, Unit: flowdsl.ScheduleUnitHour,
+		Source: flowdsl.ScheduleSource{Type: flowdsl.ScheduleSourceFixed, Value: 1},
+	}}
 	require.NoError(t, svc.applyTemplateScheduleOverride(context.Background(), "automation-1", 50, &formDelay))
-	require.Equal(t, easyflow.ScheduleSourceTemplateField, formDelay.Schedule.Source.Type)
-	require.Equal(t, easyflow.ScheduleUnitMinute, formDelay.Schedule.Unit)
+	require.Equal(t, flowdsl.ScheduleSourceTemplateField, formDelay.Schedule.Source.Type)
+	require.Equal(t, flowdsl.ScheduleUnitMinute, formDelay.Schedule.Unit)
 	actualDelay, err := svc.calculateScheduledAt(formDelay, domain.TaskArgs{"delay_minutes": 15}, 50)
 	require.NoError(t, err)
 	require.WithinDuration(t, time.Now().Add(15*time.Minute), time.UnixMilli(actualDelay), time.Second)
 
-	legacy := easyflow.AutomationProperty{Schedule: &easyflow.ScheduleConfig{
-		Type: easyflow.ScheduleAt, Timezone: defaultScheduleTimezone,
-		Source: easyflow.ScheduleSource{
-			Type: easyflow.ScheduleSourceTemplateField, TemplateID: 30, Field: "old_at",
+	legacy := flowdsl.AutoTaskConfig{Schedule: &flowdsl.ScheduleConfig{
+		Type: flowdsl.ScheduleAt, Timezone: defaultScheduleTimezone,
+		Source: flowdsl.ScheduleSource{
+			Type: flowdsl.ScheduleSourceTemplateField, TemplateID: 30, Field: "old_at",
 		},
 	}}
 	require.NoError(t, svc.applyTemplateScheduleOverride(context.Background(), "automation-1", 30, &legacy))
@@ -378,8 +366,8 @@ func TestResolveTemplateScheduleOverrideAcceptsDefaultDatePicker(t *testing.T) {
 	}, rules)
 
 	require.NoError(t, err)
-	require.Equal(t, easyflow.ScheduleAt, schedule.Type)
-	require.Equal(t, easyflow.ScheduleSourceTemplateField, schedule.Source.Type)
+	require.Equal(t, flowdsl.ScheduleAt, schedule.Type)
+	require.Equal(t, flowdsl.ScheduleSourceTemplateField, schedule.Source.Type)
 	require.Equal(t, "schedule_date", schedule.Source.Field)
 	require.Equal(t, "schedule_time", schedule.Source.TimeField)
 }
@@ -419,7 +407,7 @@ func (s *dispatchServiceStub) ListByTemplateNode(_ context.Context, _ int64,
 }
 
 type runnerCatalogStub struct {
-	etaskclient.RunnerCatalog
+	etaskclient.Client
 	runner  etaskclient.Runner
 	runners map[int64]etaskclient.Runner
 }

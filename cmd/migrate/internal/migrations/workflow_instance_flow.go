@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"github.com/Duke1616/eiam/pkg/migration"
+	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/pkg/sqlx"
 )
@@ -40,10 +41,10 @@ func (workflowInstanceFlowMigrator) Convert(src mongoWorkflowSnapshot) dao.Snaps
 		ProcessId:      src.ProcessId,
 		ProcessVersion: src.ProcessVersion,
 		Name:           src.Name,
-		FlowData: sqlx.JsonField[dao.LogicFlow]{
-			Val: dao.LogicFlow{
-				Edges: src.FlowData.Edges,
-				Nodes: src.FlowData.Nodes,
+		FlowData: sqlx.JsonField[domain.CanvasData]{
+			Val: domain.CanvasData{
+				"edges": src.FlowData.Edges,
+				"nodes": src.FlowData.Nodes,
 			},
 			Valid: src.FlowData.Edges != nil || src.FlowData.Nodes != nil,
 		},

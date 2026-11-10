@@ -2,15 +2,13 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
+	"fmt"
 
-	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/compiler"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/service/engine"
-	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -28,20 +26,18 @@ type IWorkflowCoreService interface {
 	Update(ctx context.Context, req domain.Workflow) (int64, error)
 	// Delete 根据 ID 删除工作流定义，返回受影响行数
 	Delete(ctx context.Context, id int64) (int64, error)
-	// Deploy 部署发布流程到 easyflow 底层引擎并加锁落库此时的画布版本快照
+	// Deploy 部署发布流程到底层引擎并加锁落库此时的画布版本快照
 	Deploy(ctx context.Context, flow domain.Workflow) error
 	// FindByKeyword 按照关键字(模糊匹配流程名或描述)进行分页列表搜索
 	FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Workflow, int64, error)
-	// GetAutomationProperty 获取已发布画布中特定自动任务节点的脚本或事件自动化扩展属性
-	GetAutomationProperty(workflow easyflow.Workflow, nodeId string) (easyflow.AutomationProperty, error)
 	// GetAutomationNodes 获取工作流画布中的自动化节点及默认执行单元。
-	GetAutomationNodes(ctx context.Context, workflowId int64) ([]easyflow.AutomationNodeRef, error)
-	// GetWorkflowSnapshot 依据引擎流程 ID 和发布版本号获取精确锁定的快照图结构详情
-	GetWorkflowSnapshot(ctx context.Context, processID, version int) (domain.Workflow, error)
-	// FindInstanceFlow 获取流程实例运行时所绑定版本的流程定义，提供特定历史快照回溯与降级解析
-	FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error)
+	GetAutomationNodes(ctx context.Context, workflowId int64) ([]domain.AutomationNodeRef, error)
+	// FindInstanceFlow 获取流程实例运行时所绑定版本的流程定义，提供特定历史快照回溯与降级解析（支持指定历史引擎类型）
+	FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int, engineType ...domain.EngineType) (domain.Workflow, error)
 	// GetHighlightedGraph 根据审批轨迹流转情况计算并点亮画布图
-	GetHighlightedGraph(ctx context.Context, workflowId int64, processInstanceId int, status domain.Status) (domain.Workflow, error)
+	GetHighlightedGraph(ctx context.Context, workflowId int64, instanceID domain.ID, status domain.Status) (domain.Workflow, error)
+	// GetMaxSnapshotVersion 获取指定工作流当前已发布的最大快照版本号（未发布过时返回 0，支持按引擎类型精确查询）
+	GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...domain.EngineType) (int, error)
 }
 
 // Service 工作流大业务服务接口
@@ -50,17 +46,21 @@ type Service interface {
 }
 
 type workflowService struct {
-	repo         repository.IWorkflowRepository
-	engineSvc    engine.Service
-	engineCovert easyflow.Converter
+	repo     repository.IWorkflowRepository
+	engine   engine.IEngine
+	compiler compiler.ICompositeCompiler
 }
 
 // NewWorkflowService 初始化工作流业务服务层实例
-func NewWorkflowService(repo repository.IWorkflowRepository, engineSvc engine.Service, engineCovert easyflow.Converter) Service {
+func NewWorkflowService(
+	repo repository.IWorkflowRepository,
+	engine engine.IEngine,
+	compiler compiler.ICompositeCompiler,
+) Service {
 	return &workflowService{
-		repo:         repo,
-		engineSvc:    engineSvc,
-		engineCovert: engineCovert,
+		repo:     repo,
+		engine:   engine,
+		compiler: compiler,
 	}
 }
 
@@ -112,31 +112,35 @@ func (s *workflowService) Delete(ctx context.Context, id int64) (int64, error) {
 }
 
 func (s *workflowService) Deploy(ctx context.Context, wf domain.Workflow) error {
-	// 1. 将画布中的前端 DSL 数据转换底层 easyflow 路由引擎所需的图拓扑 Process 模型
-	process, err := s.engineCovert.Convert(easyflow.FromDomainWorkflow(wf))
+	if err := wf.ValidateEngineType(); err != nil {
+		return err
+	}
+
+	// 1. 编译器将前端画布编译为目标引擎原生定义
+	compileResult, err := s.compiler.Compile(ctx, wf)
 	if err != nil {
-		return err
+		return fmt.Errorf("工作流画布编译失败: %w", err)
 	}
 
-	// 2. 部署保存至底层流程引擎，并返回全局唯一的自增 processId
-	processId, err := s.engineSvc.ProcessSave(ctx, process)
+	// 2. 底层流程引擎调度门面统一执行部署发布
+	deployInfo, err := s.engine.Deploy(ctx, wf.ResolveEngineType(), compileResult.RawDef)
 	if err != nil {
-		return err
+		return fmt.Errorf("流程引擎部署失败: %w", err)
 	}
 
-	// 3. 关联回写主记录的 process_id，用于日常状态映射和数据追溯
-	if err = s.repo.UpdateProcessId(ctx, wf.Id, processId); err != nil {
-		return err
+	// 3. 关联回写 process_id（若底层引擎生成了自增ID则更新，flowx 引擎下直接以 wf.Id 建立映射）
+	processId := deployInfo.ProcessID
+	if processId == 0 {
+		processId = int(wf.Id)
+	}
+	if processId != wf.ProcessId {
+		if err = s.repo.UpdateProcessId(ctx, wf.Id, processId); err != nil {
+			return fmt.Errorf("关联回写 process_id 失败: %w", err)
+		}
 	}
 
-	// 4. Double Check 安全验证: 获取刚刚成功部署发布的最新版本号
-	version, err := s.engineSvc.GetLatestProcessVersion(ctx, processId)
-	if err != nil {
-		return err
-	}
-
-	// 5. 将当前发布的最新图数据在物理快照表 c_workflow_snapshot 中锁死存档，为以后的历史归档提供数据兜底
-	return s.repo.CreateSnapshot(ctx, wf, processId, version)
+	// 4. 彻底以底层引擎返回的权威版本为准，在物理快照表中锁死存档（单一真实源 SSOT 原则）
+	return s.repo.CreateSnapshot(ctx, wf, processId, deployInfo.Version)
 }
 
 func (s *workflowService) FindByKeyword(ctx context.Context, keyword string, offset, limit int64) ([]domain.Workflow, int64, error) {
@@ -164,125 +168,94 @@ func (s *workflowService) FindByKeyword(ctx context.Context, keyword string, off
 	return ws, total, nil
 }
 
-func (s *workflowService) GetAutomationProperty(workflow easyflow.Workflow, nodeId string) (easyflow.AutomationProperty, error) {
-	nodes, err := easyflow.ParseNodes(workflow.FlowData.Nodes)
-	if err != nil {
-		return easyflow.AutomationProperty{}, err
-	}
-
-	targetNode, found := lo.Find(nodes, func(node easyflow.Node) bool {
-		return node.ID == nodeId
-	})
-	if !found {
-		return easyflow.AutomationProperty{}, errors.New("node not found")
-	}
-
-	return easyflow.ToNodeProperty[easyflow.AutomationProperty](targetNode)
-}
-
-func (s *workflowService) GetAutomationNodes(ctx context.Context, workflowId int64) ([]easyflow.AutomationNodeRef, error) {
+func (s *workflowService) GetAutomationNodes(ctx context.Context, workflowId int64) ([]domain.AutomationNodeRef, error) {
 	wf, err := s.Find(ctx, workflowId)
 	if err != nil {
 		return nil, err
 	}
 
-	nodes, err := easyflow.ParseNodes(wf.FlowData.Nodes)
+	graph, err := flowdsl.Parse(wf.FlowData)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("解析流程拓扑失败: %w", err)
 	}
 
-	refs := make([]easyflow.AutomationNodeRef, 0, len(nodes))
-	for _, node := range nodes {
-		if node.Type != easyflow.NodeTypeAuto {
+	refs := make([]domain.AutomationNodeRef, 0)
+	for _, node := range graph.GetOrderedNodes() {
+		autoCfg, isAuto := node.AsAutoTask()
+		if !isAuto || node.Name == "" || autoCfg.CodebookID <= 0 {
 			continue
 		}
-		property, err := easyflow.ToNodeProperty[easyflow.AutomationProperty](node)
-		if err != nil {
-			return nil, err
-		}
-		if property.Name == "" || property.CodebookId <= 0 {
-			continue
-		}
-		refs = append(refs, easyflow.AutomationNodeRef{
-			ID: node.ID, Name: property.Name, CodebookID: property.CodebookId, RunnerID: property.RunnerID,
+		refs = append(refs, domain.AutomationNodeRef{
+			ID:         node.ID,
+			Name:       node.Name,
+			CodebookID: autoCfg.CodebookID,
+			RunnerID:   autoCfg.RunnerID,
 		})
 	}
 
 	return refs, nil
 }
 
-func (s *workflowService) GetWorkflowSnapshot(ctx context.Context, processID, version int) (domain.Workflow, error) {
-	return s.repo.FindSnapshot(ctx, processID, version)
-}
-
-func (s *workflowService) FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int) (domain.Workflow, error) {
-	// 1. 获取工作流最新版元数据模型
+func (s *workflowService) FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int, engineType ...domain.EngineType) (domain.Workflow, error) {
+	// 1. 获取工作流最新版元数据模型，确立工作流主数据与所属引擎类型
 	latest, err := s.Find(ctx, workflowID)
-
-	// 2. 降级容灾逻辑：如果主记录在极端场景下已被物理删除或查询失败，则完全从此刻版本快照中拉取做物理回填恢复
 	if err != nil {
-		snapshot, snapErr := s.repo.FindSnapshot(ctx, processID, version)
-		if snapErr != nil {
-			return domain.Workflow{}, err
-		}
-		return snapshot, nil
+		return domain.Workflow{}, fmt.Errorf("查询工作流定义失败 [workflowID=%d]: %w", workflowID, err)
 	}
 
-	// 3. 读取快照覆盖主实体的 flow_data，以保障用户点击历史工单图渲染时看到的是当时审批时的画布拓扑，而不是最新的画布，符合设计完整性
-	snapshot, err := s.repo.FindSnapshot(ctx, processID, version)
-	if err == nil {
+	targetEngine := latest.ResolveEngineType()
+	if len(engineType) > 0 && engineType[0] != "" {
+		targetEngine = engineType[0]
+	}
+
+	// 2. 依据该实例【真正运行时的引擎类型】和版本号精准定位快照（避免切换引擎后画布错配）
+	snapshot, snapErr := s.repo.FindSnapshotByWorkflowVersion(ctx, workflowID, targetEngine, version)
+	if snapErr != nil && targetEngine == domain.EngineTypeEasyFlow && processID > 0 {
+		// 仅对历史未绑定 workflow_id 的极老 EasyFlow 存量数据进行安全兼容
+		snapshot, snapErr = s.repo.FindSnapshot(ctx, processID, version)
+	}
+
+	// 3. 读取快照覆盖主实体的 flow_data，以保障用户点击历史工单图渲染时看到的是当时审批时的画布拓扑
+	if snapErr == nil {
 		latest.FlowData = snapshot.FlowData
 	}
 
 	return latest, nil
 }
 
-func (s *workflowService) GetHighlightedGraph(ctx context.Context, workflowId int64, processInstanceId int, status domain.Status) (domain.Workflow, error) {
-	// 1. 获取当前流转实例详情
-	inst, err := s.engineSvc.GetInstanceByID(ctx, processInstanceId)
+func (s *workflowService) GetHighlightedGraph(ctx context.Context, workflowId int64, instanceID domain.ID, status domain.Status) (domain.Workflow, error) {
+	wf, err := s.Find(ctx, workflowId)
 	if err != nil {
 		return domain.Workflow{}, err
 	}
 
-	// 2. 根据实例运行时的版本信息，从物理快照层回溯读取锁定的画布拓扑 FlowData
-	flow, err := s.FindInstanceFlow(ctx, workflowId, inst.ProcID, inst.ProcVersion)
+	targetEngine := wf.ResolveEngineType()
+
+	// 2. 通过统一流程引擎接口获取该实例的执行态点亮视图
+	execView, err := s.engine.GetInstanceExecutionView(ctx, targetEngine, instanceID, status.ToUint8())
+	if err != nil {
+		return domain.Workflow{}, fmt.Errorf("获取流程实例执行态轨迹失败: %w", err)
+	}
+
+	// 2. 根据实例运行时的版本信息以及真实运行的引擎类型，从物理快照层回溯读取锁定的画布拓扑 FlowData
+	flow, err := s.FindInstanceFlow(ctx, workflowId, execView.ProcessID, execView.ProcessVersion, execView.EngineType)
 	if err != nil {
 		return domain.Workflow{}, err
 	}
 
-	// 3. 全量提取流转过的审批任务记录
-	tasks, _, err := s.engineSvc.TaskRecord(ctx, processInstanceId, 0, 1000)
-	if err != nil {
-		return domain.Workflow{}, err
-	}
-
-	// 4. 将审批记录整理生成 NodeID -> Status 最新状态的聚合 Map
-	nodeStatusMap := lo.Associate(tasks, func(task model.Task) (string, int) {
-		return task.NodeID, task.Status
+	// 3. 利用 flowdsl 进行多画布兼容的连线高亮装饰与图层 Z-Index 优化
+	highlightedCanvas, err := flowdsl.HighlightCanvas(flow.FlowData, flowdsl.ExecutionTrace{
+		TraversedEdges: execView.TraversedEdges,
+		NodeStatusMap:  execView.NodeStatusMap,
 	})
-
-	// 5. 根据审批轨迹流转情况，计算出被点亮激活的边路径映射集
-	edgeMap, err := s.engineSvc.GetTraversedEdges(ctx, tasks, processInstanceId, flow.ProcessId, status.ToUint8())
 	if err != nil {
-		return domain.Workflow{}, err
+		return domain.Workflow{}, fmt.Errorf("装饰高亮流程拓扑失败: %w", err)
 	}
 
-	// 6. 将原始 LogicFlow 中的 Edges 转换为 easyflow.Edge
-	edgesJSON, err := json.Marshal(flow.FlowData.Edges)
-	if err != nil {
-		return domain.Workflow{}, err
-	}
-	var edges []easyflow.Edge
-	if err = json.Unmarshal(edgesJSON, &edges); err != nil {
-		return domain.Workflow{}, err
-	}
-
-	edges = easyflow.UpdateEdgeProperties(edges, edgeMap, nodeStatusMap)
-
-	// 7. 使用 EdgeToMap 直接构建 FlowEdge，避免低效的二次 json.Marshal/Unmarshal
-	flow.FlowData.Edges = lo.Map(edges, func(edge easyflow.Edge, _ int) domain.FlowEdge {
-		return domain.FlowEdge(easyflow.EdgeToMap(edge))
-	})
-
+	flow.FlowData = highlightedCanvas
 	return flow, nil
+}
+
+func (s *workflowService) GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...domain.EngineType) (int, error) {
+	return s.repo.GetMaxSnapshotVersion(ctx, workflowID, engineType...)
 }

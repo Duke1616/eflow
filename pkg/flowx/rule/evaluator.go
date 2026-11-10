@@ -9,8 +9,19 @@ import (
 	"github.com/samber/lo"
 )
 
-// EvaluateRuleGroup 对复合条件组进行规则求值，判断给定的表单变量是否满足触发要求
-func EvaluateRuleGroup(group *model.ConditionGroup, vars map[string]any) bool {
+// standardRuleEvaluator 标准规则组求值器实现
+type standardRuleEvaluator struct{}
+
+// NewRuleEvaluator 创建规则组求值器实例
+func NewRuleEvaluator() IRuleEvaluator {
+	return &standardRuleEvaluator{}
+}
+
+// DefaultEvaluator 全局默认规则组求值器单例
+var DefaultEvaluator IRuleEvaluator = NewRuleEvaluator()
+
+// Evaluate 实现 IRuleEvaluator 接口：对复合条件组进行规则求值
+func (e *standardRuleEvaluator) Evaluate(group *model.ConditionGroup, vars model.Variables) bool {
 	if group == nil || (len(group.Conditions) == 0 && len(group.SubGroups) == 0) {
 		return true // 无规则限制，默认放行
 	}
@@ -19,7 +30,7 @@ func EvaluateRuleGroup(group *model.ConditionGroup, vars map[string]any) bool {
 		return evaluateSingleCondition(cond, vars[cond.Field])
 	}
 	evalSub := func(sub model.ConditionGroup) bool {
-		return EvaluateRuleGroup(&sub, vars)
+		return e.Evaluate(&sub, vars)
 	}
 
 	// OR 逻辑：只要任一原子条件或任一子条件组命中即可短路通过
@@ -31,66 +42,18 @@ func EvaluateRuleGroup(group *model.ConditionGroup, vars map[string]any) bool {
 	return lo.EveryBy(group.Conditions, evalCond) && lo.EveryBy(group.SubGroups, evalSub)
 }
 
+// EvaluateRuleGroup 包级便捷函数：委托全局默认求值器执行复合条件组求值
+func EvaluateRuleGroup(group *model.ConditionGroup, vars model.Variables) bool {
+	return DefaultEvaluator.Evaluate(group, vars)
+}
+
+// evaluateSingleCondition 委托算子策略注册表执行单项条件匹配
 func evaluateSingleCondition(cond model.Condition, actualVal any) bool {
-	switch cond.Operator {
-	case model.OpEmpty:
-		return actualVal == nil || actualVal == ""
-	case model.OpNotEmpty:
-		return actualVal != nil && actualVal != ""
-	}
-
-	// 若字段不存在且不是判空操作，直接不匹配
-	if actualVal == nil {
+	op, exists := operatorRegistry[cond.Operator]
+	if !exists {
 		return false
 	}
-
-	switch cond.Operator {
-	case model.OpEqual:
-		// 优先数值比较，消除浮点数与整型 JSON 反序列化后的字符串差异 (如 float64(3) vs int(3))
-		if leftNum, ok1 := ToNumeric(actualVal); ok1 {
-			if rightNum, ok2 := ToNumeric(cond.Value); ok2 {
-				return leftNum == rightNum
-			}
-		}
-		return fmt.Sprintf("%v", actualVal) == fmt.Sprintf("%v", cond.Value)
-	case model.OpNotEqual:
-		if leftNum, ok1 := ToNumeric(actualVal); ok1 {
-			if rightNum, ok2 := ToNumeric(cond.Value); ok2 {
-				return leftNum != rightNum
-			}
-		}
-		return fmt.Sprintf("%v", actualVal) != fmt.Sprintf("%v", cond.Value)
-	case model.OpGreaterThan:
-		left, ok1 := ToNumeric(actualVal)
-		right, ok2 := ToNumeric(cond.Value)
-		return ok1 && ok2 && left > right
-	case model.OpGreaterEqual:
-		left, ok1 := ToNumeric(actualVal)
-		right, ok2 := ToNumeric(cond.Value)
-		return ok1 && ok2 && left >= right
-	case model.OpLessThan:
-		left, ok1 := ToNumeric(actualVal)
-		right, ok2 := ToNumeric(cond.Value)
-		return ok1 && ok2 && left < right
-	case model.OpLessEqual:
-		left, ok1 := ToNumeric(actualVal)
-		right, ok2 := ToNumeric(cond.Value)
-		return ok1 && ok2 && left <= right
-	case model.OpIn:
-		targetStr := fmt.Sprintf("%v", actualVal)
-		slice := ToStringSlice(cond.Value)
-		return lo.Contains(slice, targetStr)
-	case model.OpNotIn:
-		targetStr := fmt.Sprintf("%v", actualVal)
-		slice := ToStringSlice(cond.Value)
-		return !lo.Contains(slice, targetStr)
-	case model.OpContains:
-		actualStr := fmt.Sprintf("%v", actualVal)
-		targetStr := fmt.Sprintf("%v", cond.Value)
-		return strings.Contains(actualStr, targetStr)
-	default:
-		return false
-	}
+	return op.Match(actualVal, cond.Value)
 }
 
 // ToNumeric 通用数值解析转换辅助函数

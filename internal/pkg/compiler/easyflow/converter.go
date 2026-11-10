@@ -5,17 +5,18 @@ import (
 	"strings"
 
 	"github.com/Bunny3th/easy-workflow/workflow/model"
-	"github.com/mitchellh/mapstructure"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 )
 
-// DefaultConverter 默认转换器实现
+// DefaultConverter easy-workflow 流程图编译器默认实现
 type DefaultConverter struct {
-	handlers map[string]INodeHandler
+	handlers map[flowdsl.NodeType]INodeHandler
 }
 
+// NewDefaultConverter 创建空白转换器
 func NewDefaultConverter() *DefaultConverter {
 	return &DefaultConverter{
-		handlers: make(map[string]INodeHandler),
+		handlers: make(map[flowdsl.NodeType]INodeHandler),
 	}
 }
 
@@ -40,26 +41,24 @@ func (c *DefaultConverter) Register(handler INodeHandler) {
 }
 
 // Convert 执行转换流程 (Pipeline)
-func (c *DefaultConverter) Convert(wf Workflow) (*model.Process, error) {
-	// 注入 context
-	ctx, err := c.initContext(wf)
+func (c *DefaultConverter) Convert(procName string, graph flowdsl.IGraph) (*model.Process, error) {
+	if graph == nil {
+		return nil, fmt.Errorf("流程拓扑图 (graph) 不能为空")
+	}
+
+	// 1. 初始化编译拓扑上下文
+	ctx, err := c.initContext(procName, graph)
 	if err != nil {
 		return nil, err
 	}
 
-	// 拓扑合法性校验：在节点转换前先验证流程图结构，
-	// 将不合理的设计在发布阶段拦截，避免运行时死锁或异常
+	// 2. 拓扑合法性校验：在节点转换前先验证流程图结构，将不合理的设计拦截在发布阶段
 	if err = ValidateAll(ctx); err != nil {
 		return nil, fmt.Errorf("流程图校验失败: %w", err)
 	}
 
-	// 数据转换
-	nodes, err := ParseNodes(wf.FlowData.Nodes)
-	if err != nil {
-		return nil, fmt.Errorf("parse nodes failed: %w", err)
-	}
-
-	for _, node := range nodes {
+	// 3. 数据转换：遍历领域标准有序节点
+	for _, node := range graph.GetOrderedNodes() {
 		handler, ok := c.handlers[node.Type]
 		if !ok {
 			return nil, fmt.Errorf("unsupported node type: %s", node.Type)
@@ -72,11 +71,8 @@ func (c *DefaultConverter) Convert(wf Workflow) (*model.Process, error) {
 		ctx.OutputNodes = append(ctx.OutputNodes, generatedNodes...)
 	}
 
-	// 此处可以扩展如 GraphRewriter, EventInjector 等
-	// 目前逻辑简单，直接组装结果
-
 	process := &model.Process{
-		ProcessName:  wf.Name,
+		ProcessName:  procName,
 		Source:       "工单系统",
 		RevokeEvents: []string{EventRevoke},
 		Nodes:        ctx.OutputNodes,
@@ -85,58 +81,45 @@ func (c *DefaultConverter) Convert(wf Workflow) (*model.Process, error) {
 	return process, nil
 }
 
-func (c *DefaultConverter) initContext(wf Workflow) (*Context, error) {
+func (c *DefaultConverter) initContext(procName string, graph flowdsl.IGraph) (*Context, error) {
+	orderedNodes := graph.GetOrderedNodes()
 	ctx := &Context{
-		Workflow:     wf,
-		NodesMap:     make(map[string]Node),
-		EdgesMap:     make(map[string][]Edge),
+		ProcName:     procName,
+		Graph:        graph,
+		NodesMap:     make(map[string]*flowdsl.Node, len(orderedNodes)),
+		EdgesMap:     make(map[string][]flowdsl.Edge),
 		PrevNodesMap: make(map[string][]string),
 		OutputNodes:  []model.Node{},
 	}
 
-	edges, err := parseEdges(wf.FlowData.Edges)
-	if err != nil {
-		return nil, fmt.Errorf("parse edges failed: %w", err)
-	}
-
-	// 针对前端 LogicFlow 连线拖拽偶发的完全重叠连线（同源、同目标）做幂等清洗去重。
-	// 若存在属性差异（如某一连线配置了条件表达式），优先保留含有有效配置的连线，提升容错性。
-	edges = deduplicateEdges(edges)
-
-	nodes, err := ParseNodes(wf.FlowData.Nodes)
-	if err != nil {
-		return nil, fmt.Errorf("parse nodes failed: %w", err)
-	}
-
-	for _, n := range nodes {
+	for _, n := range orderedNodes {
 		ctx.NodesMap[n.ID] = n
 	}
 
+	edges := deduplicateEdges(graph.GetEdges())
 	for _, e := range edges {
-		ctx.EdgesMap[e.SourceNodeId] = append(ctx.EdgesMap[e.SourceNodeId], e)
-		ctx.PrevNodesMap[e.TargetNodeId] = append(ctx.PrevNodesMap[e.TargetNodeId], e.SourceNodeId)
+		ctx.EdgesMap[e.Source] = append(ctx.EdgesMap[e.Source], e)
+		ctx.PrevNodesMap[e.Target] = append(ctx.PrevNodesMap[e.Target], e.Source)
 	}
 
 	return ctx, nil
 }
 
-// deduplicateEdges 对相同 (SourceNodeId, TargetNodeId) 的连线进行幂等清洗去重。
-// 前端画图（LogicFlow）偶发多次拖拽重叠连线，后端自动净化，优先保留配置了条件表达式等有效属性的连线。
-func deduplicateEdges(edges []Edge) []Edge {
+// deduplicateEdges 对相同 (Source, Target) 的连线进行幂等清洗去重。
+// 前端画图（LogicFlow / X6）偶发多次拖拽重叠连线，后端自动净化，优先保留配置了条件表达式等有效属性的连线。
+func deduplicateEdges(edges []flowdsl.Edge) []flowdsl.Edge {
 	if len(edges) <= 1 {
 		return edges
 	}
 
-	uniqueEdges := make([]Edge, 0, len(edges))
+	uniqueEdges := make([]flowdsl.Edge, 0, len(edges))
 	seenIndex := make(map[string]int) // "src->dst" -> uniqueEdges 中的索引
 
 	for _, e := range edges {
-		key := fmt.Sprintf("%s->%s", e.SourceNodeId, e.TargetNodeId)
+		key := fmt.Sprintf("%s->%s", e.Source, e.Target)
 		if idx, ok := seenIndex[key]; ok {
 			// 若重复边中后出现的连线带有条件表达式而先前连线为空，则覆盖更新
-			oldProp, _ := ToEdgeProperty(uniqueEdges[idx])
-			newProp, _ := ToEdgeProperty(e)
-			if strings.TrimSpace(oldProp.Expression) == "" && strings.TrimSpace(newProp.Expression) != "" {
+			if strings.TrimSpace(uniqueEdges[idx].Expression) == "" && strings.TrimSpace(e.Expression) != "" {
 				uniqueEdges[idx] = e
 			}
 			continue
@@ -146,22 +129,4 @@ func deduplicateEdges(edges []Edge) []Edge {
 	}
 
 	return uniqueEdges
-}
-
-// parseEdges 定义线字段 (搬运自 convert.go)
-func parseEdges(raw any) ([]Edge, error) {
-	var edges []Edge
-	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-		Result:  &edges,
-		TagName: "json",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if err = decoder.Decode(raw); err != nil {
-		return nil, err
-	}
-
-	return edges, nil
 }

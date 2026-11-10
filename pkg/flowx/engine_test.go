@@ -99,7 +99,37 @@ func (s *EngineTestSuite) TestDeploy() {
 				return m
 			},
 			run: func(ctx context.Context, e Engine) error {
-				return e.Deploy(ctx, buildValidDefinition())
+				deployed, err := e.Deploy(ctx, buildValidDefinition())
+				if err != nil {
+					return err
+				}
+				assert.Equal(s.T(), 1, deployed.Version)
+				return nil
+			},
+		},
+		{
+			name: "版本未指定自动自增_基于最大版本+1",
+			before: func() storage.IStorage {
+				m := storagemocks.NewMockIStorage(s.ctrl)
+				// 历史已有最大版本 2
+				m.EXPECT().GetLatestVersion(gomock.Any(), "proc_test").Return(2, nil)
+				m.EXPECT().SaveDefinition(gomock.Any(), gomock.Any()).
+					DoAndReturn(func(_ context.Context, d model.ProcessDefinition) error {
+						assert.Equal(s.T(), 3, d.Version)
+						assert.Equal(s.T(), "proc_test", d.Key)
+						return nil
+					})
+				return m
+			},
+			run: func(ctx context.Context, e Engine) error {
+				def := buildValidDefinition()
+				def.Version = 0 // 未指定版本
+				deployed, err := e.Deploy(ctx, def)
+				if err != nil {
+					return err
+				}
+				assert.Equal(s.T(), 3, deployed.Version)
+				return nil
 			},
 		},
 		{
@@ -112,7 +142,8 @@ func (s *EngineTestSuite) TestDeploy() {
 					Key:   "bad_proc",
 					Nodes: []model.NodeSpec{{ID: "start", Type: model.NodeStart}},
 				}
-				return e.Deploy(ctx, badDef)
+				_, err := e.Deploy(ctx, badDef)
+				return err
 			},
 			wantErr:   ErrInvalidDefinition,
 			errSubStr: "流程必须至少包含 1 个结束节点",
@@ -126,7 +157,8 @@ func (s *EngineTestSuite) TestDeploy() {
 				return m
 			},
 			run: func(ctx context.Context, e Engine) error {
-				return e.Deploy(ctx, buildValidDefinition())
+				_, err := e.Deploy(ctx, buildValidDefinition())
+				return err
 			},
 			errSubStr: "db disk full",
 		},
@@ -170,6 +202,7 @@ func (s *EngineTestSuite) TestStart() {
 			name: "流程定义不存在",
 			before: func() storage.IStorage {
 				m := storagemocks.NewMockIStorage(s.ctrl)
+				m.EXPECT().GetLatestVersion(gomock.Any(), "unknown_proc").Return(0, nil).AnyTimes()
 				m.EXPECT().GetDefinition(gomock.Any(), "unknown_proc", 1).
 					Return(model.ProcessDefinition{}, storage.ErrDefinitionNotFound)
 				return m
@@ -182,6 +215,34 @@ func (s *EngineTestSuite) TestStart() {
 				return err
 			},
 			errSubStr: "获取流程定义失败",
+		},
+		{
+			name: "未传版本号_自动查询并加载已发布的最新版本",
+			before: func() storage.IStorage {
+				m := storagemocks.NewMockIStorage(s.ctrl)
+				defV3 := buildValidDefinition()
+				defV3.Version = 3
+				m.EXPECT().GetLatestVersion(gomock.Any(), "proc_test").Return(3, nil)
+				m.EXPECT().GetDefinition(gomock.Any(), "proc_test", 3).Return(defV3, nil)
+				m.EXPECT().SaveTasks(gomock.Any(), gomock.Len(1)).Return(nil)
+				m.EXPECT().SaveInstance(gomock.Any(), gomock.Any()).
+					DoAndReturn(func(_ context.Context, inst *model.Instance) error {
+						assert.Equal(s.T(), 3, inst.Version)
+						return nil
+					})
+				return m
+			},
+			run: func(ctx context.Context, e Engine) (err error) {
+				startedInstID, err = e.Start(ctx, StartReq{
+					Key:       "proc_test",
+					Starter:   "zhangsan",
+					Variables: map[string]any{"dept": "IT"},
+				})
+				return err
+			},
+			after: func(t *testing.T, err error) {
+				assert.NotEmpty(t, startedInstID)
+			},
 		},
 		{
 			name: "首批目标直接为END节点_流程自动办结",
@@ -205,7 +266,7 @@ func (s *EngineTestSuite) TestStart() {
 					Build()
 				startedInstID, err = e.Start(ctx, StartReq{
 					Starter: "zhangsan",
-					Def:     &instantDef,
+					Def:     instantDef,
 				})
 				return err
 			},
@@ -217,6 +278,7 @@ func (s *EngineTestSuite) TestStart() {
 			name: "待办任务保存失败_事务阻断",
 			before: func() storage.IStorage {
 				m := storagemocks.NewMockIStorage(s.ctrl)
+				m.EXPECT().GetLatestVersion(gomock.Any(), "proc_test").Return(1, nil)
 				m.EXPECT().GetDefinition(gomock.Any(), "proc_test", 1).Return(buildValidDefinition(), nil)
 				m.EXPECT().SaveTasks(gomock.Any(), gomock.Any()).Return(errors.New("insert tasks error"))
 				return m
@@ -262,17 +324,19 @@ func (s *EngineTestSuite) TestPass() {
 			wantErr: ErrTaskNotPending,
 		},
 		{
-			name: "非指派操作人_越权拦截",
+			name: "查询关联实例失败_错误透传",
 			before: func() storage.IStorage {
 				m := storagemocks.NewMockIStorage(s.ctrl)
 				m.EXPECT().GetTaskForUpdate(gomock.Any(), "task_1").
-					Return(&model.Task{ID: "task_1", Assignee: "leader_tom", Status: model.TaskPending}, nil)
+					Return(&model.Task{ID: "task_1", InstanceID: "inst_1", Assignee: "leader_tom", Status: model.TaskPending}, nil)
+				m.EXPECT().GetInstanceForUpdate(gomock.Any(), "inst_1").
+					Return(nil, storage.ErrInstanceNotFound)
 				return m
 			},
 			run: func(ctx context.Context, e Engine) error {
-				return e.Pass(ctx, PassReq{TaskID: "task_1", Operator: "hacker_bob"})
+				return e.Pass(ctx, PassReq{TaskID: "task_1", Operator: "proxy_user"})
 			},
-			wantErr: ErrUnauthorizedAssignee,
+			wantErr: ErrInstanceNotFound,
 		},
 		{
 			name: "流程已非Running状态_流转拦截",
@@ -355,7 +419,7 @@ func (s *EngineTestSuite) TestPass() {
 func (s *EngineTestSuite) TestReject() {
 	s.runCases([]testCase{
 		{
-			name: "首个节点驳回_无上游审批节点直接置为Rejected终态",
+			name: "首个节点驳回_上游仅有开始节点_回退至提单人重新发起",
 			before: func() storage.IStorage {
 				m := storagemocks.NewMockIStorage(s.ctrl)
 				task := &model.Task{
@@ -370,6 +434,7 @@ func (s *EngineTestSuite) TestReject() {
 					ID:      "inst_1",
 					ProcKey: "proc_test",
 					Version: 1,
+					Starter: "user_alice",
 					Status:  model.InstanceRunning,
 				}
 
@@ -383,10 +448,18 @@ func (s *EngineTestSuite) TestReject() {
 					})
 				m.EXPECT().ListTasksByInstance(gomock.Any(), "inst_1").Return([]*model.Task{task}, nil)
 				m.EXPECT().GetDefinition(gomock.Any(), "proc_test", 1).Return(buildValidDefinition(), nil)
+				m.EXPECT().SaveTasks(gomock.Any(), gomock.Any()).
+					DoAndReturn(func(_ context.Context, tasks []*model.Task) error {
+						require.Len(s.T(), tasks, 1)
+						assert.Equal(s.T(), "start", tasks[0].NodeID)
+						assert.Equal(s.T(), "user_alice", tasks[0].Assignee)
+						assert.Equal(s.T(), 2, tasks[0].BatchCode)
+						return nil
+					})
 				m.EXPECT().SaveInstance(gomock.Any(), gomock.Any()).
 					DoAndReturn(func(_ context.Context, i *model.Instance) error {
-						assert.Equal(s.T(), model.InstanceRejected, i.Status)
-						assert.NotNil(s.T(), i.FinishTime)
+						assert.Equal(s.T(), model.InstanceRunning, i.Status)
+						assert.Equal(s.T(), "start", i.CurrentNode)
 						return nil
 					})
 				return m

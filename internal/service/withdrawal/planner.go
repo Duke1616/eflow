@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/repository"
-	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
+	"github.com/Duke1616/eflow/internal/service/engine/easyflow"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
@@ -40,12 +40,12 @@ type compensationPlanner struct {
 	withdrawalRepo repository.WithdrawalRepository
 	tasks          taskSvc.Service
 	tickets        ticketSvc.Service
-	engine         engineSvc.Service
+	engine         easyflow.Service
 	workflows      workflowSvc.Service
 }
 
 func NewCompensationPlanner(taskRepo repository.TaskRepository, withdrawalRepo repository.WithdrawalRepository,
-	tasks taskSvc.Service, tickets ticketSvc.Service, engine engineSvc.Service,
+	tasks taskSvc.Service, tickets ticketSvc.Service, engine easyflow.Service,
 	workflows workflowSvc.Service) CompensationPlanner {
 	return &compensationPlanner{
 		taskRepo: taskRepo, withdrawalRepo: withdrawalRepo, tasks: tasks,
@@ -89,18 +89,23 @@ func (p *compensationPlanner) Build(ctx context.Context, processInstanceID int) 
 	if err != nil {
 		return CompensationPlan{}, fmt.Errorf("查询流程实例失败: %w", err)
 	}
-	flow, err := p.workflows.FindInstanceFlow(ctx, ticket.WorkflowId, instance.ProcID, instance.ProcVersion)
+	flow, err := p.workflows.FindInstanceFlow(ctx, ticket.WorkflowId, instance.ProcID, instance.ProcVersion, ticket.Process.ResolveEngineType())
 	if err != nil {
 		return CompensationPlan{}, fmt.Errorf("查询流程实例快照失败: %w", err)
 	}
 
+	graph, err := flowdsl.Parse(flow.FlowData)
+	if err != nil {
+		return CompensationPlan{}, fmt.Errorf("解析流程拓扑失败: %w", err)
+	}
+
 	plan := CompensationPlan{TicketID: ticket.Id, TenantID: ticket.TenantID}
 	for _, nodeID := range targetIDs {
-		property, propertyErr := p.workflows.GetAutomationProperty(easyflow.FromDomainWorkflow(flow), nodeID)
-		if propertyErr != nil {
-			return CompensationPlan{}, fmt.Errorf("查询补偿节点 %s 失败: %w", nodeID, propertyErr)
+		node, ok := graph.GetNode(nodeID)
+		if !ok {
+			return CompensationPlan{}, fmt.Errorf("查询补偿节点 %s 失败: 节点不存在", nodeID)
 		}
-		plan.Targets = append(plan.Targets, CompensationTarget{NodeID: nodeID, NodeName: property.Name})
+		plan.Targets = append(plan.Targets, CompensationTarget{NodeID: nodeID, NodeName: node.Name})
 	}
 	return plan, nil
 }
@@ -109,13 +114,13 @@ func (p *compensationPlanner) Apply(ctx context.Context, processInstanceID int, 
 	ctx = withdrawalTenantContext(ctx, plan.TenantID)
 	nodeIDs := make([]string, 0, len(plan.Targets))
 	for _, target := range plan.Targets {
-		if _, err := p.tasks.CreateTask(ctx, plan.TicketID, processInstanceID,
+		if _, err := p.tasks.CreateTask(ctx, plan.TicketID, domain.NewID(processInstanceID),
 			target.NodeID, target.NodeName); err != nil {
 			return fmt.Errorf("补建补偿任务 %s 失败: %w", target.NodeID, err)
 		}
 		nodeIDs = append(nodeIDs, target.NodeID)
 	}
-	if err := p.withdrawalRepo.ActivateCompensations(ctx, processInstanceID, nodeIDs); err != nil {
+	if err := p.withdrawalRepo.ActivateCompensations(ctx, domain.NewID(processInstanceID), nodeIDs); err != nil {
 		return fmt.Errorf("激活撤回补偿任务失败: %w", err)
 	}
 	return nil
@@ -125,7 +130,7 @@ func (p *compensationPlanner) listTasks(ctx context.Context, processInstanceID i
 	const pageSize int64 = 100
 	var result []domain.Task
 	for offset := int64(0); ; offset += pageSize {
-		page, err := p.taskRepo.ListByInstanceID(ctx, offset, pageSize, processInstanceID)
+		page, err := p.taskRepo.ListByInstanceID(ctx, offset, pageSize, int64(processInstanceID))
 		if err != nil {
 			return nil, err
 		}

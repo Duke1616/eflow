@@ -7,18 +7,17 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
 	"github.com/Duke1616/eflow/internal/event"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/internal/repository"
 	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/gotomicro/ego/core/elog"
 	"github.com/samber/lo"
-	"github.com/xen0n/go-workwx"
 )
 
 // ValidationError 局部表单字段校验错误定义
@@ -35,40 +34,34 @@ type Service interface {
 	CreateBizTicket(ctx context.Context, ticket domain.Ticket) (domain.Ticket, error)
 	// CreateTicket 创建工单实例并驱动流程引擎启动对应审批流实例
 	CreateTicket(ctx context.Context, req domain.Ticket) error
-	// GetByProcessInstanceID 根据流程引擎的实例执行 ID 反查物理工单明细
-	GetByProcessInstanceID(ctx context.Context, instanceId int) (domain.Ticket, error)
+	// GetByProcessInstance 根据流程实例唯一标识统一检索工单明细
+	GetByProcessInstance(ctx context.Context, instanceID domain.ID) (domain.Ticket, error)
 	// GetByID 根据自增主键 ID 查询物理工单及其动态表单属性详情
 	GetByID(ctx context.Context, id int64) (domain.Ticket, error)
-	// UpdateStatusByProcessInstanceID 根据引擎流程实例 ID 同步更新本地物理工单的最新流转状态
-	UpdateStatusByProcessInstanceID(ctx context.Context, instanceId int, status uint8) error
-	// BindProcessInstanceID 在流程引擎成功创建实例后反登记引擎的流程实例 ID 到物理工单上
-	BindProcessInstanceID(ctx context.Context, id int64, instanceId int) error
+	// UpdateStatusByProcessInstance 根据流程实例唯一标识统一更新本地物理工单状态
+	UpdateStatusByProcessInstance(ctx context.Context, instanceID domain.ID, status uint8, wtime ...int64) error
+	// BindProcess 在流程引擎成功创建实例后反向登记引擎类型与实例全局唯一标识到工单记录中
+	BindProcess(ctx context.Context, id int64, engineType domain.EngineType, instanceID domain.ID) error
 	// MarkProcessStartFailed 保留工单并记录流程启动失败原因
 	MarkProcessStartFailed(ctx context.Context, id int64, reason string) error
 	// RestartProcess 使用原工单数据重新发送流程启动事件
 	RestartProcess(ctx context.Context, id int64) error
-	// MergeData 将审批节点提交的最新变量合并追加到工单已存盘的 Data 变量集中
-	MergeData(ctx context.Context, ticketId int64, data map[string]interface{}) error
-	// CreateTaskForm 对指定的任务节点进行审批动作提交时的物理表单快照记录
-	CreateTaskForm(ctx context.Context, taskId int, ticketId int64, fields []domain.FormValue) error
-	// ListTaskFormsByTaskIDs 根据任务 ID 列表批量拉取历史步骤留存的物理表单数据
-	ListTaskFormsByTaskIDs(ctx context.Context, taskIds []int) (map[int][]domain.FormValue, error)
 	// ListTaskFormsByTicketID 查询某个物理工单下所有审批节点曾提交过的物理表单数据集
 	ListTaskFormsByTicketID(ctx context.Context, ticketID int64) ([]domain.FormValue, error)
 	// Pass 同意当前代办节点审批，统一执行领域自卫校验、变量合并与必填校验并驱动引擎推进
-	Pass(ctx context.Context, taskId int, operator string, isAdmin bool, comment string, extraData map[string]interface{}) error
+	Pass(ctx context.Context, ticketId int64, taskId string, operator string, isAdmin bool, comment string, extraData map[string]interface{}) error
 	// Reject 驳回当前节点审批，统一执行领域自卫校验并驱动引擎执行驳回流转
-	Reject(ctx context.Context, taskId int, operator string, isAdmin bool, comment string) error
+	Reject(ctx context.Context, ticketId int64, taskId string, operator string, isAdmin bool, comment string) error
 	// Transfer 将当前审批任务转签指派给其他用户
-	Transfer(ctx context.Context, taskId int, operator string, isAdmin bool, targetUsers []string) error
+	Transfer(ctx context.Context, ticketId int64, taskId string, operator string, isAdmin bool, targetUsers []string) error
 	// GetTaskFormConfig 获取指定任务节点在当时流程版本中定义的表单字段列表
-	GetTaskFormConfig(ctx context.Context, taskId int, workflowId int64) ([]easyflow.Field, error)
+	GetTaskFormConfig(ctx context.Context, ticketId int64, taskId string, workflowId int64) ([]flowdsl.Field, error)
 }
 
 type ticketService struct {
 	repo        repository.TicketRepository
 	templateSvc templateSvc.Service
-	engineSvc   engineSvc.Service
+	engine      engineSvc.IEngine
 	workflowSvc workflowSvc.Service
 	producer    TicketEventProducer
 	l           *elog.Component
@@ -76,12 +69,12 @@ type ticketService struct {
 
 // NewService 构造工单业务服务实现类
 func NewService(repo repository.TicketRepository, templateSvc templateSvc.Service,
-	engineSvc engineSvc.Service, workflowSvc workflowSvc.Service,
+	engine engineSvc.IEngine, workflowSvc workflowSvc.Service,
 	producer TicketEventProducer) Service {
 	return &ticketService{
 		repo:        repo,
 		templateSvc: templateSvc,
-		engineSvc:   engineSvc,
+		engine:      engine,
 		workflowSvc: workflowSvc,
 		producer:    producer,
 		l:           elog.DefaultLogger,
@@ -93,10 +86,9 @@ func (s *ticketService) CreateBizTicket(ctx context.Context, ticket domain.Ticke
 		return domain.Ticket{}, err
 	}
 
-	// 如果是告警转工单，且 Key 和 BizID 不为空，检查是否已有相同 Key 和 BizID 的进行中工单
-	if ticket.Provide.IsAlert() && ticket.Key != "" && ticket.BizID > 0 {
-		existingTicket, err := s.repo.FindByBizIdAndKey(ctx, ticket.BizID, ticket.Key,
-			[]domain.Status{domain.START, domain.PROCESS, domain.WITHDRAWING, domain.START_FAILED})
+	// 领域规则收拢：若符合告警防重合并条件，检查是否存在流转中的同源工单
+	if ticket.SupportsDeduplication() {
+		existingTicket, err := s.repo.FindByBizIdAndKey(ctx, ticket.BizID, ticket.Key, domain.ActiveStatuses())
 		if err != nil {
 			s.l.Warn("查询已有工单失败",
 				elog.FieldErr(err),
@@ -134,16 +126,7 @@ func (s *ticketService) CreateBizTicket(ctx context.Context, ticket domain.Ticke
 		return domain.Ticket{}, err
 	}
 
-	templateName := "默认工单"
-	if ticket.TemplateId > 0 {
-		if tmpl, tmplErr := s.templateSvc.DetailTemplate(ctx, ticket.TemplateId); tmplErr == nil && tmpl.Name != "" {
-			templateName = tmpl.Name
-		} else if tmplErr != nil {
-			s.l.Warn("查询工单模板名称失败，使用默认模版名兜底",
-				elog.Int64("templateId", ticket.TemplateId),
-				elog.FieldErr(tmplErr))
-		}
-	}
+	templateName := s.resolveTemplateName(ctx, ticket.TemplateId)
 
 	err = s.sendGenerateFlowEvent(ctx, ticket, bizTicket.Id, templateName)
 	if err != nil {
@@ -151,6 +134,26 @@ func (s *ticketService) CreateBizTicket(ctx context.Context, ticket domain.Ticke
 		return bizTicket, nil
 	}
 	return bizTicket, nil
+}
+
+// resolveTemplateName 安全获取模板展示名称，失败或未配置时平滑降级为兜底名称
+func (s *ticketService) resolveTemplateName(ctx context.Context, templateID int64) string {
+	const defaultName = "默认工单"
+	if templateID <= 0 {
+		return defaultName
+	}
+	tmpl, err := s.templateSvc.DetailTemplate(ctx, templateID)
+	if err != nil {
+		s.l.Warn("查询工单模板名称失败，使用默认模版名兜底",
+			elog.Int64("templateId", templateID),
+			elog.FieldErr(err),
+		)
+		return defaultName
+	}
+	if tmpl.Name != "" {
+		return tmpl.Name
+	}
+	return defaultName
 }
 
 func (s *ticketService) CreateTicket(ctx context.Context, req domain.Ticket) error {
@@ -161,7 +164,7 @@ func (s *ticketService) CreateTicket(ctx context.Context, req domain.Ticket) err
 	// 1. 前置校验模板合法性并读取模板名称，避免写库成功后因模板异常残留无绑定的孤儿工单
 	dTm, err := s.templateSvc.DetailTemplate(ctx, req.TemplateId)
 	if err != nil {
-		return fmt.Errorf("读取工单模板失败: %w", err)
+		return errs.NotFound("TEMPLATE_NOT_FOUND", "指定的工单模板不存在或已下线").WithCause(err)
 	}
 
 	// 2. 持久化工单主表记录
@@ -178,20 +181,38 @@ func (s *ticketService) CreateTicket(ctx context.Context, req domain.Ticket) err
 	return nil
 }
 
-func (s *ticketService) GetByProcessInstanceID(ctx context.Context, instanceId int) (domain.Ticket, error) {
-	return s.repo.AccessibleDetailByProcessInstId(ctx, instanceId)
+func (s *ticketService) GetByProcessInstance(ctx context.Context, instanceID domain.ID) (domain.Ticket, error) {
+	ticket, err := s.repo.DetailByProcessInstance(ctx, instanceID)
+	if err != nil {
+		if errors.Is(err, repository.ErrTicketNotFound) {
+			return domain.Ticket{}, errs.NotFound("TICKET_NOT_FOUND", fmt.Sprintf("工单流程实例不存在: %s", instanceID)).WithCause(err)
+		}
+		return domain.Ticket{}, fmt.Errorf("根据流程实例标识 [%s] 获取工单失败: %w", instanceID, err)
+	}
+	return ticket, nil
 }
 
 func (s *ticketService) GetByID(ctx context.Context, id int64) (domain.Ticket, error) {
-	return s.repo.Detail(ctx, id)
+	ticket, err := s.repo.Detail(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrTicketNotFound) {
+			return domain.Ticket{}, errs.NotFound("TICKET_NOT_FOUND", fmt.Sprintf("工单不存在: %d", id)).WithCause(err)
+		}
+		return domain.Ticket{}, fmt.Errorf("获取工单详情失败: %w", err)
+	}
+	return ticket, nil
 }
 
-func (s *ticketService) UpdateStatusByProcessInstanceID(ctx context.Context, instanceId int, status uint8) error {
-	return s.repo.UpdateStatusByInstanceId(ctx, instanceId, status)
+func (s *ticketService) UpdateStatusByProcessInstance(ctx context.Context, instanceID domain.ID, status uint8, wtime ...int64) error {
+	var wt int64
+	if len(wtime) > 0 {
+		wt = wtime[0]
+	}
+	return s.repo.UpdateStatusByProcessInstance(ctx, instanceID, status, wt)
 }
 
-func (s *ticketService) BindProcessInstanceID(ctx context.Context, id int64, instanceId int) error {
-	return s.repo.RegisterProcessInstanceId(ctx, id, instanceId)
+func (s *ticketService) BindProcess(ctx context.Context, id int64, engineType domain.EngineType, instanceID domain.ID) error {
+	return s.repo.RegisterProcess(ctx, id, engineType, instanceID)
 }
 
 // MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因。
@@ -206,7 +227,7 @@ func (s *ticketService) RestartProcess(ctx context.Context, id int64) error {
 		return err
 	}
 	if !ticket.CanRestartProcess() {
-		return fmt.Errorf("工单 %d 当前不是可重新启动状态", id)
+		return errs.BadRequest("TICKET_NOT_RESTARTABLE", fmt.Sprintf("工单 %d 当前不是可重新启动状态", id))
 	}
 	if err = s.repo.PrepareProcessRestart(ctx, id); err != nil {
 		return err
@@ -224,115 +245,151 @@ func (s *ticketService) RestartProcess(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (s *ticketService) MergeData(ctx context.Context, ticketId int64, data map[string]interface{}) error {
-	return s.repo.MergeTicketData(ctx, ticketId, data)
-}
-
-func (s *ticketService) CreateTaskForm(ctx context.Context, taskId int, ticketId int64, fields []domain.FormValue) error {
-	return s.repo.CreateTaskForm(ctx, taskId, ticketId, fields)
-}
-
-func (s *ticketService) ListTaskFormsByTaskIDs(ctx context.Context, taskIds []int) (map[int][]domain.FormValue, error) {
-	return s.repo.FindTaskFormsBatch(ctx, taskIds)
-}
-
 func (s *ticketService) ListTaskFormsByTicketID(ctx context.Context, ticketID int64) ([]domain.FormValue, error) {
 	return s.repo.FindTaskFormsByTicketID(ctx, ticketID)
 }
 
-// Pass 审批通过当前代办的流程节点，包含数据合并、必填校验与动态快照记录
-func (s *ticketService) Pass(ctx context.Context, taskId int, operator string, isAdmin bool, comment string, extraData map[string]interface{}) error {
-	// 1. 获取审批任务明细
-	taskInfo, err := s.engineSvc.TaskInfo(ctx, taskId)
+// operableTaskContext 封装工单与流程任务在审批操作中的运行时上下文
+type operableTaskContext struct {
+	ticket   domain.Ticket
+	taskInfo domain.TaskContext
+	tID      domain.ID
+}
+
+// loadTaskContext 统一校验工单标识、加载工单实体并提取特定任务上下文
+func (s *ticketService) loadTaskContext(ctx context.Context, ticketId int64, taskId string) (*operableTaskContext, error) {
+	if ticketId <= 0 {
+		return nil, fmt.Errorf("%w: 工单 ID 非法", domain.ErrInvalidParameter)
+	}
+	ticket, err := s.repo.Detail(ctx, ticketId)
 	if err != nil {
-		return fmt.Errorf("获取任务详情失败: %w", err)
+		if errors.Is(err, repository.ErrTicketNotFound) {
+			return nil, errs.NotFound("TICKET_NOT_FOUND", fmt.Sprintf("工单不存在: %d", ticketId)).WithCause(err)
+		}
+		return nil, fmt.Errorf("查询工单实体关联失败 [ticketId=%d]: %w", ticketId, err)
 	}
 
-	// 2. 领域层自卫校验：断言是否已被处理及操作人权限
-	if err = domain.ValidateTaskOperable(taskInfo.UserID, taskInfo.IsFinished == 1, operator, isAdmin); err != nil {
-		return err
+	tID := domain.NewID(taskId)
+	if tID.IsZero() {
+		return nil, fmt.Errorf("%w: 任务 ID 非法", domain.ErrInvalidParameter)
 	}
 
-	// 3. 记录管理员代办审计日志
-	if isAdmin && taskInfo.UserID != operator {
-		s.l.Info("管理员代办他人审批任务[同意]",
+	taskInfo, err := s.engine.GetTaskContext(ctx, ticket.Process.ResolveEngineType(), tID)
+	if err != nil {
+		return nil, fmt.Errorf("获取任务明细失败: %w", err)
+	}
+
+	return &operableTaskContext{
+		ticket:   ticket,
+		taskInfo: taskInfo,
+		tID:      tID,
+	}, nil
+}
+
+// prepareOperableTask 统一执行审批前置校验：加载工单与任务上下文，断言操作权限与办结状态，并记录管理员代办审计日志
+func (s *ticketService) prepareOperableTask(ctx context.Context, ticketId int64, taskId, operator, action string, isAdmin bool) (*operableTaskContext, error) {
+	opCtx, err := s.loadTaskContext(ctx, ticketId, taskId)
+	if err != nil {
+		return nil, err
+	}
+
+	// 领域层自卫校验：断言是否已被处理及操作人权限
+	if err = opCtx.taskInfo.ValidateOperable(operator, isAdmin); err != nil {
+		return nil, err
+	}
+
+	// 统一审计日志：记录管理员代办行为
+	if isAdmin && opCtx.taskInfo.Assignee != operator {
+		s.l.Info("管理员代办他人审批任务",
+			elog.String("action", action),
 			elog.String("admin", operator),
-			elog.Int("taskId", taskId),
-			elog.String("originalAssignee", taskInfo.UserID),
+			elog.String("taskId", taskId),
+			elog.String("originalAssignee", opCtx.taskInfo.Assignee),
 		)
 	}
 
-	// 4. 查询流程实例
-	instance, err := s.engineSvc.GetInstanceByID(ctx, taskInfo.ProcInstID)
+	return opCtx, nil
+}
+
+// Pass 审批通过当前代办的流程节点，包含数据合并、必填校验与动态快照记录
+func (s *ticketService) Pass(ctx context.Context, ticketId int64, taskId string, operator string, isAdmin bool, comment string, extraData map[string]interface{}) error {
+	opCtx, err := s.prepareOperableTask(ctx, ticketId, taskId, operator, "同意", isAdmin)
 	if err != nil {
 		return err
 	}
+	engineType := opCtx.ticket.Process.ResolveEngineType()
 
-	// 5. 锁定当时发布的版本快照
-	snapshot, err := s.workflowSvc.GetWorkflowSnapshot(ctx, taskInfo.ProcID, instance.ProcVersion)
+	// 4. 统一加载流程图版本拓扑快照（支持按 workflow_id 智能检索与回退兜底，对底层流程引擎透明）
+	targetWf, err := s.workflowSvc.FindInstanceFlow(ctx, opCtx.ticket.WorkflowId, opCtx.taskInfo.ProcessID, opCtx.taskInfo.ProcessVersion, engineType)
 	if err != nil {
-		s.l.Error("获取快照版本失败", elog.FieldErr(err),
-			elog.Int("流程ID", taskInfo.ProcID),
-			elog.Int("流程版本", instance.ProcVersion))
-		return err
+		return fmt.Errorf("获取流程拓扑快照失败: %w", err)
 	}
 
-	// 6. 解析 node 节点数据并定位当前执行节点
-	nodes, _ := easyflow.ParseNodes(snapshot.FlowData.Nodes)
-	node, ok := lo.Find(nodes, func(node easyflow.Node) bool {
-		return node.ID == taskInfo.NodeID
-	})
+	// 5. 解析标准拓扑图并定位当前执行节点
+	graph, err := flowdsl.Parse(targetWf.FlowData)
+	if err != nil {
+		return fmt.Errorf("解析流程拓扑失败: %w", err)
+	}
+	node, ok := graph.GetNode(opCtx.taskInfo.NodeID)
 	if !ok {
-		return fmt.Errorf("当前执行节点在流程图中不存在: %s", taskInfo.NodeID)
+		return fmt.Errorf("当前执行节点在流程图中不存在: %s", opCtx.taskInfo.NodeID)
 	}
 
-	property, err := easyflow.ToNodeProperty[easyflow.UserProperty](node)
+	var nodeFields []flowdsl.Field
+	if userCfg, isUser := node.AsUserTask(); isUser {
+		nodeFields = userCfg.Fields
+	}
+
+	// 6. 若无表单字段需要录入，则直接触发引擎通过
+	if len(nodeFields) == 0 {
+		return s.engine.Pass(ctx, domain.TaskPassReq{
+			EngineType: engineType,
+			TaskId:     opCtx.tID,
+			Operator:   operator,
+			Comment:    comment,
+		})
+	}
+
+	// 7. 执行必填与格式正则校验，汇总合并更新项及快照数据
+	mergeData, formValues, err := s.collectAndValidateFields(nodeFields, extraData)
 	if err != nil {
 		return err
 	}
 
-	// 7. 若无表单字段需要录入，则直接触发引擎通过
-	if len(property.Fields) == 0 {
-		return s.engineSvc.Pass(ctx, taskId, comment)
-	}
-
-	// 8. 执行必填与格式正则校验，汇总合并更新项及快照数据
-	mergeData, formValues, err := s.collectAndValidateFields(property.Fields, extraData)
-	if err != nil {
-		return err
-	}
-
-	// 9. 查询对应的关联工单实体
-	ticket, err := s.repo.DetailByProcessInstId(ctx, taskInfo.ProcInstID)
-	if err != nil {
-		return fmt.Errorf("查询工单实体关联失败: %w", err)
-	}
-
-	// 10. 原子合并入库
+	// 8. 原子合并工单业务数据（直接复用前置加载的工单实体，避免重复查库）
 	if len(mergeData) > 0 {
-		if err = s.repo.MergeTicketData(ctx, ticket.Id, mergeData); err != nil {
+		if err = s.repo.MergeTicketData(ctx, opCtx.ticket.Id, mergeData); err != nil {
 			return fmt.Errorf("物理合并工单数据失败: %w", err)
 		}
 	}
 
-	// 11. 记录当前审批步骤下的快照
-	if err = s.repo.CreateTaskForm(ctx, taskId, ticket.Id, formValues); err != nil {
-		return fmt.Errorf("物理归档任务快照失败: %w", err)
+	// 9. 记录当前审批步骤下的快照
+	if len(formValues) > 0 {
+		if err = s.repo.CreateTaskForm(ctx, opCtx.tID, opCtx.ticket.Id, formValues); err != nil {
+			return fmt.Errorf("物理归档任务快照失败: %w", err)
+		}
 	}
 
-	return s.engineSvc.Pass(ctx, taskId, comment)
+	return s.engine.Pass(ctx, domain.TaskPassReq{
+		EngineType: engineType,
+		TaskId:     opCtx.tID,
+		Operator:   operator,
+		Comment:    comment,
+		Variables:  mergeData,
+	})
 }
 
 // collectAndValidateFields 校验表单字段约束，并分别汇总待合并入工单的业务属性和快照属性
-func (s *ticketService) collectAndValidateFields(fields []easyflow.Field, extraData map[string]interface{}) (map[string]interface{}, []domain.FormValue, error) {
+func (s *ticketService) collectAndValidateFields(fields []flowdsl.Field, extraData map[string]interface{}) (map[string]interface{}, []domain.FormValue, error) {
 	mergeData := make(map[string]interface{})
 	var formValues []domain.FormValue
 
-	for _, field := range fields {
-		if field.Type == easyflow.FieldTips {
-			continue
-		}
+	// 先利用 lo.Filter 滤除纯静态说明文本组件，扁平化主干校验与收集循环
+	interactiveFields := lo.Filter(fields, func(f flowdsl.Field, _ int) bool {
+		return f.Type != flowdsl.FieldTips
+	})
 
+	for _, field := range interactiveFields {
 		val, exists := extraData[field.Key]
 		if err := s.validateField(field, exists, val); err != nil {
 			return nil, nil, err
@@ -355,97 +412,74 @@ func (s *ticketService) collectAndValidateFields(fields []easyflow.Field, extraD
 }
 
 // Reject 审批节点驳回
-func (s *ticketService) Reject(ctx context.Context, taskId int, operator string, isAdmin bool, comment string) error {
-	taskInfo, err := s.engineSvc.TaskInfo(ctx, taskId)
+func (s *ticketService) Reject(ctx context.Context, ticketId int64, taskId string, operator string, isAdmin bool, comment string) error {
+	opCtx, err := s.prepareOperableTask(ctx, ticketId, taskId, operator, "驳回", isAdmin)
 	if err != nil {
-		return fmt.Errorf("获取任务明细失败: %w", err)
-	}
-
-	// 领域层自卫校验：断言是否已被处理及操作人权限
-	if err = domain.ValidateTaskOperable(taskInfo.UserID, taskInfo.IsFinished == 1, operator, isAdmin); err != nil {
 		return err
 	}
 
-	// 记录管理员代办审计日志
-	if isAdmin && taskInfo.UserID != operator {
-		s.l.Info("管理员代办他人审批任务[驳回]",
-			elog.String("admin", operator),
-			elog.Int("taskId", taskId),
-			elog.String("originalAssignee", taskInfo.UserID),
-		)
-	}
-
-	return s.engineSvc.Reject(ctx, taskId, comment)
+	return s.engine.Reject(ctx, domain.TaskRejectReq{
+		EngineType: opCtx.ticket.Process.ResolveEngineType(),
+		TaskId:     opCtx.tID,
+		Operator:   operator,
+		Comment:    comment,
+	})
 }
 
 // Transfer 审批任务转签指派
-func (s *ticketService) Transfer(ctx context.Context, taskId int, operator string, isAdmin bool, targetUsers []string) error {
+func (s *ticketService) Transfer(ctx context.Context, ticketId int64, taskId string, operator string, isAdmin bool, targetUsers []string) error {
 	if len(targetUsers) == 0 {
 		return fmt.Errorf("%w: 转签目标用户不能为空", domain.ErrInvalidParameter)
 	}
 
-	taskInfo, err := s.engineSvc.TaskInfo(ctx, taskId)
+	opCtx, err := s.prepareOperableTask(ctx, ticketId, taskId, operator, "转签", isAdmin)
 	if err != nil {
-		return fmt.Errorf("获取任务明细失败: %w", err)
-	}
-
-	// 领域层自卫校验：断言是否已被处理及操作人权限
-	if err = domain.ValidateTaskOperable(taskInfo.UserID, taskInfo.IsFinished == 1, operator, isAdmin); err != nil {
 		return err
 	}
 
-	// 记录管理员代办审计日志
-	if isAdmin && taskInfo.UserID != operator {
-		s.l.Info("管理员代办他人转签任务",
-			elog.String("admin", operator),
-			elog.Int("taskId", taskId),
-			elog.String("originalAssignee", taskInfo.UserID),
-		)
-	}
-
-	_, err = s.engineSvc.Transfer(ctx, taskId, targetUsers)
-	return err
+	return s.engine.Transfer(ctx, domain.TaskTransferReq{
+		EngineType:  opCtx.ticket.Process.ResolveEngineType(),
+		TaskId:      opCtx.tID,
+		TargetUsers: targetUsers,
+	})
 }
 
 // GetTaskFormConfig 获取指定任务节点在流程版本中定义的表单字段配置
-func (s *ticketService) GetTaskFormConfig(ctx context.Context, taskId int, workflowId int64) ([]easyflow.Field, error) {
-	info, err := s.engineSvc.TaskInfo(ctx, taskId)
+func (s *ticketService) GetTaskFormConfig(ctx context.Context, ticketId int64, taskId string, workflowId int64) ([]flowdsl.Field, error) {
+	opCtx, err := s.loadTaskContext(ctx, ticketId, taskId)
 	if err != nil {
 		return nil, err
 	}
 
-	inst, err := s.engineSvc.GetInstanceByID(ctx, info.ProcInstID)
+	wfID := workflowId
+	if wfID <= 0 {
+		wfID = opCtx.ticket.WorkflowId
+	}
+
+	engineType := opCtx.ticket.Process.ResolveEngineType()
+	targetWf, err := s.workflowSvc.FindInstanceFlow(ctx, wfID, opCtx.taskInfo.ProcessID, opCtx.taskInfo.ProcessVersion, engineType)
 	if err != nil {
 		return nil, err
 	}
 
-	wf, err := s.workflowSvc.FindInstanceFlow(ctx, workflowId, inst.ProcID, inst.ProcVersion)
+	graph, err := flowdsl.Parse(targetWf.FlowData)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("解析流程拓扑失败: %w", err)
+	}
+	node, ok := graph.GetNode(opCtx.taskInfo.NodeID)
+	if !ok {
+		return []flowdsl.Field{}, nil
 	}
 
-	nodes, err := easyflow.ParseNodes(wf.FlowData.Nodes)
-	if err != nil {
-		return nil, err
+	if userCfg, isUser := node.AsUserTask(); isUser {
+		return userCfg.Fields, nil
 	}
 
-	targetNode, found := lo.Find(nodes, func(node easyflow.Node) bool {
-		return node.ID == info.NodeID
-	})
-	if !found {
-		return []easyflow.Field{}, nil
-	}
-
-	property, err1 := easyflow.ToNodeProperty[easyflow.UserProperty](targetNode)
-	if err1 != nil {
-		return nil, err1
-	}
-
-	return property.Fields, nil
+	return []flowdsl.Field{}, nil
 }
 
 // validateField 校验表单字段的规则约束
-func (s *ticketService) validateField(field easyflow.Field, exists bool, val any) error {
+func (s *ticketService) validateField(field flowdsl.Field, exists bool, val any) error {
 	if field.Required && (!exists || val == nil || val == "") {
 		return fmt.Errorf("%w: [%s] 为必填项，请输入填写", ValidationError, field.Name)
 	}
@@ -510,11 +544,9 @@ func (s *ticketService) sendGenerateFlowEvent(ctx context.Context, req domain.Ti
 }
 
 func (s *ticketService) variables(req domain.Ticket) ([]event.Variables, error) {
-	var data []event.Variables
-	data = append(data, event.Variables{
-		Key:   "starter",
-		Value: req.CreateBy,
-	})
+	data := []event.Variables{
+		{Key: "starter", Value: req.CreateBy},
+	}
 
 	switch req.Provide {
 	case domain.WECHAT:
@@ -522,15 +554,15 @@ func (s *ticketService) variables(req domain.Ticket) ([]event.Variables, error) 
 		if err != nil {
 			return nil, err
 		}
-
 		data = convert(data, oaData)
 	case domain.SYSTEM:
-		for key, value := range req.Data {
-			data = append(data, event.Variables{
+		systemVars := lo.MapToSlice(req.Data, func(key string, value any) event.Variables {
+			return event.Variables{
 				Key:   key,
 				Value: formatVariableValue(value),
-			})
-		}
+			}
+		})
+		data = append(data, systemVars...)
 	}
 
 	return data, nil
@@ -553,7 +585,7 @@ func formatVariableValue(value any) any {
 }
 
 func (s *ticketService) sendAppendAlertNotification(ctx context.Context, existingTicket domain.Ticket, newAlert domain.Ticket) error {
-	if existingTicket.Process.InstanceId == 0 {
+	if !existingTicket.Process.IsBound() {
 		s.l.Info("工单流程未启动，暂不发送追加告警通知",
 			elog.Int64("ticketId", existingTicket.Id))
 		return nil
@@ -561,7 +593,7 @@ func (s *ticketService) sendAppendAlertNotification(ctx context.Context, existin
 
 	s.l.Info("追加告警到已有工单",
 		elog.Int64("ticketId", existingTicket.Id),
-		elog.Int("processInstanceId", existingTicket.Process.InstanceId),
+		elog.String("processInstanceId", existingTicket.Process.DisplayID()),
 		elog.Int64("newAlertBizId", newAlert.BizID),
 		elog.String("newAlertKey", newAlert.Key))
 
@@ -572,65 +604,4 @@ func (s *ticketService) sendAppendAlertNotification(ctx context.Context, existin
 	}
 
 	return nil
-}
-
-func wechatOaData(data map[string]interface{}) (workwx.OAApprovalDetail, error) {
-	wechatOaJson, err := json.Marshal(data)
-	if err != nil {
-		return workwx.OAApprovalDetail{}, fmt.Errorf("序列化企微表单数据失败: %w", err)
-	}
-
-	var wechatOaDetail workwx.OAApprovalDetail
-	err = json.Unmarshal(wechatOaJson, &wechatOaDetail)
-	if err != nil {
-		return workwx.OAApprovalDetail{}, fmt.Errorf("反序列化企微审批详情失败: %w", err)
-	}
-
-	return wechatOaDetail, nil
-}
-
-func convert(data []event.Variables, oaData workwx.OAApprovalDetail) []event.Variables {
-	for _, contents := range oaData.ApplyData.Contents {
-		// 防御：控件 ID 可能不包含 "-" 或者是单个字符串
-		key := contents.ID
-		if idx := strings.Index(contents.ID, "-"); idx >= 0 && idx < len(contents.ID)-1 {
-			key = contents.ID[idx+1:]
-		}
-
-		switch contents.Control {
-		case "Selector":
-			switch contents.Value.Selector.Type {
-			case "single":
-				if len(contents.Value.Selector.Options) == 0 || len(contents.Value.Selector.Options[0].Value) == 0 {
-					continue
-				}
-				data = append(data, event.Variables{
-					Key:   key,
-					Value: contents.Value.Selector.Options[0].Value[0].Text,
-				})
-			case "multi":
-				value := lo.FilterMap(contents.Value.Selector.Options, func(src workwx.OAContentSelectorOption, _ int) (string, bool) {
-					if len(src.Value) == 0 {
-						return "", false
-					}
-					return src.Value[0].Text, true
-				})
-				if len(value) > 0 {
-					data = append(data, event.Variables{
-						Key:   key,
-						Value: value,
-					})
-				}
-			}
-		case "Textarea":
-			data = append(data, event.Variables{
-				Key:   key,
-				Value: contents.Value.Text,
-			})
-		default:
-			continue
-		}
-	}
-
-	return data
 }

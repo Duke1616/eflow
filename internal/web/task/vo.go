@@ -9,8 +9,8 @@ type Page struct {
 
 type ListTaskReq struct{ Page }
 
-type ListTaskByInstanceIDReq struct {
-	InstanceID int `json:"instance_id"`
+type ListTaskByTicketIDReq struct {
+	TicketID int64 `json:"ticket_id"`
 	Page
 }
 
@@ -36,7 +36,8 @@ type LogsReq struct {
 type Task struct {
 	ID                  int64  `json:"id"`
 	TicketID            int64  `json:"ticket_id"`
-	ProcessInstanceID   int    `json:"process_instance_id"`
+	EngineType          string `json:"engine_type"`
+	ProcessInstanceID   int64  `json:"process_instance_id"`
 	NodeID              string `json:"node_id"`
 	NodeName            string `json:"node_name"`
 	ProcessVersion      int    `json:"process_version"`

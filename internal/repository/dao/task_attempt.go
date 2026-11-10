@@ -24,9 +24,10 @@ type TaskAttempt struct {
 	RequestID       string                          `gorm:"column:request_id;type:varchar(128);not null;uniqueIndex:uk_attempt_request,priority:2;comment:'etask 幂等请求标识'"`
 	DefaultRunnerID int64                           `gorm:"column:default_runner_id;type:bigint;not null;default:0;index;comment:'节点默认 Runner ID'"`
 	RunnerID        int64                           `gorm:"column:runner_id;type:bigint;not null;index;comment:'本次选择的 Runner ID'"`
-	RouteRuleID     int64                           `gorm:"column:route_rule_id;type:bigint;not null;default:0;index;comment:'命中的 Runner 路由规则 ID，0 表示默认路由'"`
-	ExecutionID     sql.NullInt64                   `gorm:"column:execution_id;type:bigint;uniqueIndex;comment:'etask 执行 ID'"`
-	Status          string                          `gorm:"column:status;type:varchar(24);not null;index;comment:'执行尝试状态'"`
+	RouteRuleID         int64                           `gorm:"column:route_rule_id;type:bigint;not null;default:0;index;comment:'命中的 Runner 路由规则 ID，0 表示默认路由'"`
+	ExecutionID         sql.NullInt64                   `gorm:"column:execution_id;type:bigint;uniqueIndex;comment:'etask 执行 ID'"`
+	MaxExecutionSeconds int64                           `gorm:"column:max_execution_seconds;type:bigint;not null;default:0;comment:'最大执行超时时间(秒)'"`
+	Status              string                          `gorm:"column:status;type:varchar(24);not null;index;comment:'执行尝试状态'"`
 	Input           sqlx.JsonField[domain.TaskArgs] `gorm:"column:input;type:json;comment:'业务输入快照'"`
 	Output          string                          `gorm:"column:output;type:mediumtext;comment:'结构化执行输出'"`
 	Error           string                          `gorm:"column:error_message;type:text;comment:'提交或执行错误'"`
@@ -103,19 +104,24 @@ func (g *gormTaskAttemptDAO) Begin(ctx context.Context, taskID int64,
 		}
 		now := time.Now().UnixMilli()
 		attempt = TaskAttempt{
-			TaskID: taskID, AttemptNo: attemptNo,
-			RequestID:       fmt.Sprintf("eflow:%d:%d", taskID, attemptNo),
-			DefaultRunnerID: decision.DefaultRunnerID,
-			RunnerID:        decision.SelectedRunnerID,
-			RouteRuleID:     decision.RuleID,
-			Status:          string(domain.AttemptStatusSubmitting),
-			Input:           sqlx.JsonField[domain.TaskArgs]{Val: input, Valid: true}, CTime: now, UTime: now,
+			TenantID:            task.TenantID,
+			TaskID:              taskID,
+			AttemptNo:           attemptNo,
+			RequestID:           fmt.Sprintf("eflow:%d:%d", taskID, attemptNo),
+			DefaultRunnerID:     decision.DefaultRunnerID,
+			RunnerID:            decision.SelectedRunnerID,
+			RouteRuleID:         decision.RuleID,
+			MaxExecutionSeconds: decision.MaxExecutionSeconds,
+			Status:              string(domain.AttemptStatusSubmitting),
+			Input:               sqlx.JsonField[domain.TaskArgs]{Val: input, Valid: true},
+			CTime:               now,
+			UTime:               now,
 		}
 		if err := tx.Create(&attempt).Error; err != nil {
 			return err
 		}
 		return tx.Model(&Task{}).Where("id = ?", taskID).Updates(map[string]any{
-			"status": domain.TaskStatusSubmitting.ToUint8(), "phase": domain.TaskPhaseSubmitting,
+			"status": domain.TaskStatusSubmitting.ToUint8(),
 			"current_attempt_id": attempt.ID, "last_error": "", "utime": now,
 		}).Error
 	})
@@ -149,7 +155,7 @@ func (g *gormTaskAttemptDAO) BindExecution(ctx context.Context, attemptID, execu
 		return tx.Model(&Task{}).
 			Where("id = ? AND current_attempt_id = ? AND status = ?", attempt.TaskID, attempt.ID,
 				domain.TaskStatusSubmitting.ToUint8()).Updates(map[string]any{
-			"status": domain.TaskStatusRunning.ToUint8(), "phase": domain.TaskPhaseRunning,
+			"status": domain.TaskStatusRunning.ToUint8(),
 			"last_error": "", "utime": now,
 		}).Error
 	})
@@ -198,7 +204,7 @@ func (g *gormTaskAttemptDAO) RejectSubmission(ctx context.Context, attemptID int
 		return tx.Model(&Task{}).
 			Where("id = ? AND current_attempt_id = ? AND status = ?", attempt.TaskID, attempt.ID,
 				domain.TaskStatusSubmitting.ToUint8()).Updates(map[string]any{
-			"status": domain.TaskStatusBlocked.ToUint8(), "phase": domain.TaskPhaseBlocked,
+			"status": domain.TaskStatusBlocked.ToUint8(),
 			"last_error": reason, "utime": now,
 		}).Error
 	})
@@ -222,8 +228,8 @@ func (g *gormTaskAttemptDAO) TerminateTask(ctx context.Context,
 			result := tx.Model(&Task{}).
 				Where("id = ? AND status = ?", taskID, task.Status).
 				Updates(map[string]any{
-					"status": domain.TaskStatusCancelled.ToUint8(), "phase": domain.TaskPhaseCancelled,
-					"cancelled_at": now, "last_error": reason, "utime": now,
+					"status":     domain.TaskStatusCancelled.ToUint8(),
+					"last_error": reason, "utime": now,
 				})
 			if result.Error != nil {
 				return result.Error
@@ -272,15 +278,12 @@ func (g *gormTaskAttemptDAO) Complete(ctx context.Context, requestID, status, ou
 		now := time.Now().UnixMilli()
 		attemptStatus := domain.AttemptStatusFailed
 		taskStatus := domain.TaskStatusFailed
-		phase := domain.TaskPhaseFailed
 		if status == string(domain.AttemptStatusSuccess) {
 			attemptStatus = domain.AttemptStatusSuccess
 			taskStatus = domain.TaskStatusSuccess
-			phase = domain.TaskPhaseSucceeded
 		} else if status == string(domain.AttemptStatusCancelled) {
 			attemptStatus = domain.AttemptStatusCancelled
 			taskStatus = domain.TaskStatusCancelled
-			phase = domain.TaskPhaseCancelled
 		}
 		if err := tx.Model(&TaskAttempt{}).Where("id = ?", attempt.ID).Updates(map[string]any{
 			"status": attemptStatus, "output": output, "error_message": reason,
@@ -292,7 +295,7 @@ func (g *gormTaskAttemptDAO) Complete(ctx context.Context, requestID, status, ou
 			Where("id = ? AND current_attempt_id = ? AND status IN ?", attempt.TaskID, attempt.ID, []int{
 				int(domain.TaskStatusSubmitting), int(domain.TaskStatusRunning),
 			}).Updates(map[string]any{
-			"status": taskStatus.ToUint8(), "phase": phase, "last_error": reason, "utime": now,
+			"status": taskStatus.ToUint8(), "last_error": reason, "utime": now,
 		}).Error; err != nil {
 			return err
 		}

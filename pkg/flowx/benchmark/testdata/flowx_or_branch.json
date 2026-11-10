@@ -1,0 +1,186 @@
+{
+  "nodes": [
+    {
+      "id": "or-branch-node-1",
+      "type": "start",
+      "x": 120,
+      "y": 200,
+      "text": {
+        "x": 120,
+        "y": 200,
+        "value": "开始"
+      },
+      "properties": {
+        "id": "or-branch-node-1",
+        "name": "开始"
+      }
+    },
+    {
+      "id": "or-branch-node-2",
+      "type": "inclusion",
+      "x": 280,
+      "y": 200,
+      "text": {
+        "x": 280,
+        "y": 200,
+        "value": ""
+      },
+      "properties": {
+        "id": "or-branch-node-2",
+        "name": "包容分流网关"
+      }
+    },
+    {
+      "id": "or-branch-node-3",
+      "type": "user",
+      "x": 460,
+      "y": 120,
+      "text": {
+        "x": 460,
+        "y": 120,
+        "value": "审批人 A"
+      },
+      "properties": {
+        "id": "or-branch-node-3",
+        "name": "审批人 A",
+        "user_type": "assignee",
+        "assignees": [
+          {
+            "rule": "appoint",
+            "values": [
+              "bob"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "or-branch-node-4",
+      "type": "user",
+      "x": 460,
+      "y": 280,
+      "text": {
+        "x": 460,
+        "y": 280,
+        "value": "审批人 B"
+      },
+      "properties": {
+        "id": "or-branch-node-4",
+        "name": "审批人 B",
+        "user_type": "assignee",
+        "assignees": [
+          {
+            "rule": "appoint",
+            "values": [
+              "carol"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "or-branch-node-5",
+      "type": "condition",
+      "x": 640,
+      "y": 200,
+      "text": {
+        "x": 640,
+        "y": 200,
+        "value": ""
+      },
+      "properties": {
+        "id": "or-branch-node-5",
+        "name": "排他汇聚网关"
+      }
+    },
+    {
+      "id": "or-branch-node-6",
+      "type": "end",
+      "x": 800,
+      "y": 200,
+      "text": {
+        "x": 800,
+        "y": 200,
+        "value": "结束"
+      },
+      "properties": {
+        "id": "or-branch-node-6",
+        "name": "结束"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "or-branch-node-7",
+      "type": "polyline",
+      "sourceNodeId": "or-branch-node-1",
+      "targetNodeId": "or-branch-node-2",
+      "text": {
+        "x": 200,
+        "y": 200,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "or-branch-node-8",
+      "type": "polyline",
+      "sourceNodeId": "or-branch-node-2",
+      "targetNodeId": "or-branch-node-3",
+      "text": {
+        "x": 370,
+        "y": 150,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "or-branch-node-9",
+      "type": "polyline",
+      "sourceNodeId": "or-branch-node-2",
+      "targetNodeId": "or-branch-node-4",
+      "text": {
+        "x": 370,
+        "y": 250,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "or-branch-node-10",
+      "type": "polyline",
+      "sourceNodeId": "or-branch-node-3",
+      "targetNodeId": "or-branch-node-5",
+      "text": {
+        "x": 550,
+        "y": 150,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "or-branch-node-11",
+      "type": "polyline",
+      "sourceNodeId": "or-branch-node-4",
+      "targetNodeId": "or-branch-node-5",
+      "text": {
+        "x": 550,
+        "y": 250,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "or-branch-node-12",
+      "type": "polyline",
+      "sourceNodeId": "or-branch-node-5",
+      "targetNodeId": "or-branch-node-6",
+      "text": {
+        "x": 720,
+        "y": 200,
+        "value": ""
+      },
+      "properties": {}
+    }
+  ]
+}

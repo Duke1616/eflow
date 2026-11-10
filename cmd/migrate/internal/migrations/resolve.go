@@ -87,8 +87,7 @@ SELECT GREATEST(
     COALESCE((SELECT MAX(proc_inst_id) FROM hist_proc_task), 0),
     COALESCE((SELECT MAX(proc_inst_id) FROM proc_inst_variable), 0),
     COALESCE((SELECT MAX(proc_inst_id) FROM hist_proc_inst_variable), 0),
-    COALESCE((SELECT MAX(process_instance_id) FROM ticket), 0),
-    COALESCE((SELECT MAX(process_instance_id) FROM automation_tasks), 0)
+    COALESCE((SELECT MAX(process_instance_id) FROM ticket), 0)
 ) + 1
 `).Scan(&nextID).Error
 	if err != nil {
@@ -119,9 +118,17 @@ func readAutoIncrement(ctx context.Context, db *gorm.DB, name, table string) int
 }
 
 // updateFlowNodesCodebookIDs 将节点列表 properties 中的 codebook_uid 修改为 codebook_id，就地修改并返回是否发生变更
-func updateFlowNodesCodebookIDs(nodes []domain.FlowNode, lookup map[string]int64) bool {
+func updateFlowNodesCodebookIDs(flowData domain.CanvasData, lookup map[string]int64) bool {
+	rawNodes, ok := flowData["nodes"].([]any)
+	if !ok {
+		return false
+	}
 	changed := false
-	for i, node := range nodes {
+	for _, rawNode := range rawNodes {
+		node, ok := rawNode.(map[string]any)
+		if !ok {
+			continue
+		}
 		props, ok := node["properties"].(map[string]any)
 		if !ok {
 			continue
@@ -133,7 +140,7 @@ func updateFlowNodesCodebookIDs(nodes []domain.FlowNode, lookup map[string]int64
 		if cbID, exists := lookup[strings.TrimSpace(uidVal)]; exists {
 			props["codebook_id"] = cbID
 			delete(props, "codebook_uid")
-			nodes[i]["properties"] = props
+			node["properties"] = props
 			changed = true
 		}
 	}
@@ -159,7 +166,7 @@ func ResolveWorkflowCodebookIDs(ctx context.Context, env migration.MigrationEnv)
 
 	return env.MySQLDst.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, wf := range wfs {
-			if updateFlowNodesCodebookIDs(wf.FlowData.Val.Nodes, lookup) {
+			if updateFlowNodesCodebookIDs(wf.FlowData.Val, lookup) {
 				if err := tx.Model(&dao.Workflow{}).
 					Where("id = ?", wf.Id).
 					Update("flow_data", wf.FlowData).Error; err != nil {
@@ -190,7 +197,7 @@ func ResolveWorkflowInstanceFlowCodebookIDs(ctx context.Context, env migration.M
 
 	return env.MySQLDst.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, snap := range snapshots {
-			if updateFlowNodesCodebookIDs(snap.FlowData.Val.Nodes, lookup) {
+			if updateFlowNodesCodebookIDs(snap.FlowData.Val, lookup) {
 				if err := tx.Model(&dao.Snapshot{}).
 					Where("id = ?", snap.Id).
 					Update("flow_data", snap.FlowData).Error; err != nil {

@@ -1,5 +1,20 @@
 package domain
 
+import (
+	"strings"
+
+	"github.com/Duke1616/eflow/internal/errs"
+)
+
+var (
+	ErrTaskCannotRetry                  = errs.BadRequest("TASK_CANNOT_RETRY", "只有失败、阻塞或已取消的自动化任务可以重试")
+	ErrTaskNotTerminable                = errs.BadRequest("TASK_NOT_TERMINABLE", "当前自动化任务不能终止")
+	ErrTaskAlreadySucceeded             = errs.Conflict("TASK_ALREADY_SUCCEEDED", "任务已经成功")
+	ErrCompensationNotTerminable        = errs.Conflict("COMPENSATION_NOT_TERMINABLE", "撤回补偿任务必须成功才能完成撤回")
+	ErrCancelledTaskRequiresManualRetry = errs.BadRequest("CANCELLED_TASK_MANUAL_RETRY", "已取消的自动化任务只支持人工重试")
+	ErrTaskMaxAttemptsExceeded          = errs.Conflict("TASK_MAX_ATTEMPTS_EXCEEDED", "超过最大执行尝试次数")
+)
+
 // TaskStatus 表示自动化节点在流程编排中的状态。
 type TaskStatus uint8
 
@@ -29,6 +44,28 @@ func (s TaskStatus) CanTerminate() bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// ToPhase 根据当前任务状态派生阶段文案枚举（表现层与向下兼容）。
+func (s TaskStatus) ToPhase() TaskPhase {
+	switch s {
+	case TaskStatusSuccess:
+		return TaskPhaseSucceeded
+	case TaskStatusFailed:
+		return TaskPhaseFailed
+	case TaskStatusRunning:
+		return TaskPhaseRunning
+	case TaskStatusWaiting:
+		return TaskPhaseReady
+	case TaskStatusBlocked:
+		return TaskPhaseBlocked
+	case TaskStatusSubmitting:
+		return TaskPhaseSubmitting
+	case TaskStatusCancelled:
+		return TaskPhaseCancelled
+	default:
+		return TaskPhaseReady
 	}
 }
 
@@ -66,14 +103,14 @@ func (s AttemptStatus) IsTerminal() bool {
 }
 
 // TaskArgs 是一次执行尝试保存的业务输入快照。
-type TaskArgs map[string]any
+type TaskArgs = Variables
 
 // Task 表示一个流程实例中的自动化节点，不保存 etask 执行实现细节。
 type Task struct {
 	ID                  int64
 	TenantID            int64
 	TicketID            int64
-	ProcessInstanceID   int
+	InstanceID          ID // 流程实例唯一标识，对齐全局多态标识规范 domain.ID
 	NodeID              string
 	NodeName            string
 	ProcessVersion      int
@@ -92,7 +129,91 @@ type Task struct {
 	UTime               int64
 }
 
-// AttemptStatus 表示一次 etask 提交尝试的生命周期。
+// NewProcessTask 创建流程编排自动化任务实体。
+func NewProcessTask(tenantID, ticketID int64, instanceID ID, nodeID, nodeName string, version int) Task {
+	return Task{
+		TenantID:       tenantID,
+		TicketID:       ticketID,
+		InstanceID:     instanceID,
+		NodeID:         nodeID,
+		NodeName:       nodeName,
+		ProcessVersion: version,
+		Status:         TaskStatusWaiting,
+		ExecutionKind:  TaskExecutionProcess,
+	}
+}
+
+// Block 将任务置为阻塞状态。
+func (t *Task) Block(reason string) {
+	t.Status = TaskStatusBlocked
+	t.LastError = reason
+}
+
+// Schedule 设置自动化任务计划执行时间与补偿节点。
+func (t *Task) Schedule(scheduledAt int64, compensationNodeID string) {
+	t.ScheduledAt = scheduledAt
+	t.CompensationNodeID = compensationNodeID
+}
+
+// IsWaiting 判断任务是否处于等待启动状态。
+func (t *Task) IsWaiting() bool {
+	return t.Status == TaskStatusWaiting
+}
+
+// IsPendingSubmission 判断任务当前是否处于提交或执行中等待绑定状态。
+func (t *Task) IsPendingSubmission() bool {
+	return t.CurrentAttemptID > 0 && (t.Status == TaskStatusSubmitting || t.Status == TaskStatusRunning)
+}
+
+// ShouldStartImmediately 判断新创建的任务是否达到立即执行条件。
+func (t *Task) ShouldStartImmediately(nowMillis int64, ticketStatus Status) bool {
+	return t.ScheduledAt <= nowMillis && ticketStatus == PROCESS
+}
+
+// ValidateTerminable 校验当前任务是否允许强制终止。
+func (t *Task) ValidateTerminable() error {
+	if t.ExecutionKind == TaskExecutionCompensation {
+		return ErrCompensationNotTerminable
+	}
+	if t.Status == TaskStatusSuccess {
+		return ErrTaskAlreadySucceeded
+	}
+	// 已取消任务允许发起终止以幂等补发底层终结信号；其余状态必须符合可终止约束
+	if t.Status != TaskStatusCancelled && !t.Status.CanTerminate() {
+		return ErrTaskNotTerminable
+	}
+	return nil
+}
+
+// ValidateRetry 校验当前任务是否满足重试条件。
+func (t *Task) ValidateRetry(automatic bool) error {
+	if !t.Status.CanRetry() {
+		return ErrTaskCannotRetry
+	}
+	if t.Status == TaskStatusCancelled && automatic {
+		return ErrCancelledTaskRequiresManualRetry
+	}
+	return nil
+}
+
+// HasExecution 判断当前执行尝试是否已成功关联外部执行标识。
+func (a TaskAttempt) HasExecution() bool {
+	return a.ExecutionID > 0
+}
+
+// HasIdentifiableRequest 判断尝试是否存在有效的外部幂等标识。
+func (a TaskAttempt) HasIdentifiableRequest() bool {
+	return a.ExecutionID > 0 || strings.TrimSpace(a.RequestID) != ""
+}
+
+// NeedsRemoteTermination 判断执行尝试在终止时是否需要向外部执行引擎补发物理取消信号。
+func (a TaskAttempt) NeedsRemoteTermination() bool {
+	if a.ID <= 0 {
+		return false
+	}
+	return !a.Status.IsTerminal() || a.Status == AttemptStatusCancelled
+}
+
 type AttemptStatus string
 
 const (
@@ -112,9 +233,10 @@ type TaskAttempt struct {
 	RequestID       string
 	DefaultRunnerID int64
 	RunnerID        int64
-	RouteRuleID     int64
-	ExecutionID     int64
-	Status          AttemptStatus
+	RouteRuleID         int64
+	ExecutionID         int64
+	MaxExecutionSeconds int64
+	Status              AttemptStatus
 	Input           TaskArgs
 	Output          string
 	Error           string

@@ -11,14 +11,14 @@ import (
 type TaskContext struct {
 	Instance  *model.Instance
 	Node      *model.NodeSpec
-	Variables map[string]any
+	Variables model.Variables
 	Attempt   int // 当前执行轮次 (从 1 开始)
 }
 
 // TaskResult 自动化任务执行产物
 type TaskResult struct {
 	// Variables 任务产出的增量业务变量，将安全合并至流程实例
-	Variables map[string]any
+	Variables model.Variables
 }
 
 // TaskWorker 自动化任务执行器函数签名

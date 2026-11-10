@@ -10,9 +10,9 @@ import (
 
 // loadOrDeployDefinition 加载已发布流程定义，或自动部署请求中附带的临时流程快照
 func (e *flowEngine) loadOrDeployDefinition(ctx context.Context, req StartReq) (model.ProcessDefinition, error) {
-	if req.Def != nil {
-		def := *req.Def
-		if err := e.Deploy(ctx, def); err != nil {
+	if req.Def.Key != "" {
+		def, err := e.Deploy(ctx, req.Def)
+		if err != nil {
 			return model.ProcessDefinition{}, fmt.Errorf("部署流程定义失败: %w", err)
 		}
 		return def, nil
@@ -20,7 +20,15 @@ func (e *flowEngine) loadOrDeployDefinition(ctx context.Context, req StartReq) (
 
 	version := req.Version
 	if version <= 0 {
-		version = 1
+		latest, err := e.storage.GetLatestVersion(ctx, req.Key)
+		if err != nil {
+			return model.ProcessDefinition{}, fmt.Errorf("获取流程最新版本失败: %w", err)
+		}
+		if latest > 0 {
+			version = latest
+		} else {
+			version = 1
+		}
 	}
 	plan, err := e.planCache.GetOrLoad(ctx, req.Key, version, func(c context.Context) (model.ProcessDefinition, error) {
 		return e.storage.GetDefinition(c, req.Key, version)
@@ -31,26 +39,15 @@ func (e *flowEngine) loadOrDeployDefinition(ctx context.Context, req StartReq) (
 	return plan.Def, nil
 }
 
-// loadAndValidateTaskForPass 加载待办任务并校验审批人权限
-func (e *flowEngine) loadAndValidateTaskForPass(ctx context.Context, taskID, operator string) (*model.Task, *model.Instance, error) {
-	return e.loadAndValidateTask(ctx, taskID, operator)
-}
-
-// loadAndValidateTaskForReject 加载待办任务供审批驳回
-func (e *flowEngine) loadAndValidateTaskForReject(ctx context.Context, taskID string) (*model.Task, *model.Instance, error) {
-	return e.loadAndValidateTask(ctx, taskID, "")
-}
-
-func (e *flowEngine) loadAndValidateTask(ctx context.Context, taskID, operator string) (*model.Task, *model.Instance, error) {
+// loadAndValidateTask 加载待办任务并执行客观物理运行态校验 (防并发重复处理、防终态非法流转)
+// 架构遵循机制与策略分离原则。身份权限(代办/委托/管理/PBAC)由业务层或洋葱中间件决策，内核仅验证物理状态
+func (e *flowEngine) loadAndValidateTask(ctx context.Context, taskID string) (*model.Task, *model.Instance, error) {
 	task, err := e.storage.GetTaskForUpdate(ctx, taskID)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !task.IsPending() {
 		return nil, nil, ErrTaskNotPending
-	}
-	if operator != "" && task.Assignee != operator {
-		return nil, nil, fmt.Errorf("%w: 任务指派人 [%s], 当前操作人 [%s]", ErrUnauthorizedAssignee, task.Assignee, operator)
 	}
 
 	inst, err := e.storage.GetInstanceForUpdate(ctx, task.InstanceID)

@@ -28,6 +28,10 @@ func (d *Decorator) GetDefinition(ctx context.Context, key string, version int) 
 	return d.target.GetDefinition(ctx, key, version)
 }
 
+func (d *Decorator) GetLatestVersion(ctx context.Context, key string) (int, error) {
+	return d.target.GetLatestVersion(ctx, key)
+}
+
 func (d *Decorator) SaveInstance(ctx context.Context, inst *model.Instance) error {
 	return d.target.SaveInstance(ctx, inst)
 }
@@ -54,6 +58,14 @@ func (d *Decorator) GetTaskForUpdate(ctx context.Context, id string) (*model.Tas
 
 func (d *Decorator) ListTasksByInstance(ctx context.Context, instID string) ([]*model.Task, error) {
 	return d.target.ListTasksByInstance(ctx, instID)
+}
+
+func (d *Decorator) ListPendingTasksByInstances(ctx context.Context, instIDs []string) ([]*model.Task, error) {
+	return d.target.ListPendingTasksByInstances(ctx, instIDs)
+}
+
+func (d *Decorator) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
+	return d.target.ListPendingTasksByAssignee(ctx, assignee, offset, limit)
 }
 
 func (d *Decorator) UpdateTask(ctx context.Context, task *model.Task) error {

@@ -19,9 +19,10 @@ type Workflow struct {
 	Icon         string                    `gorm:"column:icon;type:varchar(256);comment:'流程设计器图标'"`
 	Owner        string                    `gorm:"column:owner;type:varchar(128);comment:'流程设计所有者/管理员'"`
 	Desc         string                    `gorm:"column:desc;type:text;comment:'流程说明描述'"`
-	ProcessId    int                       `gorm:"column:process_id;type:int;comment:'关联工作流引擎部署的流程模型ID'"`
-	FlowData     sqlx.JsonField[LogicFlow] `gorm:"column:flow_data;type:json;comment:'LogicFlow图形化流程拓扑节点关系json'"`
-	IsNotify     bool                      `gorm:"column:is_notify;type:tinyint(1);default:0;comment:'流程审批流转时是否触发发送通知'"`
+	ProcessId    int                              `gorm:"column:process_id;type:int;comment:'关联工作流引擎部署的流程模型ID'"`
+	EngineType   string                           `gorm:"column:engine_type;type:varchar(32);not null;default:'easy-workflow';comment:'工作流引擎类型(easy-workflow/flowx)'"`
+	FlowData     sqlx.JsonField[domain.CanvasData] `gorm:"column:flow_data;type:json;comment:'图形化流程拓扑节点关系json'"`
+	IsNotify     bool                             `gorm:"column:is_notify;type:tinyint(1);default:0;comment:'流程审批流转时是否触发发送通知'"`
 	NotifyMethod uint8                     `gorm:"column:notify_method;type:tinyint unsigned;comment:'流程通知首选投递渠道类型'"`
 	Ctime        int64                     `gorm:"column:ctime;type:bigint;comment:'创建时间(毫秒)'"`
 	Utime        int64                     `gorm:"column:utime;type:bigint;comment:'修改时间(毫秒)'"`
@@ -32,22 +33,17 @@ func (Workflow) TableName() string {
 	return "workflow"
 }
 
-// LogicFlow 前端流程设计器对应的 JSON 表达结构
-type LogicFlow struct {
-	Edges []domain.FlowEdge `json:"edges"`
-	Nodes []domain.FlowNode `json:"nodes"`
-}
-
 // Snapshot 流程定义发布版本画布快照物理实体
 type Snapshot struct {
-	Id             int64                     `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'快照唯一自增ID'"`
-	TenantID       int64                     `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
-	WorkflowId     int64                     `gorm:"column:workflow_id;type:bigint;not null;uniqueIndex:uix_wf_process_version;comment:'绑定的工作流定义ID'"`
-	ProcessId      int                       `gorm:"column:process_id;type:int;not null;uniqueIndex:uix_wf_process_version;comment:'关联引擎部署的流程模型ID'"`
-	ProcessVersion int                       `gorm:"column:process_version;type:int;not null;uniqueIndex:uix_wf_process_version;comment:'对应流程发布版本号'"`
-	Name           string                    `gorm:"column:name;type:varchar(128);not null;comment:'快照名字'"`
-	FlowData       sqlx.JsonField[LogicFlow] `gorm:"column:flow_data;type:json;comment:'发布快照时对应的画布拓扑结构数据json'"`
-	Ctime          int64                     `gorm:"column:ctime;type:bigint;comment:'创建时间(毫秒)'"`
+	Id             int64                             `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'快照唯一自增ID'"`
+	TenantID       int64                             `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
+	WorkflowId     int64                             `gorm:"column:workflow_id;type:bigint;not null;uniqueIndex:uix_wf_engine_version;comment:'绑定的工作流定义ID'"`
+	ProcessId      int                               `gorm:"column:process_id;type:int;not null;comment:'关联引擎部署的流程模型ID'"`
+	ProcessVersion int                               `gorm:"column:process_version;type:int;not null;uniqueIndex:uix_wf_engine_version;comment:'对应流程发布版本号'"`
+	EngineType     string                            `gorm:"column:engine_type;type:varchar(32);not null;default:'easy-workflow';uniqueIndex:uix_wf_engine_version;comment:'工作流引擎类型(easy-workflow/flowx)'"`
+	Name           string                            `gorm:"column:name;type:varchar(128);not null;comment:'快照名字'"`
+	FlowData       sqlx.JsonField[domain.CanvasData] `gorm:"column:flow_data;type:json;comment:'发布快照时对应的画布拓扑结构数据json'"`
+	Ctime          int64                             `gorm:"column:ctime;type:bigint;comment:'创建时间(毫秒)'"`
 }
 
 // TableName 指定物理表名
@@ -85,6 +81,10 @@ type ISnapshotDAO interface {
 	CreateSnapshot(ctx context.Context, snapshot Snapshot) error
 	// FindSnapshotByProcess 根据底层关联的流程引擎 ID 与发布的对应版本号精确检索快照数据
 	FindSnapshotByProcess(ctx context.Context, processID, version int) (Snapshot, error)
+	// FindSnapshotByWorkflowVersion 精确依据工作流 ID、引擎类型与版本号定位快照，避免跨引擎版本冲突
+	FindSnapshotByWorkflowVersion(ctx context.Context, workflowID int64, engineType string, version int) (Snapshot, error)
+	// GetMaxSnapshotVersion 获取指定工作流在特定引擎类型下当前已发布的最大快照版本号（engineType 为空则不限制引擎）
+	GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...string) (int, error)
 }
 
 // IWorkflowDAO 工作流数据层大组合接口 (遵循 ISP 接口隔离原则拆分再优雅嵌入组合)
@@ -137,10 +137,14 @@ func (g *gormWorkflowDAO) UpdateWorkflow(ctx context.Context, w Workflow) (int64
 		"name":          w.Name,
 		"desc":          w.Desc,
 		"owner":         w.Owner,
+		"icon":          w.Icon,
 		"is_notify":     w.IsNotify,
 		"notify_method": w.NotifyMethod,
 		"flow_data":     w.FlowData,
 		"utime":         time.Now().UnixMilli(),
+	}
+	if w.EngineType != "" {
+		updates["engine_type"] = w.EngineType
 	}
 	result := g.db.WithContext(ctx).Model(&Workflow{}).Where("id = ?", w.Id).Updates(updates)
 	return result.RowsAffected, result.Error
@@ -207,8 +211,8 @@ func (g *gormWorkflowDAO) CountByKeyword(ctx context.Context, keyword string) (i
 func (g *gormWorkflowDAO) CreateSnapshot(ctx context.Context, snapshot Snapshot) error {
 	snapshot.Ctime = time.Now().UnixMilli()
 	return g.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "workflow_id"}, {Name: "process_id"}, {Name: "process_version"}},
-		DoUpdates: clause.AssignmentColumns([]string{"name", "flow_data", "ctime"}),
+		Columns:   []clause.Column{{Name: "workflow_id"}, {Name: "engine_type"}, {Name: "process_version"}},
+		DoUpdates: clause.AssignmentColumns([]string{"name", "process_id", "flow_data", "ctime"}),
 	}).Create(&snapshot).Error
 }
 
@@ -218,4 +222,24 @@ func (g *gormWorkflowDAO) FindSnapshotByProcess(ctx context.Context, processID, 
 		Where("process_id = ? AND process_version = ?", processID, version).
 		First(&s).Error
 	return s, err
+}
+
+func (g *gormWorkflowDAO) FindSnapshotByWorkflowVersion(ctx context.Context, workflowID int64, engineType string, version int) (Snapshot, error) {
+	var s Snapshot
+	query := g.db.WithContext(ctx).Where("workflow_id = ? AND process_version = ?", workflowID, version)
+	if engineType != "" {
+		query = query.Where("engine_type = ?", engineType)
+	}
+	err := query.First(&s).Error
+	return s, err
+}
+
+func (g *gormWorkflowDAO) GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...string) (int, error) {
+	var maxVer int
+	query := g.db.WithContext(ctx).Model(&Snapshot{}).Where("workflow_id = ?", workflowID)
+	if len(engineType) > 0 && engineType[0] != "" {
+		query = query.Where("engine_type = ?", engineType[0])
+	}
+	err := query.Select("COALESCE(MAX(process_version), 0)").Scan(&maxVer).Error
+	return maxVer, err
 }

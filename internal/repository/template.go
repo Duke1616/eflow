@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/errs"
 	"github.com/Duke1616/eflow/internal/repository/dao"
 	"github.com/Duke1616/eflow/pkg/sqlx"
 	"github.com/samber/lo"
@@ -17,7 +18,7 @@ var (
 	// ErrTemplateNotFound 未找到对应工单模板的仓储层 Sentinel 错误
 	ErrTemplateNotFound = gorm.ErrRecordNotFound
 	// ErrTemplateGroupNotEmpty 删除分组前发现分组内仍存在模板
-	ErrTemplateGroupNotEmpty = errors.New("请先删除分组下的模板后再删除分组")
+	ErrTemplateGroupNotEmpty = errs.Conflict("TEMPLATE_GROUP_NOT_EMPTY", "请先删除分组下的模板后再删除分组")
 )
 
 // ITemplateCoreRepository 工单模板核心防腐仓储子接口

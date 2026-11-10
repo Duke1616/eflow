@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
@@ -20,13 +21,13 @@ var (
 // WithdrawalDAO 持久化工单撤回状态机及其关联自动化任务迁移。
 type WithdrawalDAO interface {
 	// Prepare 加锁校验工单和运行中任务，并原子写入撤回中状态及撤单原因。
-	Prepare(ctx context.Context, processInstanceID int, reason string) error
+	Prepare(ctx context.Context, instanceID domain.ID, reason string) error
 	// ActivateCompensations 激活指定补偿任务并取消其余可取消任务。
-	ActivateCompensations(ctx context.Context, processInstanceID int, nodeIDs []string) error
+	ActivateCompensations(ctx context.Context, instanceID domain.ID, nodeIDs []string) error
 	// TryFinalize 在不存在未完成补偿任务时原子完成撤回。
-	TryFinalize(ctx context.Context, processInstanceID int) (bool, error)
+	TryFinalize(ctx context.Context, instanceID domain.ID) (bool, error)
 	// Rollback 将尚未完成引擎撤回的工单恢复为处理中并清除撤单原因。
-	Rollback(ctx context.Context, processInstanceID int) error
+	Rollback(ctx context.Context, instanceID domain.ID) error
 	// ListStale 分页读取需要恢复的撤回中工单及其流程引擎状态。
 	ListStale(ctx context.Context, before int64, afterID, limit int64) ([]WithdrawalCandidate, error)
 }
@@ -44,11 +45,18 @@ type gormWithdrawalDAO struct{ db *gorm.DB }
 
 func NewWithdrawalDAO(db *gorm.DB) WithdrawalDAO { return &gormWithdrawalDAO{db: db} }
 
-func (g *gormWithdrawalDAO) Prepare(ctx context.Context, processInstanceID int, reason string) error {
+func whereWithdrawalInstance(tx *gorm.DB, instanceID domain.ID) *gorm.DB {
+	idStr := instanceID.String()
+	if intID, err := strconv.Atoi(idStr); err == nil && intID > 0 {
+		return tx.Where("process_instance_key = ? OR process_instance_id = ?", idStr, intID)
+	}
+	return tx.Where("process_instance_key = ?", idStr)
+}
+
+func (g *gormWithdrawalDAO) Prepare(ctx context.Context, instanceID domain.ID, reason string) error {
 	return g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var ticket Ticket
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("process_instance_id = ?", processInstanceID).First(&ticket).Error; err != nil {
+		if err := whereWithdrawalInstance(tx.Clauses(clause.Locking{Strength: "UPDATE"}), instanceID).First(&ticket).Error; err != nil {
 			return err
 		}
 		if domain.Status(ticket.Status) != domain.PROCESS {
@@ -58,13 +66,13 @@ func (g *gormWithdrawalDAO) Prepare(ctx context.Context, processInstanceID int, 
 		// 只有成功动作所关联的补偿节点可以在撤回时继续运行。
 		var active int64
 		if err := tx.Model(&Task{}).
-			Where(`process_instance_id = ? AND status IN (?, ?) AND NOT EXISTS (
+			Where(`ticket_id = ? AND status IN (?, ?) AND NOT EXISTS (
 				SELECT 1 FROM automation_tasks AS source
-				WHERE source.process_instance_id = automation_tasks.process_instance_id
+				WHERE source.ticket_id = automation_tasks.ticket_id
 					AND source.status = ?
 					AND source.compensation_node_id = automation_tasks.node_id
 			)`,
-				processInstanceID, domain.TaskStatusSubmitting.ToUint8(),
+				ticket.Id, domain.TaskStatusSubmitting.ToUint8(),
 				domain.TaskStatusRunning.ToUint8(), domain.TaskStatusSuccess.ToUint8()).
 			Count(&active).Error; err != nil {
 			return err
@@ -80,18 +88,17 @@ func (g *gormWithdrawalDAO) Prepare(ctx context.Context, processInstanceID int, 
 			return err
 		}
 		// 冻结阶段不允许任何待执行任务穿过撤回边界；补偿计划在引擎撤回后重新激活。
-		return tx.Model(&Task{}).Where("process_instance_id = ?", processInstanceID).
+		return tx.Model(&Task{}).Where("ticket_id = ?", ticket.Id).
 			Update("execution_kind", domain.TaskExecutionProcess).Error
 	})
 }
 
 func (g *gormWithdrawalDAO) ActivateCompensations(ctx context.Context,
-	processInstanceID int, nodeIDs []string) error {
+	instanceID domain.ID, nodeIDs []string) error {
 	now := time.Now().UnixMilli()
 	return g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var ticket Ticket
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("process_instance_id = ?", processInstanceID).First(&ticket).Error; err != nil {
+		if err := whereWithdrawalInstance(tx.Clauses(clause.Locking{Strength: "UPDATE"}), instanceID).First(&ticket).Error; err != nil {
 			return err
 		}
 		if domain.Status(ticket.Status) == domain.WITHDRAW {
@@ -103,14 +110,14 @@ func (g *gormWithdrawalDAO) ActivateCompensations(ctx context.Context,
 
 		pending := withdrawalPendingStatuses()
 		normalTasks := tx.Model(&Task{}).
-			Where("process_instance_id = ? AND status IN ?", processInstanceID, pending)
+			Where("ticket_id = ? AND status IN ?", ticket.Id, pending)
 		if len(nodeIDs) > 0 {
 			normalTasks = normalTasks.Where("node_id NOT IN ?", nodeIDs)
 		}
 		if err := normalTasks.
 			Updates(map[string]any{
-				"status": domain.TaskStatusCancelled.ToUint8(), "phase": domain.TaskPhaseCancelled,
-				"cancelled_at": now, "last_error": "", "utime": now,
+				"status": domain.TaskStatusCancelled.ToUint8(),
+				"last_error": "", "utime": now,
 			}).Error; err != nil {
 			return err
 		}
@@ -119,18 +126,16 @@ func (g *gormWithdrawalDAO) ActivateCompensations(ctx context.Context,
 		}
 		// execution_kind=COMPENSATION 同时充当激活标记，恢复任务重复执行时不会重置失败状态。
 		if err := tx.Model(&Task{}).
-			Where("process_instance_id = ? AND node_id IN ? AND execution_kind <> ? AND status IN ?",
-				processInstanceID, nodeIDs, domain.TaskExecutionCompensation, pending).
+			Where("ticket_id = ? AND node_id IN ? AND execution_kind <> ? AND status IN ?",
+				ticket.Id, nodeIDs, domain.TaskExecutionCompensation, pending).
 			Updates(map[string]any{
-				"status": domain.TaskStatusWaiting.ToUint8(), "phase": domain.TaskPhaseReady,
-				"original_scheduled_at": gorm.Expr(
-					"CASE WHEN original_scheduled_at = 0 THEN scheduled_at ELSE original_scheduled_at END"),
+				"status": domain.TaskStatusWaiting.ToUint8(),
 				"scheduled_at": now, "last_error": "", "utime": now,
 			}).Error; err != nil {
 			return err
 		}
 		return tx.Model(&Task{}).
-			Where("process_instance_id = ? AND node_id IN ?", processInstanceID, nodeIDs).
+			Where("ticket_id = ? AND node_id IN ?", ticket.Id, nodeIDs).
 			Update("execution_kind", domain.TaskExecutionCompensation).Error
 	})
 }
@@ -143,12 +148,11 @@ func withdrawalPendingStatuses() []int {
 	}
 }
 
-func (g *gormWithdrawalDAO) TryFinalize(ctx context.Context, processInstanceID int) (bool, error) {
+func (g *gormWithdrawalDAO) TryFinalize(ctx context.Context, instanceID domain.ID) (bool, error) {
 	completed := false
 	err := g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var ticket Ticket
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("process_instance_id = ?", processInstanceID).First(&ticket).Error; err != nil {
+		if err := whereWithdrawalInstance(tx.Clauses(clause.Locking{Strength: "UPDATE"}), instanceID).First(&ticket).Error; err != nil {
 			return err
 		}
 		if domain.Status(ticket.Status) == domain.WITHDRAW {
@@ -161,8 +165,8 @@ func (g *gormWithdrawalDAO) TryFinalize(ctx context.Context, processInstanceID i
 
 		var unfinished int64
 		if err := tx.Model(&Task{}).
-			Where("process_instance_id = ? AND execution_kind = ? AND status <> ?",
-				processInstanceID, domain.TaskExecutionCompensation, domain.TaskStatusSuccess.ToUint8()).
+			Where("ticket_id = ? AND execution_kind = ? AND status <> ?",
+				ticket.Id, domain.TaskExecutionCompensation, domain.TaskStatusSuccess.ToUint8()).
 			Count(&unfinished).Error; err != nil {
 			return err
 		}
@@ -179,9 +183,9 @@ func (g *gormWithdrawalDAO) TryFinalize(ctx context.Context, processInstanceID i
 	return completed, err
 }
 
-func (g *gormWithdrawalDAO) Rollback(ctx context.Context, processInstanceID int) error {
-	return g.db.WithContext(ctx).Model(&Ticket{}).
-		Where("process_instance_id = ? AND status = ?", processInstanceID, domain.WITHDRAWING.ToUint8()).
+func (g *gormWithdrawalDAO) Rollback(ctx context.Context, instanceID domain.ID) error {
+	return whereWithdrawalInstance(g.db.WithContext(ctx).Model(&Ticket{}), instanceID).
+		Where("status = ?", domain.WITHDRAWING.ToUint8()).
 		Updates(map[string]any{
 			"status": domain.PROCESS.ToUint8(), "revoke_reason": "", "utime": time.Now().UnixMilli(),
 		}).Error

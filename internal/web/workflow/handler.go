@@ -1,10 +1,12 @@
 package workflow
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Duke1616/eflow/internal/domain"
-	"github.com/Duke1616/eflow/internal/pkg/easyflow"
+	"github.com/Duke1616/eflow/internal/errs"
+	"github.com/Duke1616/eflow/internal/repository"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	"github.com/Duke1616/eflow/pkg/contract/model"
 	"github.com/Duke1616/eflow/pkg/contract/permission"
@@ -162,7 +164,7 @@ func (h *Handler) AutomationNodes(ctx *ginx.Context, req AutomationNodesReq) (gi
 	return ginx.Result{
 		Msg: "查询流程自动化节点成功",
 		Data: RetrieveAutomationNodes{
-			AutomationNodes: lo.Map(nodes, func(src easyflow.AutomationNodeRef, _ int) AutomationNodeVO {
+			AutomationNodes: lo.Map(nodes, func(src domain.AutomationNodeRef, _ int) AutomationNodeVO {
 				return AutomationNodeVO{
 					ID: src.ID, Name: src.Name, CodebookID: src.CodebookID, RunnerID: src.RunnerID,
 				}
@@ -175,6 +177,12 @@ func (h *Handler) AutomationNodes(ctx *ginx.Context, req AutomationNodesReq) (gi
 func (h *Handler) Deploy(ctx *ginx.Context, req DeployReq) (ginx.Result, error) {
 	flow, err := h.svc.Find(ctx.Context, req.Id)
 	if err != nil {
+		if errors.Is(err, repository.ErrWorkflowNotFound) {
+			return ErrWorkflowNotFound, nil
+		}
+		if bizErr, ok := errors.AsType[*errs.Error](err); ok {
+			return ginx.Result{Code: int(bizErr.Code), Msg: bizErr.Message}, nil
+		}
 		return SystemErrorResult, fmt.Errorf("查询流程定义元数据失败: %w", err)
 	}
 
@@ -183,6 +191,11 @@ func (h *Handler) Deploy(ctx *ginx.Context, req DeployReq) (ginx.Result, error) 
 		// 区分「流程图校验失败」（用户设计问题）与「系统内部错误」，
 		// 前者将具体原因透传给前端展示，后者统一返回系统错误
 		return toDeployResult(err), fmt.Errorf("发布流程失败: %w", err)
+	}
+
+	// 部署成功后重新加载流程最新状态（含回写绑定的 process_id 与元数据）
+	if updatedFlow, findErr := h.svc.Find(ctx.Context, req.Id); findErr == nil {
+		flow = updatedFlow
 	}
 
 	return ginx.Result{
@@ -194,11 +207,17 @@ func (h *Handler) Deploy(ctx *ginx.Context, req DeployReq) (ginx.Result, error) 
 func (h *Handler) Detail(ctx *ginx.Context) (ginx.Result, error) {
 	id, err := ctx.Param("id").AsInt64()
 	if err != nil {
-		return SystemErrorResult, fmt.Errorf("ID 格式错误: %w", err)
+		return ErrWorkflowInvalidID, err
 	}
 
 	flow, err := h.svc.Find(ctx.Context, id)
 	if err != nil {
+		if errors.Is(err, repository.ErrWorkflowNotFound) {
+			return ErrWorkflowNotFound, nil
+		}
+		if bizErr, ok := errors.AsType[*errs.Error](err); ok {
+			return ginx.Result{Code: int(bizErr.Code), Msg: bizErr.Message}, nil
+		}
 		return SystemErrorResult, fmt.Errorf("查询流程模板详情失败: %w", err)
 	}
 
@@ -223,7 +242,7 @@ func (h *Handler) Update(ctx *ginx.Context, req UpdateReq) (ginx.Result, error) 
 func (h *Handler) Delete(ctx *ginx.Context) (ginx.Result, error) {
 	id, err := ctx.Param("id").AsInt64()
 	if err != nil {
-		return SystemErrorResult, fmt.Errorf("ID 格式错误: %w", err)
+		return ErrWorkflowInvalidID, err
 	}
 
 	count, err := h.svc.Delete(ctx.Context, id)
@@ -240,6 +259,12 @@ func (h *Handler) Delete(ctx *ginx.Context) (ginx.Result, error) {
 func (h *Handler) FindOrderGraph(ctx *ginx.Context, req OrderGraphReq) (ginx.Result, error) {
 	flow, err := h.svc.GetHighlightedGraph(ctx.Context, req.Id, req.ProcessInstanceId, domain.Status(req.Status))
 	if err != nil {
+		if errors.Is(err, repository.ErrWorkflowNotFound) {
+			return ErrWorkflowNotFound, nil
+		}
+		if bizErr, ok := errors.AsType[*errs.Error](err); ok {
+			return ginx.Result{Code: int(bizErr.Code), Msg: bizErr.Message}, nil
+		}
 		return SystemErrorResult, err
 	}
 
@@ -261,21 +286,8 @@ func (h *Handler) toDomain(req CreateReq) domain.Workflow {
 		IsNotify:     req.IsNotify,
 		NotifyMethod: domain.NotifyMethod(req.NotifyMethod),
 		TemplateId:   req.TemplateId,
-	}
-
-	if req.FlowData != nil {
-		edges := make([]domain.FlowEdge, len(req.FlowData.Edges))
-		for i, e := range req.FlowData.Edges {
-			edges[i] = e
-		}
-		nodes := make([]domain.FlowNode, len(req.FlowData.Nodes))
-		for i, n := range req.FlowData.Nodes {
-			nodes[i] = n
-		}
-		res.FlowData = domain.LogicFlow{
-			Edges: edges,
-			Nodes: nodes,
-		}
+		EngineType:   domain.EngineType(req.EngineType),
+		FlowData:     req.FlowData,
 	}
 
 	return res
@@ -286,24 +298,12 @@ func (h *Handler) toUpdateDomain(req UpdateReq) domain.Workflow {
 		Id:           req.Id,
 		Name:         req.Name,
 		Desc:         req.Desc,
+		Icon:         req.Icon,
 		Owner:        req.Owner,
 		IsNotify:     req.IsNotify,
 		NotifyMethod: domain.NotifyMethod(req.NotifyMethod),
-	}
-
-	if req.FlowData != nil {
-		edges := make([]domain.FlowEdge, len(req.FlowData.Edges))
-		for i, e := range req.FlowData.Edges {
-			edges[i] = e
-		}
-		nodes := make([]domain.FlowNode, len(req.FlowData.Nodes))
-		for i, n := range req.FlowData.Nodes {
-			nodes[i] = n
-		}
-		res.FlowData = domain.LogicFlow{
-			Edges: edges,
-			Nodes: nodes,
-		}
+		EngineType:   domain.EngineType(req.EngineType),
+		FlowData:     req.FlowData,
 	}
 
 	return res
@@ -319,21 +319,8 @@ func (h *Handler) toWorkflowVo(req domain.Workflow) Workflow {
 		IsNotify:     req.IsNotify,
 		NotifyMethod: req.NotifyMethod.ToUint8(),
 		TemplateId:   req.TemplateId,
-	}
-
-	if len(req.FlowData.Nodes) > 0 || len(req.FlowData.Edges) > 0 {
-		nodes := make([]map[string]interface{}, len(req.FlowData.Nodes))
-		for i, n := range req.FlowData.Nodes {
-			nodes[i] = n
-		}
-		edges := make([]map[string]interface{}, len(req.FlowData.Edges))
-		for i, e := range req.FlowData.Edges {
-			edges[i] = e
-		}
-		res.FlowData = &LogicFlow{
-			Nodes: nodes,
-			Edges: edges,
-		}
+		EngineType:   req.ResolveEngineType().String(),
+		FlowData:     req.FlowData,
 	}
 
 	return res

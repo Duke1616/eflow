@@ -3,7 +3,7 @@ package ioc
 import (
 	"context"
 
-	"github.com/Duke1616/eflow/internal/service/event/easyflow"
+	"github.com/Duke1616/eflow/internal/service/engine/easyflow/hook"
 	grpcpkg "github.com/Duke1616/etask/pkg/grpc"
 	"github.com/gotomicro/ego/server"
 	"github.com/gotomicro/ego/server/egin"
@@ -20,7 +20,7 @@ type App struct {
 	Web *egin.Component
 	// GRPC 服务组件
 	Server *grpcpkg.Server
-	Event  *easyflow.ProcessEvent
+	Event  *hook.ProcessEvent
 	Tasks  []Task
 }
 

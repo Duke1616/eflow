@@ -164,7 +164,21 @@ type flowRecord struct {
 	id       int64
 	tenantID int64
 	version  int64
-	flowData dao.LogicFlow
+	flowData domain.CanvasData
+}
+
+func (r flowRecord) nodes() []map[string]any {
+	raw, ok := r.flowData["nodes"].([]any)
+	if !ok {
+		return nil
+	}
+	res := make([]map[string]any, 0, len(raw))
+	for _, n := range raw {
+		if m, ok := n.(map[string]any); ok {
+			res = append(res, m)
+		}
+	}
+	return res
 }
 
 type workflowRunnerSummary struct {
@@ -224,7 +238,7 @@ func planWorkflowRunnerUpdates(ctx context.Context, records []flowRecord,
 
 	for i := range records {
 		changed := false
-		for _, node := range records[i].flowData.Nodes {
+		for _, node := range records[i].nodes() {
 			if node["type"] != "automation" {
 				continue
 			}
@@ -394,7 +408,7 @@ func positiveInt64(value interface{}) (int64, bool) {
 	}
 }
 
-func describeLegacyNode(record flowRecord, node domain.FlowNode, err error) string {
+func describeLegacyNode(record flowRecord, node map[string]any, err error) string {
 	return fmt.Sprintf("%s id=%d tenant_id=%d 节点=%v: %v",
 		record.table, record.id, record.tenantID, node["id"], err)
 }
@@ -402,7 +416,7 @@ func describeLegacyNode(record flowRecord, node domain.FlowNode, err error) stri
 func applyWorkflowRunnerUpdates(ctx context.Context, db *gorm.DB, updates []flowRecord) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, update := range updates {
-			flowData := sqlx.JsonField[dao.LogicFlow]{Val: update.flowData, Valid: true}
+			flowData := sqlx.JsonField[domain.CanvasData]{Val: update.flowData, Valid: true}
 			versionColumn := "utime"
 			if update.table == "workflow_snapshot" {
 				versionColumn = "ctime"

@@ -1,5 +1,15 @@
 package ticket
 
+import (
+	"github.com/Duke1616/eflow/pkg/idx"
+)
+
+// TaskID 审批任务强类型自适应标识，直接对齐底层通用包 pkg/idx.ID
+type TaskID = idx.ID
+
+// InstanceID 流程实例强类型自适应标识，直接对齐底层通用包 pkg/idx.ID
+type InstanceID = idx.ID
+
 type CreateTicketReq struct {
 	TemplateId int64                  `json:"template_id"`
 	WorkflowId int64                  `json:"workflow_id"`
@@ -8,7 +18,7 @@ type CreateTicketReq struct {
 }
 
 type DetailProcessInstIdReq struct {
-	ProcessInstanceId int `json:"process_instance_id"`
+	ProcessInstanceId idx.ID `json:"process_instance_id"`
 }
 
 // RestartProcessReq 表示重新启动指定工单流程的请求参数。
@@ -17,16 +27,16 @@ type RestartProcessReq struct {
 }
 
 type RecordTaskReq struct {
-	ProcessInstId int   `json:"process_inst_id"`
-	Offset        int64 `json:"offset"`
-	Limit         int64 `json:"limit"`
+	ProcessInstId idx.ID `json:"process_inst_id"`
+	Offset        int64  `json:"offset"`
+	Limit         int64  `json:"limit"`
 }
 
 // TaskTimelineReq 按节点执行批次分页查询工单流转时间线。
 type TaskTimelineReq struct {
-	ProcessInstId int   `json:"process_inst_id"`
-	Offset        int64 `json:"offset"`
-	Limit         int64 `json:"limit"`
+	ProcessInstId idx.ID `json:"process_inst_id"`
+	Offset        int64  `json:"offset"`
+	Limit         int64  `json:"limit"`
 }
 
 type Todo struct {
@@ -49,23 +59,26 @@ type StartUserReq struct {
 }
 
 type PassOrderReq struct {
-	TaskId    int                    `json:"task_id"`
+	TicketId  int64                  `json:"ticket_id"`
+	TaskId    TaskID                 `json:"task_id"`
 	Comment   string                 `json:"comment"`
 	ExtraData map[string]interface{} `json:"extra_data"`
 }
 
 type RejectOrderReq struct {
-	TaskId  int    `json:"task_id"`
-	Comment string `json:"comment"`
+	TicketId int64  `json:"ticket_id"`
+	TaskId   TaskID `json:"task_id"`
+	Comment  string `json:"comment"`
 }
 
 type TransferReq struct {
-	TaskId    int      `json:"task_id"`
+	TicketId  int64    `json:"ticket_id"`
+	TaskId    TaskID   `json:"task_id"`
 	Usernames []string `json:"usernames"`
 }
 
 type RevokeOrderReq struct {
-	InstanceId int    `json:"instance_id"`
+	InstanceId idx.ID `json:"instance_id"`
 	Force      bool   `json:"force"`
 	Reason     string `json:"reason"`
 }
@@ -77,8 +90,9 @@ type SubmitRatingReq struct {
 }
 
 type TaskFormConfigReq struct {
-	WorkflowId int64 `json:"workflow_id"`
-	TaskId     int   `json:"task_id"`
+	TicketId   int64  `json:"ticket_id"`
+	WorkflowId int64  `json:"workflow_id"`
+	TaskId     TaskID `json:"task_id"`
 }
 
 type RetrieveTickets struct {
@@ -123,7 +137,7 @@ type TaskTimelineSummary struct {
 }
 
 type TaskRecord struct {
-	Nodename     string      `json:"node_name"`
+	NodeName     string      `json:"node_name"`
 	ApprovedBy   string      `json:"approved_by"`
 	IsCosigned   int         `json:"is_cosigned"`
 	Status       int         `json:"status"`
@@ -135,12 +149,13 @@ type TaskRecord struct {
 
 type Ticket struct {
 	Id                   int64                  `json:"id"`
-	TaskId               int                    `json:"task_id"`
+	EngineType           string                 `json:"engine_type"`
+	TaskId               TaskID                 `json:"task_id"`
 	TemplateId           int64                  `json:"template_id"`
 	Starter              string                 `json:"starter"`
 	Status               uint8                  `json:"status"`
 	Provide              uint8                  `json:"provide"`
-	ProcessInstanceId    int                    `json:"process_instance_id"`
+	ProcessInstanceId    InstanceID             `json:"process_instance_id"`
 	WorkflowId           int64                  `json:"workflow_id"`
 	Ctime                string                 `json:"ctime"`
 	Wtime                string                 `json:"wtime"`

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
@@ -16,9 +15,9 @@ import (
 
 func TestPassProcessTaskJobDoesNotSkipShrinkingPages(t *testing.T) {
 	tasks := &passTaskServiceStub{remaining: []domain.Task{
-		{ID: 1, TenantID: 11, NodeID: "node-1", ProcessInstanceID: 101},
-		{ID: 2, TenantID: 12, NodeID: "node-2", ProcessInstanceID: 102},
-		{ID: 3, TenantID: 13, NodeID: "node-3", ProcessInstanceID: 103},
+		{ID: 1, TenantID: 11, NodeID: "node-1", InstanceID: domain.NewID(101)},
+		{ID: 2, TenantID: 12, NodeID: "node-2", InstanceID: domain.NewID(102)},
+		{ID: 3, TenantID: 13, NodeID: "node-3", InstanceID: domain.NewID(103)},
 	}}
 	engineSvc := &passEngineStub{}
 	job := NewPassProcessTaskJob(tasks, engineSvc, 2, time.Minute)
@@ -33,9 +32,9 @@ func TestPassProcessTaskJobDoesNotSkipShrinkingPages(t *testing.T) {
 
 func TestPassProcessTaskJobContinuesAfterTaskFailure(t *testing.T) {
 	tasks := &passTaskServiceStub{remaining: []domain.Task{
-		{ID: 1, TenantID: 11, NodeID: "node-1", ProcessInstanceID: 101},
-		{ID: 2, TenantID: 12, NodeID: "node-2", ProcessInstanceID: 102},
-		{ID: 3, TenantID: 13, NodeID: "node-3", ProcessInstanceID: 103},
+		{ID: 1, TenantID: 11, NodeID: "node-1", InstanceID: domain.NewID(101)},
+		{ID: 2, TenantID: 12, NodeID: "node-2", InstanceID: domain.NewID(102)},
+		{ID: 3, TenantID: 13, NodeID: "node-3", InstanceID: domain.NewID(103)},
 	}}
 	engineSvc := &passEngineStub{errors: map[int]error{101: errors.New("engine unavailable")}}
 	job := NewPassProcessTaskJob(tasks, engineSvc, 2, time.Minute)
@@ -81,7 +80,7 @@ func TestPassProcessTaskJobDefersWithdrawingProcess(t *testing.T) {
 func TestPassProcessTaskJobMarksAutoPassedWhenEngineTaskNotFound(t *testing.T) {
 	// 流程引擎中节点任务不存在（已被跳过或完结），应自动标记已推进，避免死循环报错
 	tasks := &passTaskServiceStub{remaining: []domain.Task{
-		{ID: 1, TenantID: 11, NodeID: "node-1", ProcessInstanceID: 101},
+		{ID: 1, TenantID: 11, NodeID: "node-1", InstanceID: domain.NewID(101)},
 	}}
 	engineSvc := &passEngineStub{errors: map[int]error{101: gorm.ErrRecordNotFound}}
 	job := NewPassProcessTaskJob(tasks, engineSvc, 10, time.Minute)
@@ -128,28 +127,29 @@ func (s *passTaskServiceStub) MarkTaskAsAutoPassed(_ context.Context, id int64) 
 	return nil
 }
 
-func (s *passTaskServiceStub) ShouldAdvanceProcessTask(context.Context, int64) (bool, error) {
+func (s *passTaskServiceStub) ShouldAdvanceProcessTask(context.Context, int64) (bool, domain.EngineType, error) {
 	if s.advanceError != nil {
-		return false, s.advanceError
+		return false, "", s.advanceError
 	}
 	if s.advance == nil {
-		return true, nil
+		return true, domain.EngineTypeEasyFlow, nil
 	}
-	return *s.advance, nil
+	return *s.advance, domain.EngineTypeEasyFlow, nil
 }
 
 type passEngineStub struct {
-	engine.Service
+	engine.IEngine
 	tenantIDs []int64
 	errors    map[int]error
 }
 
-func (s *passEngineStub) GetAutomationTask(ctx context.Context, _ string, processInstanceID int) (model.Task, error) {
+func (s *passEngineStub) GetAutomationTask(ctx context.Context, _ domain.EngineType, instanceID domain.ID, _ string) (domain.TaskRecord, error) {
 	s.tenantIDs = append(s.tenantIDs, ctxutil.GetTenantID(ctx).Int64())
-	if err := s.errors[processInstanceID]; err != nil {
-		return model.Task{}, err
+	procInstID := instanceID.Int()
+	if err := s.errors[procInstID]; err != nil {
+		return domain.TaskRecord{}, err
 	}
-	return model.Task{TaskID: processInstanceID}, nil
+	return domain.TaskRecord{TaskID: domain.NewID(procInstID)}, nil
 }
 
-func (s *passEngineStub) Pass(context.Context, int, string) error { return nil }
+func (s *passEngineStub) Pass(context.Context, domain.TaskPassReq) error { return nil }

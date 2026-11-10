@@ -71,6 +71,15 @@ func (b *ProcessBuilder) CarbonCopy(id, name string, assignees ...string) *Proce
 	})
 }
 
+// ChatGroup 添加群聊通知节点 (IM 群聊广播通知，瞬时穿透，不阻塞流程推进)
+func (b *ProcessBuilder) ChatGroup(id, name string) *ProcessBuilder {
+	return b.addNode(model.NodeSpec{
+		ID:   id,
+		Name: name,
+		Type: model.NodeChatGroup,
+	})
+}
+
 // Task 添加自动化执行节点 (如自动调用接口、执行系统任务)
 func (b *ProcessBuilder) Task(id, name, workerType string) *ProcessBuilder {
 	return b.addNode(model.NodeSpec{

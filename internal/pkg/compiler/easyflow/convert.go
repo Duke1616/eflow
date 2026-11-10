@@ -1,32 +1,5 @@
 package easyflow
 
-import (
-	"github.com/Bunny3th/easy-workflow/workflow/model"
-)
-
-// 节点类型标识，对应前端 LogicFlow DSL 中的 type 字段
-const (
-	NodeTypeStart     = "start"
-	NodeTypeEnd       = "end"
-	NodeTypeUser      = "user"
-	NodeTypeCondition = "condition"
-	NodeTypeParallel  = "parallel"
-	NodeTypeInclusion = "inclusion"
-	NodeTypeSelective = "selective"
-	NodeTypeAuto      = "automation"
-	NodeTypeChat      = "chat"
-)
-
-// 节点默认名称
-const (
-	DefaultNameStart     = "Start"
-	DefaultNameEnd       = "End"
-	DefaultNameUser      = "审批节点"
-	DefaultNameParallel  = "并行网关"
-	DefaultNameInclusion = "包容网关"
-	DefaultNameSelective = "条件并行网关"
-)
-
 // 系统内置用户标识
 const (
 	UserStarter        = "$starter"   // 工单发起人
@@ -59,6 +32,8 @@ const (
 	EventTaskParallelNodePass = "EventTaskParallelNodePass"
 	// EventTaskInclusionNodePass 包容网关：分支通过事件
 	EventTaskInclusionNodePass = "EventTaskInclusionNodePass"
+	// EventTaskSelectiveNodePass 条件并行网关：分支通过事件
+	EventTaskSelectiveNodePass = "EventTaskSelectiveNodePass"
 
 	// EventConcurrentRejectCleanup 并发拒绝时清理其他分支的事件（condition -> parallel/inclusion/selective）
 	EventConcurrentRejectCleanup = "EventConcurrentRejectCleanup"
@@ -70,16 +45,12 @@ const (
 	EventUserNodeRejectProxyCleanup = "EventUserNodeRejectProxyCleanup"
 )
 
-type logicFlow struct {
-	converter *DefaultConverter
+// NewConverter 创建包含所有标准节点处理器的 easy-workflow 转换器
+func NewConverter() IConverter {
+	return NewDefaultConverterWithHandlers()
 }
 
-func NewLogicFlowToEngineConvert() Converter {
-	return &logicFlow{
-		converter: NewDefaultConverterWithHandlers(),
-	}
-}
-
-func (l *logicFlow) Convert(workflow Workflow) (*model.Process, error) {
-	return l.converter.Convert(workflow)
+// NewLogicFlowToEngineConvert 兼容旧构造函数命名
+func NewLogicFlowToEngineConvert() IConverter {
+	return NewConverter()
 }

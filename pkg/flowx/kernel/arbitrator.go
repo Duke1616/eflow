@@ -11,7 +11,7 @@ type ArbitrationResult struct {
 	SkippedTaskIDs []string // 或签竞争通过时，需被联动跳过的其他待办任务 ID 列表
 }
 
-// ISignArbitrator 审批流转仲裁策略接口
+// ISignArbitrator 审批流转仲裁策略接口（操作与判定针对领域实体指针）
 type ISignArbitrator interface {
 	// IsSatisfied 判定本批次审批任务是否满足流转推进条件
 	IsSatisfied(batchTasks []*model.Task) bool

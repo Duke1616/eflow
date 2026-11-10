@@ -10,13 +10,36 @@ import (
 
 	"github.com/Bunny3th/easy-workflow/workflow/database"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
-	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/ticketpbac"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	pbacgorm "github.com/Duke1616/eiam/pkg/pbac/gormx"
 	"github.com/ecodeclub/ekit/slice"
 	"gorm.io/gorm"
 )
+
+// TimelineBatchFilter 用于跨批次高效聚合过滤的轻量持久化键值
+type TimelineBatchFilter struct {
+	NodeID    string
+	BatchCode string
+}
+
+// TaskTimelineGroupPO 流程任务流转时间线批次持久化聚合实体
+type TaskTimelineGroupPO struct {
+	NodeID              string `gorm:"column:node_id"`
+	NodeName            string `gorm:"column:node_name"`
+	BatchCode           string `gorm:"column:batch_code"`
+	IsCosigned          int    `gorm:"column:is_cosigned"`
+	TaskCount           int    `gorm:"column:task_count"`
+	PassedCount         int    `gorm:"column:passed_count"`
+	RejectedCount       int    `gorm:"column:rejected_count"`
+	SystemPassedCount   int    `gorm:"column:system_passed_count"`
+	SystemRejectedCount int    `gorm:"column:system_rejected_count"`
+	SkippedCount        int    `gorm:"column:skipped_count"`
+	LinkedCount         int    `gorm:"column:linked_count"`
+	PendingCount        int    `gorm:"column:pending_count"`
+	OccurredAt          string `gorm:"column:occurred_at"`
+	LatestTaskID        int    `gorm:"column:latest_task_id"`
+}
 
 // IEngineDAO 流程引擎物理数据访问接口
 type IEngineDAO interface {
@@ -40,11 +63,11 @@ type IEngineDAO interface {
 	// CountAccessibleTaskRecord 使用与列表相同的 AccessScope 统计流转记录。
 	CountAccessibleTaskRecord(ctx context.Context, processInstId int) (int64, error)
 	// ListAccessibleTaskTimelineGroups 按节点执行批次聚合可见任务，供时间线分页展示。
-	ListAccessibleTaskTimelineGroups(ctx context.Context, processInstId, offset, limit int) ([]domain.TaskTimelineGroup, error)
+	ListAccessibleTaskTimelineGroups(ctx context.Context, processInstId, offset, limit int) ([]TaskTimelineGroupPO, error)
 	// CountAccessibleTaskTimelineGroups 统计可见的节点执行批次数。
 	CountAccessibleTaskTimelineGroups(ctx context.Context, processInstId int) (int64, error)
 	// ListAccessibleTaskTimelineMembers 查询指定时间线分组下的原始任务明细。
-	ListAccessibleTaskTimelineMembers(ctx context.Context, processInstId int, groups []domain.TaskTimelineGroup) ([]model.Task, error)
+	ListAccessibleTaskTimelineMembers(ctx context.Context, processInstId int, batches []TimelineBatchFilter) ([]model.Task, error)
 
 	// UpdateIsFinishedByPreNodeId 自动更新当前节点的前置代理流转任务为完成状态
 	UpdateIsFinishedByPreNodeId(ctx context.Context, processInstId int, nodeId string, status int, comment string) error
@@ -250,11 +273,18 @@ func (g *gormEngineDAO) GetAutomationTask(ctx context.Context, currentNodeId str
 }
 
 func (g *gormEngineDAO) ListTasksByProcInstId(ctx context.Context, processInstIds []int, starter string) ([]model.Task, error) {
-	var res []model.Task
-	err := g.db.WithContext(ctx).Model(&model.Task{}).Table("proc_task").
-		Where("starter = ? AND is_finished = 0 AND proc_inst_id IN ?", starter, processInstIds).
-		Find(&res).Error
+	if len(processInstIds) == 0 {
+		return []model.Task{}, nil
+	}
 
+	var res []model.Task
+	query := g.db.WithContext(ctx).Model(&model.Task{}).Table("proc_task").
+		Where("is_finished = 0 AND proc_inst_id IN ?", processInstIds)
+	if starter != "" {
+		query = query.Where("starter = ?", starter)
+	}
+
+	err := query.Find(&res).Error
 	return res, err
 }
 
@@ -369,13 +399,13 @@ func (g *gormEngineDAO) CountAccessibleTaskRecord(ctx context.Context, processIn
 	return total, err
 }
 
-func (g *gormEngineDAO) ListAccessibleTaskTimelineGroups(ctx context.Context, processInstId, offset, limit int) ([]domain.TaskTimelineGroup, error) {
+func (g *gormEngineDAO) ListAccessibleTaskTimelineGroups(ctx context.Context, processInstId, offset, limit int) ([]TaskTimelineGroupPO, error) {
 	db, err := g.accessibleTaskTimelineGroupQuery(ctx, processInstId)
 	if err != nil {
 		return nil, err
 	}
 
-	var groups []domain.TaskTimelineGroup
+	var groups []TaskTimelineGroupPO
 	err = db.Order("occurred_at DESC, latest_task_id DESC").
 		Offset(offset).
 		Limit(limit).
@@ -394,8 +424,8 @@ func (g *gormEngineDAO) CountAccessibleTaskTimelineGroups(ctx context.Context, p
 	return total, err
 }
 
-func (g *gormEngineDAO) ListAccessibleTaskTimelineMembers(ctx context.Context, processInstId int, groups []domain.TaskTimelineGroup) ([]model.Task, error) {
-	if len(groups) == 0 {
+func (g *gormEngineDAO) ListAccessibleTaskTimelineMembers(ctx context.Context, processInstId int, batches []TimelineBatchFilter) ([]model.Task, error) {
+	if len(batches) == 0 {
 		return []model.Task{}, nil
 	}
 
@@ -404,11 +434,11 @@ func (g *gormEngineDAO) ListAccessibleTaskTimelineMembers(ctx context.Context, p
 		return nil, err
 	}
 
-	conditions := make([]string, 0, len(groups))
-	args := make([]interface{}, 0, len(groups)*2)
-	for _, group := range groups {
+	conditions := make([]string, 0, len(batches))
+	args := make([]interface{}, 0, len(batches)*2)
+	for _, b := range batches {
 		conditions = append(conditions, "(a.node_id = ? AND a.batch_code = ?)")
-		args = append(args, group.NodeID, group.BatchCode)
+		args = append(args, b.NodeID, b.BatchCode)
 	}
 
 	var tasks []model.Task
@@ -563,15 +593,24 @@ func (g *gormEngineDAO) GetInstanceByID(ctx context.Context, processInstId int) 
 
 func (g *gormEngineDAO) GetProcessDefineByVersion(ctx context.Context, processID, version int) (model.Process, error) {
 	var resource string
+	var err error
 
-	subQuery1 := g.db.Table("proc_def").Select("resource, version").Where("id = ?", processID)
-	subQuery2 := g.db.Table("hist_proc_def").Select("resource, version").Where("proc_id = ?", processID)
+	if version <= 0 {
+		// 当未指定版本或版本<=0时，优先获取该流程的当前最新定义
+		err = g.db.WithContext(ctx).Table("proc_def").
+			Select("resource").
+			Where("id = ?", processID).
+			Scan(&resource).Error
+	} else {
+		subQuery1 := g.db.Table("proc_def").Select("resource, version").Where("id = ?", processID)
+		subQuery2 := g.db.Table("hist_proc_def").Select("resource, version").Where("proc_id = ?", processID)
 
-	err := g.db.Table("(?) as t", g.db.Raw("? UNION ALL ?", subQuery1, subQuery2)).
-		Select("resource").
-		Where("version = ?", version).
-		Limit(1).
-		Scan(&resource).Error
+		err = g.db.Table("(?) as t", g.db.Raw("? UNION ALL ?", subQuery1, subQuery2)).
+			Select("resource").
+			Where("version = ?", version).
+			Limit(1).
+			Scan(&resource).Error
+	}
 
 	if err != nil {
 		return model.Process{}, err

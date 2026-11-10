@@ -1,7 +1,7 @@
 package ioc
 
 import (
-	"github.com/Duke1616/eflow/internal/event/ticket"
+	"github.com/Duke1616/eflow/internal/callback/feishu"
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
@@ -17,7 +17,7 @@ func InitLarkClient() *lark.Client {
 }
 
 // InitLarkDispatcher 初始化飞书事件分发器
-func InitLarkDispatcher(handler ticket.ILarkCallbackHandler) *dispatcher.EventDispatcher {
+func InitLarkDispatcher(handler feishu.IFeishuCardCallbackHandler) *dispatcher.EventDispatcher {
 	vToken := viper.GetString("lark.verification_token")
 	eKey := viper.GetString("lark.encrypt_key")
 
@@ -26,7 +26,7 @@ func InitLarkDispatcher(handler ticket.ILarkCallbackHandler) *dispatcher.EventDi
 }
 
 // InitLarkServer 初始化飞书长连接服务 (WebSocket)
-func InitLarkServer(eventHandler *dispatcher.EventDispatcher) *ticket.LarkCallbackTicketServer {
+func InitLarkServer(eventHandler *dispatcher.EventDispatcher) *feishu.LarkCallbackServer {
 	appID := viper.GetString("lark.app_id")
 	appSecret := viper.GetString("lark.app_secret")
 
@@ -35,5 +35,5 @@ func InitLarkServer(eventHandler *dispatcher.EventDispatcher) *ticket.LarkCallba
 		larkws.WithLogLevel(larkcore.LogLevelError),
 	)
 
-	return ticket.NewLarkCallbackTicketServer(cli)
+	return feishu.NewLarkCallbackServer(cli)
 }

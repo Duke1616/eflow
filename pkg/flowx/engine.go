@@ -2,6 +2,7 @@ package flowx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,8 +16,10 @@ import (
 
 // StartReq 流程实例发起请求
 type StartReq struct {
-	// 流程图定义快照（可选，若提供则自动部署；主要用于单元测试与快速演练）
-	Def *model.ProcessDefinition
+	// 预分配流程实例唯一标识（可选，若提供则作为实例物理主键）
+	InstanceID string
+	// 流程图定义快照（可选，若提供则自动部署；主要用于单元测试与快速演练，Value Semantics 优先）
+	Def model.ProcessDefinition
 	// 流程唯一标识（当 Def 未提供时必填）
 	Key string
 	// 流程版本（可选，默认 1）
@@ -24,26 +27,28 @@ type StartReq struct {
 	// 发起人账号（必填）
 	Starter string
 	// 初始业务变量（可选）
-	Variables map[string]any
+	Variables model.Variables
+	// 业务关联唯一标识（可选，如工单 ID），透传至生命周期事件中，消除时序竞态
+	BusinessKey string
 }
 
 // PassReq 审批通过请求
 type PassReq struct {
 	// 待处理任务物理 ID（必填）
 	TaskID string
-	// 当前操作人账号（必填）
+	// 当前操作人账号（必填，作为流转审计完成人）
 	Operator string
 	// 审批意见（可选）
 	Comment string
 	// 增量表单变量合并（可选）
-	Variables map[string]any
+	Variables model.Variables
 }
 
 // RejectReq 审批驳回请求
 type RejectReq struct {
 	// 待处理任务物理 ID（必填）
 	TaskID string
-	// 当前操作人账号（必填）
+	// 当前操作人账号（必填，作为流转审计完成人）
 	Operator string
 	// 驳回原因（必填）
 	Comment string
@@ -53,11 +58,11 @@ type RejectReq struct {
 	Terminate bool
 }
 
-// RevokeReq 提单人主动撤回请求
+// RevokeReq 流程实例撤回请求
 type RevokeReq struct {
 	// 流程实例物理 ID（必填）
 	InstanceID string
-	// 当前操作人账号（必填，必须为流程发起人 Starter）
+	// 当前操作人账号（必填，作为流转审计操作人）
 	Operator string
 	// 撤回原因（可选）
 	Comment string
@@ -72,7 +77,7 @@ type CompleteTaskReq struct {
 	// 执行结果说明（可选，默认 "系统异步作业执行完成"）
 	Comment string
 	// 自动化任务产出的增量业务变量表（可选）
-	Variables map[string]any
+	Variables model.Variables
 }
 
 // IProcessOperator 流程运行时操作视角接口，供业务层（如工单审批 Controller/Service）使用，最小化暴露权限
@@ -89,12 +94,30 @@ type IProcessOperator interface {
 	Revoke(ctx context.Context, req RevokeReq) error
 	// GetTimeline 按执行批次提取流转时间线
 	GetTimeline(ctx context.Context, instanceID string) ([]model.TimelineEvent, error)
+	// GetTask 根据任务物理 ID 获取单条审批任务详情
+	GetTask(ctx context.Context, taskID string) (*model.Task, error)
+	// GetInstance 根据流程实例 ID 获取当前运行态实体
+	GetInstance(ctx context.Context, instanceID string) (*model.Instance, error)
+	// Transfer 将当前审批任务转签/委托指派给新目标用户
+	Transfer(ctx context.Context, taskID string, targetUsers []string) error
+	// ListPendingTasks 分页查询指定处理人的未办结待办任务列表
+	ListPendingTasks(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error)
+	// ListPendingTasksByInstances 批量拉取多个流程实例当前挂起的未办结审批任务（单次 SQL 批量检索）
+	ListPendingTasksByInstances(ctx context.Context, instanceIDs []string) ([]*model.Task, error)
+	// ListTasksByInstance 获取指定流程实例下的全部流转与历史任务列表
+	ListTasksByInstance(ctx context.Context, instanceID string) ([]*model.Task, error)
+	// GetExecutionView 获取流程实例的运行态综合视图（包含节点状态映射、高亮已流转边、待处理人等）
+	GetExecutionView(ctx context.Context, instanceID string) (model.ExecutionView, error)
+	// GetDefinition 根据流程唯一标识与版本号加载流程图定义快照
+	GetDefinition(ctx context.Context, key string, version int) (model.ProcessDefinition, error)
+	// GenInstanceID 预分配符合引擎规范的流程实例全局唯一标识
+	GenInstanceID(procKey string) string
 }
 
 // IProcessAdmin 流程定义部署与组件注册管理视角接口，供初始化、后台管理或运维脚手架使用
 type IProcessAdmin interface {
-	// Deploy 部署/发布流程定义版本
-	Deploy(ctx context.Context, def model.ProcessDefinition) error
+	// Deploy 部署/发布流程定义版本。若 def.Version <= 0 则自动获取已发布最大版本并原子递增 (+1)，返回最终生效的流程定义快照
+	Deploy(ctx context.Context, def model.ProcessDefinition) (model.ProcessDefinition, error)
 	// RegisterHook 注册节点同步守卫与动态算人 Hook
 	RegisterHook(name string, handler HookHandler) Engine
 	// AddListener 注册全局生命周期事件监听器 (观察者模式)
@@ -193,19 +216,44 @@ func (e *flowEngine) Use(mws ...middleware.Middleware) Engine {
 	return e
 }
 
-// Deploy 部署流程定义快照（发布期自动执行静态拓扑与语法校验，并预热进入只读执行缓存）
-func (e *flowEngine) Deploy(ctx context.Context, def model.ProcessDefinition) error {
-	if def.Version <= 0 {
-		def.Version = 1
+// GetTask Deploy 部署流程定义快照（发布期自动执行静态拓扑与语法校验，并预热进入只读执行缓存）
+// 若 def.Version <= 0，则由引擎自动查询已发布的最大版本号并原子递增 (+1)，返回生效后的定义实体
+func (e *flowEngine) GetTask(ctx context.Context, taskID string) (*model.Task, error) {
+	return e.storage.GetTask(ctx, taskID)
+}
+
+func (e *flowEngine) GetInstance(ctx context.Context, instanceID string) (*model.Instance, error) {
+	return e.storage.GetInstance(ctx, instanceID)
+}
+
+func (e *flowEngine) Transfer(ctx context.Context, taskID string, targetUsers []string) error {
+	if len(targetUsers) == 0 {
+		return errors.New("转签目标用户不能为空")
 	}
-	if err := def.Validate(); err != nil {
-		return fmt.Errorf("%w: %s", ErrInvalidDefinition, err.Error())
-	}
-	if err := e.storage.SaveDefinition(ctx, def); err != nil {
+	task, err := e.storage.GetTaskForUpdate(ctx, taskID)
+	if err != nil {
 		return err
 	}
+	task.Assignee = targetUsers[0]
+	return e.storage.UpdateTask(ctx, task)
+}
+
+func (e *flowEngine) Deploy(ctx context.Context, def model.ProcessDefinition) (model.ProcessDefinition, error) {
+	if err := def.Validate(); err != nil {
+		return model.ProcessDefinition{}, fmt.Errorf("%w: %s", ErrInvalidDefinition, err.Error())
+	}
+	if def.Version <= 0 {
+		latestVersion, err := e.storage.GetLatestVersion(ctx, def.Key)
+		if err != nil {
+			return model.ProcessDefinition{}, fmt.Errorf("获取流程最新版本失败: %w", err)
+		}
+		def.Version = latestVersion + 1
+	}
+	if err := e.storage.SaveDefinition(ctx, def); err != nil {
+		return model.ProcessDefinition{}, err
+	}
 	e.planCache.Put(def)
-	return nil
+	return def, nil
 }
 
 // DoTx 在物理本地事务闭包内执行操作，异常自动回滚
@@ -252,6 +300,10 @@ func (e *flowEngine) Start(ctx context.Context, req StartReq) (string, error) {
 	return actCtx.InstanceID, nil
 }
 
+func (e *flowEngine) GenInstanceID(procKey string) string {
+	return e.idGen.GenInstanceID(procKey)
+}
+
 func (e *flowEngine) doStart(ctx context.Context, req StartReq) (string, error) {
 	def, err := e.loadOrDeployDefinition(ctx, req)
 	if err != nil {
@@ -264,12 +316,16 @@ func (e *flowEngine) doStart(ctx context.Context, req StartReq) (string, error) 
 		return "", err
 	}
 
-	instID := e.idGen.GenInstanceID(def.Key)
+	instID := req.InstanceID
+	if instID == "" {
+		instID = e.idGen.GenInstanceID(def.Key)
+	}
 	inst := &model.Instance{
 		ID:          instID,
 		ProcKey:     def.Key,
 		Version:     def.Version,
 		Starter:     req.Starter,
+		BusinessKey: req.BusinessKey,
 		Status:      model.InstanceRunning,
 		CurrentNode: startNode.ID,
 		Variables:   req.Variables,
@@ -284,13 +340,13 @@ func (e *flowEngine) doStart(ctx context.Context, req StartReq) (string, error) 
 
 	session := newFlowSession(e.storage, inst, plan, nil)
 
-	// 2. 统一调度下一阶段动作（自动Skip占位、办结或激活待办；若无有效出路则由调度器统一拦截断流）
+	// 2. 优先广播流程启动事件（确保提单人通知/撤销卡片在流转前第一时间发出，杜绝审批待办抢跑乱序）
+	e.eventBus.Publish(ctx, NewNodeEvent(EventProcessStarted, session.Instance(), &startNode, req.Starter, ""))
+
+	// 3. 统一调度下一阶段动作（自动Skip占位、办结或激活待办；若无有效出路则由调度器统一拦截断流）
 	if err := e.applyStepDecision(ctx, session, decision, 1, req.Starter); err != nil {
 		return "", err
 	}
-
-	// 3. 广播流程启动事件
-	e.eventBus.Publish(ctx, NewNodeEvent(EventProcessStarted, inst, &startNode, req.Starter, ""))
 
 	return instID, nil
 }
@@ -312,8 +368,8 @@ func (e *flowEngine) Pass(ctx context.Context, req PassReq) error {
 }
 
 func (e *flowEngine) doPass(ctx context.Context, req PassReq) error {
-	// 1. 锁查询与前置状态/权限校验
-	task, inst, err := e.loadAndValidateTaskForPass(ctx, req.TaskID, req.Operator)
+	// 1. 锁查询与客观物理状态防卫校验 (防并发重复处理、防终态非法流转)
+	task, inst, err := e.loadAndValidateTask(ctx, req.TaskID)
 	if err != nil {
 		return err
 	}
@@ -349,7 +405,7 @@ func (e *flowEngine) CompleteTask(ctx context.Context, req CompleteTaskReq) erro
 }
 
 func (e *flowEngine) doCompleteTask(ctx context.Context, req CompleteTaskReq, comment string) error {
-	task, inst, err := e.loadAndValidateTask(ctx, req.TaskID, "")
+	task, inst, err := e.loadAndValidateTask(ctx, req.TaskID)
 	if err != nil {
 		return err
 	}
@@ -364,7 +420,7 @@ func (e *flowEngine) doCompleteTask(ctx context.Context, req CompleteTaskReq, co
 
 // advanceTaskPipeline 推进已办结任务的核心状态机管线（模板方法模式）
 // 统一封装：任务通过 -> 节点仲裁 -> 下一步推导 -> 决策应用
-func (e *flowEngine) advanceTaskPipeline(ctx context.Context, session *flowSession, task *model.Task, comment string, variables map[string]any, operator string) error {
+func (e *flowEngine) advanceTaskPipeline(ctx context.Context, session *flowSession, task *model.Task, comment string, variables model.Variables, operator string) error {
 	inst := session.Instance()
 
 	// 1. 办结当前任务并增量合并表单变量
@@ -425,7 +481,7 @@ func (e *flowEngine) Reject(ctx context.Context, req RejectReq) error {
 }
 
 func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
-	task, inst, err := e.loadAndValidateTaskForReject(ctx, req.TaskID)
+	task, inst, err := e.loadAndValidateTask(ctx, req.TaskID)
 	if err != nil {
 		return err
 	}
@@ -444,23 +500,23 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 	if err := session.UpdateTask(ctx, task); err != nil {
 		return err
 	}
-	e.eventBus.Publish(ctx, NewTaskEvent(EventTaskRejected, inst, &node, task, req.Operator, req.Comment))
+	e.eventBus.Publish(ctx, NewTaskEvent(EventTaskRejected, session.Instance(), &node, task, req.Operator, req.Comment))
 
 	// 2. 原子清理当前批次中其余未处理的兄弟任务
 	e.cancelPendingSiblingTasks(ctx, session, task)
 
 	// 3. 若明确指定直接终止，流程置为终态 Rejected 并广播流程终止事件
 	if req.Terminate {
-		inst.Reject()
+		session.Instance().Reject()
 		if err := session.SaveInstance(ctx); err != nil {
 			return err
 		}
-		e.eventBus.Publish(ctx, NewProcessEvent(EventProcessRejected, inst, req.Operator, req.Comment))
+		e.eventBus.Publish(ctx, NewProcessEvent(EventProcessRejected, session.Instance(), req.Operator, req.Comment))
 		return nil
 	}
 
 	// 4. 确定驳回的目标节点（自选目标节点 vs 默认回溯上游）
-	var targetNode model.NodeSpec
+	var targetNodes []model.NodeSpec
 	if req.TargetNodeID != "" {
 		tn, ok := session.Plan().NodesMap[req.TargetNodeID]
 		if !ok {
@@ -469,28 +525,30 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 		if !tn.CanRejectTo() {
 			return fmt.Errorf("%w: 驳回目标必须是人工审批或提单节点", ErrInvalidTargetNode)
 		}
-		targetNode = tn
+		targetNodes = []model.NodeSpec{tn}
 	} else {
-		tn, err := session.Plan().FindUpstreamApprovalNode(task.NodeID)
-		if err != nil {
-			inst.Reject() // 无可用上游节点，流程置为终态 Rejected
+		nodes, err := session.Plan().FindUpstreamRejectNodes(task.NodeID, session.AllTasks())
+		if err != nil || len(nodes) == 0 {
+			session.Instance().Reject() // 无可用上游审批节点，流程置为终态 Rejected
 			return session.SaveInstance(ctx)
 		}
-		targetNode = tn
+		targetNodes = nodes
 	}
 
-	// 5. 流转批次号自增 (batch_code + 1)，激活回退的目标节点
+	// 5. 流转批次号自增 (batch_code + 1)，激活回退的目标节点集合
 	newBatchCode := task.BatchCode + 1
-	if targetNode.Type == model.NodeStart {
+	if len(targetNodes) == 1 && targetNodes[0].Type == model.NodeStart {
 		// 回退至发起人重新编辑发起
-		inst.CurrentNode = targetNode.ID
+		targetNode := targetNodes[0]
+		session.Instance().CurrentNode = targetNode.ID
 		comment := fmt.Sprintf("由审批人 [%s] 驳回至提单人重新编辑: %s", req.Operator, req.Comment)
-		startTask := e.buildStarterTask(targetNode, inst.ID, inst.Starter, newBatchCode, comment)
+		startTask := e.buildStarterTask(targetNode, session.Instance().ID, session.Instance().Starter, newBatchCode, comment)
 		if err := session.SaveTasks(ctx, []*model.Task{startTask}); err != nil {
 			return err
 		}
+		e.eventBus.Publish(ctx, NewTaskEvent(EventTaskCreated, session.Instance(), &targetNode, startTask, req.Operator, comment))
 	} else {
-		if err := e.activateNodes(ctx, session, []model.NodeSpec{targetNode}, newBatchCode, req.Operator); err != nil {
+		if err := e.activateNodes(ctx, session, targetNodes, newBatchCode, req.Operator); err != nil {
 			return err
 		}
 	}
@@ -521,9 +579,6 @@ func (e *flowEngine) doRevoke(ctx context.Context, req RevokeReq) error {
 	if !inst.IsRunning() {
 		return ErrInstanceNotRunning
 	}
-	if req.Operator != "" && req.Operator != inst.Starter {
-		return fmt.Errorf("%w: 仅提单人 [%s] 可撤回工单，当前操作人 [%s]", ErrUnauthorizedRevoke, inst.Starter, req.Operator)
-	}
 
 	session, err := e.newSessionForInstance(ctx, inst)
 	if err != nil {
@@ -540,7 +595,7 @@ func (e *flowEngine) doRevoke(ctx context.Context, req RevokeReq) error {
 		}
 		for _, pid := range pendingIDs {
 			if pt, ok := session.GetTask(pid); ok {
-				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskRevoked, inst, nil, pt, req.Operator, req.Comment))
+				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskRevoked, session.Instance(), nil, pt, req.Operator, req.Comment))
 			}
 		}
 	}
@@ -553,16 +608,16 @@ func (e *flowEngine) doRevoke(ctx context.Context, req RevokeReq) error {
 		}
 
 		newBatchCode := session.MaxBatchCode() + 1
-		inst.CurrentNode = startNode.ID
+		session.Instance().CurrentNode = startNode.ID
 		comment := fmt.Sprintf("提单人主动撤回修改: %s", req.Comment)
-		startTask := e.buildStarterTask(startNode, inst.ID, inst.Starter, newBatchCode, comment)
+		startTask := e.buildStarterTask(startNode, session.Instance().ID, session.Instance().Starter, newBatchCode, comment)
 		if err := session.SaveTasks(ctx, []*model.Task{startTask}); err != nil {
 			return err
 		}
-		e.eventBus.Publish(ctx, NewTaskEvent(EventTaskCreated, inst, &startNode, startTask, req.Operator, comment))
+		e.eventBus.Publish(ctx, NewTaskEvent(EventTaskCreated, session.Instance(), &startNode, startTask, req.Operator, comment))
 	} else {
-		inst.Cancel()
-		e.eventBus.Publish(ctx, NewProcessEvent(EventProcessCancelled, inst, req.Operator, req.Comment))
+		session.Instance().Cancel()
+		e.eventBus.Publish(ctx, NewProcessEvent(EventProcessCancelled, session.Instance(), req.Operator, req.Comment))
 	}
 
 	return session.SaveInstance(ctx)
@@ -592,4 +647,113 @@ func (e *flowEngine) GetTimeline(ctx context.Context, instanceID string) ([]mode
 		return nil, err
 	}
 	return buildTimelineFromTasks(allTasks), nil
+}
+
+// ListPendingTasks 分页查询指定处理人的未办结待办任务列表
+func (e *flowEngine) ListPendingTasks(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
+	return e.storage.ListPendingTasksByAssignee(ctx, assignee, offset, limit)
+}
+
+// ListPendingTasksByInstances 批量拉取多个流程实例当前挂起的未办结审批任务（单次 SQL 批量检索）
+func (e *flowEngine) ListPendingTasksByInstances(ctx context.Context, instanceIDs []string) ([]*model.Task, error) {
+	if len(instanceIDs) == 0 {
+		return []*model.Task{}, nil
+	}
+	return e.storage.ListPendingTasksByInstances(ctx, instanceIDs)
+}
+
+// ListTasksByInstance 获取指定流程实例下的全部流转与历史任务列表
+func (e *flowEngine) ListTasksByInstance(ctx context.Context, instanceID string) ([]*model.Task, error) {
+	if instanceID == "" {
+		return nil, errors.New("流程实例 ID 不能为空")
+	}
+	return e.storage.ListTasksByInstance(ctx, instanceID)
+}
+
+// GetDefinition 根据流程唯一标识与版本号加载流程图定义快照
+func (e *flowEngine) GetDefinition(ctx context.Context, key string, version int) (model.ProcessDefinition, error) {
+	if e.storage == nil {
+		return model.ProcessDefinition{}, errors.New("存储层未初始化")
+	}
+	return e.storage.GetDefinition(ctx, key, version)
+}
+
+// GetExecutionView 获取流程实例的运行态综合视图（包含节点状态映射、高亮已流转边、待处理人等）
+func (e *flowEngine) GetExecutionView(ctx context.Context, instanceID string) (model.ExecutionView, error) {
+	if instanceID == "" {
+		return model.ExecutionView{}, errors.New("流程实例 ID 不能为空")
+	}
+
+	inst, err := e.GetInstance(ctx, instanceID)
+	if err != nil {
+		return model.ExecutionView{}, fmt.Errorf("查询流程实例详情失败: %w", err)
+	}
+
+	tasks, err := e.ListTasksByInstance(ctx, instanceID)
+	if err != nil {
+		return model.ExecutionView{}, fmt.Errorf("查询任务执行记录失败: %w", err)
+	}
+
+	plan, err := e.loadPlan(ctx, inst)
+	if err != nil {
+		return model.ExecutionView{}, fmt.Errorf("加载流程执行计划失败: %w", err)
+	}
+
+	// 按节点分组聚合任务状态，避免或签场景下兄弟任务的 TaskSkipped(5) 错误覆盖已通过的 TaskPassed(1)
+	nodeTasks := lo.GroupBy(tasks, func(t *model.Task) string {
+		return t.NodeID
+	})
+	nodeStatusMap := lo.MapValues(nodeTasks, func(group []*model.Task, _ string) int {
+		return resolveNodeAggregateStatus(group)
+	})
+
+	pendingUsers := lo.Uniq(lo.FilterMap(tasks, func(t *model.Task, _ int) (string, bool) {
+		if t.IsPending() && t.Assignee != "" {
+			return t.Assignee, true
+		}
+		return "", false
+	}))
+
+	traversedEdges := plan.CalculateTraversedEdges(tasks, inst)
+
+	return model.ExecutionView{
+		ProcessKey:     inst.ProcKey,
+		ProcessVersion: inst.Version,
+		NodeStatusMap:  nodeStatusMap,
+		TraversedEdges: traversedEdges,
+		PendingUsers:   pendingUsers,
+	}, nil
+}
+
+// resolveNodeAggregateStatus 根据节点下的所有任务裁决节点的综合状态
+// 状态裁决原则：基于该节点产生的最新批次（Max BatchCode）进行裁决，避免历史批次干扰当前流转表现
+// 同批次内状态裁决优先级：Passed (通过) > Rejected (驳回) > Pending (待办中) > Skipped (全跳过)
+func resolveNodeAggregateStatus(tasks []*model.Task) int {
+	currentTasks := model.FilterLatestBatchTasks(tasks)
+	if len(currentTasks) == 0 {
+		return int(model.TaskPending)
+	}
+
+	// 1. 最新批次内只要有任意任务已通过（人工通过或系统放行），节点综合状态裁决为通过
+	if lo.SomeBy(currentTasks, func(t *model.Task) bool { return t.IsPassed() }) {
+		return int(model.TaskPassed)
+	}
+
+	// 2. 最新批次内存在主动驳回任务，节点综合状态裁决为驳回
+	if lo.SomeBy(currentTasks, func(t *model.Task) bool { return t.Status == model.TaskRejected }) {
+		return int(model.TaskRejected)
+	}
+
+	// 3. 最新批次内仍有待办任务（会签等待中或尚未处理），节点综合状态裁决为待办中
+	if lo.SomeBy(currentTasks, func(t *model.Task) bool { return t.IsPending() }) {
+		return int(model.TaskPending)
+	}
+
+	// 4. 当且仅当最新批次中所有任务全为跳过时，节点综合状态才为跳过
+	if lo.EveryBy(currentTasks, func(t *model.Task) bool { return t.Status == model.TaskSkipped }) {
+		return int(model.TaskSkipped)
+	}
+
+	// 5. 兜底返回最新批次的最后一个任务状态
+	return int(currentTasks[len(currentTasks)-1].Status)
 }

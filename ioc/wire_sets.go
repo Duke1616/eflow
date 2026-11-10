@@ -5,24 +5,27 @@ import (
 	"sync"
 
 	easyEngine "github.com/Bunny3th/easy-workflow/workflow/engine"
+	feishuCallback "github.com/Duke1616/eflow/internal/callback/feishu"
 	"github.com/Duke1616/eflow/internal/client/ealert"
 	"github.com/Duke1616/eflow/internal/client/eiam"
 	"github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/event"
-	ticketEvent "github.com/Duke1616/eflow/internal/event/ticket"
-	eflowEasyflow "github.com/Duke1616/eflow/internal/pkg/easyflow"
 	"github.com/Duke1616/eflow/internal/grpc"
+	"github.com/Duke1616/eflow/internal/pkg/compiler"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/repository/dao"
+	channelSvc "github.com/Duke1616/eflow/internal/service/channel"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
-	engineSvc "github.com/Duke1616/eflow/internal/service/engine"
-	"github.com/Duke1616/eflow/internal/service/event/easyflow"
-	"github.com/Duke1616/eflow/internal/service/event/strategy"
-	"github.com/Duke1616/eflow/internal/service/event/strategy/automation"
-	"github.com/Duke1616/eflow/internal/service/event/strategy/carbon_copy"
-	"github.com/Duke1616/eflow/internal/service/event/strategy/chat"
-	"github.com/Duke1616/eflow/internal/service/event/strategy/start"
-	userstrategy "github.com/Duke1616/eflow/internal/service/event/strategy/user"
+	easyflowDrv "github.com/Duke1616/eflow/internal/service/engine/easyflow"
+	"github.com/Duke1616/eflow/internal/service/engine/easyflow/hook"
+	flowxHook "github.com/Duke1616/eflow/internal/service/engine/flowx/hook"
+	"github.com/Duke1616/eflow/internal/service/notification"
+	"github.com/Duke1616/eflow/internal/service/notification/strategy"
+	"github.com/Duke1616/eflow/internal/service/notification/strategy/automation"
+	"github.com/Duke1616/eflow/internal/service/notification/strategy/carbon_copy"
+	"github.com/Duke1616/eflow/internal/service/notification/strategy/chat"
+	"github.com/Duke1616/eflow/internal/service/notification/strategy/start"
+	userstrategy "github.com/Duke1616/eflow/internal/service/notification/strategy/user"
 	ratingSvc "github.com/Duke1616/eflow/internal/service/rating"
 	taskSvc "github.com/Duke1616/eflow/internal/service/task"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
@@ -34,6 +37,7 @@ import (
 	"github.com/Duke1616/eflow/internal/web/template"
 	"github.com/Duke1616/eflow/internal/web/ticket"
 	"github.com/Duke1616/eflow/internal/web/workflow"
+	"github.com/Duke1616/eflow/pkg/flowx"
 	"github.com/Duke1616/eflow/pkg/mqx"
 	"github.com/google/wire"
 	"gorm.io/gorm"
@@ -62,14 +66,16 @@ var (
 		workflowSvc.NewWorkflowService,
 		workflowSvc.NewTemplateSyncer,
 		workflow.NewHandler,
-		eflowEasyflow.NewLogicFlowToEngineConvert,
+		compiler.NewDefaultCompositeCompiler,
 	)
 
 	// EngineSet 流程引擎核心模块的 Provider 集合
 	EngineSet = wire.NewSet(
 		dao.NewProcessEngineDAO,
 		repository.NewProcessEngineRepository,
-		engineSvc.NewEngineService,
+		easyflowDrv.NewService,
+		InitFlowxEngine,
+		InitEngine,
 	)
 
 	// TaskSet 自动化任务模块 Provider 集合
@@ -80,7 +86,6 @@ var (
 		repository.NewTaskAttemptRepository,
 		taskSvc.NewTaskService,
 		task.NewHandler,
-		etask.NewTaskDispatcher,
 	)
 
 	WithdrawalSet = wire.NewSet(
@@ -127,9 +132,11 @@ var (
 
 		// 流程状态与核心反射事件处理器/Kafka 消费者/三方回调/审批模板自愈
 		InitLarkClient,
-		ticketEvent.NewUserServiceAdapter,
+		eiam.NewUserClient,
+		channelSvc.NewChannelIdentityResolver,
+		channelSvc.NewChannelActionService,
 		InitWechatTicketConsumer,
-		ticketEvent.NewLarkCallbackHandler,
+		feishuCallback.NewLarkCallbackHandler,
 		InitLarkDispatcher,
 		InitLarkServer,
 		InitWechatTicketEventProducer,
@@ -153,8 +160,7 @@ var (
 		eiam.NewEIAMClient,
 		ealert.NewEALERTClient,
 		etask.NewETASKClient,
-		etask.NewExecutionReader,
-		etask.NewRunnerCatalog,
+		etask.NewClient,
 
 		// 导出具体的 Client，直接满足底层 Service 的注入需求！
 		wire.FieldsOf(new(*eiam.EIAMClient), "UserClient", "DepartmentClient"),
@@ -193,10 +199,10 @@ var (
 
 var engineOnce = sync.Once{}
 
-func InitWorkflowEngineOnce(db *gorm.DB, engineSvc engineSvc.Service, producer mqx.Producer[event.TicketStatusModifyEvent],
+func InitWorkflowEngineOnce(db *gorm.DB, engineSvc easyflowDrv.Service, flowxEngine flowx.Engine, ticketRepo repository.TicketRepository, repo repository.IEngineRepository, producer mqx.Producer[event.TicketStatusModifyEvent],
 	taskSvc taskSvc.Service, ticketSvc ticketSvc.Service, workflowSvc workflowSvc.Service,
-	strategy strategy.SendStrategy) *easyflow.ProcessEvent {
-	event := easyflow.NewProcessEvent(producer, engineSvc, taskSvc, ticketSvc, workflowSvc, strategy)
+	sendStrategy strategy.SendStrategy) *hook.ProcessEvent {
+	hookEvent := hook.NewProcessEvent(producer, engineSvc, taskSvc, ticketSvc, workflowSvc, sendStrategy, repo)
 
 	engineOnce.Do(func() {
 		easyEngine.DB = db
@@ -205,9 +211,17 @@ func InitWorkflowEngineOnce(db *gorm.DB, engineSvc engineSvc.Service, producer m
 		}
 		// 是否忽略事件错误
 		easyEngine.IgnoreEventError = false
+
+		// 挂载 flowx 专属飞书通知监听器，实现与 easyflow 等价的消息广播与生命周期协同
+		if dispatcher, ok := sendStrategy.(*strategy.Dispatcher); ok {
+			flowxEngine.AddListener(notification.NewFlowxNotificationListener(ticketRepo, workflowSvc, dispatcher))
+		}
+
+		// 挂载 flowx 自动化任务执行器，将 flowx 引擎触发的自动化节点对接到统一自动化任务编排服务
+		flowxHook.RegisterAutomationWorker(flowxEngine, taskSvc)
 	})
 
-	return event
+	return hookEvent
 }
 
 // InitSendStrategy 包装并实例化节点消息发送分发器

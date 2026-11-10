@@ -34,8 +34,10 @@ func TestProcess_IsBound(t *testing.T) {
 		process    Process
 		wantResult bool
 	}{
-		{name: "未绑定实例", process: Process{InstanceId: 0}, wantResult: false},
-		{name: "已绑定有效实例", process: Process{InstanceId: 100}, wantResult: true},
+		{name: "未绑定实例", process: Process{InstanceID: ""}, wantResult: false},
+		{name: "整型零值未绑定", process: Process{InstanceID: NewID(0)}, wantResult: false},
+		{name: "已绑定有效实例(整型)", process: Process{EngineType: EngineTypeEasyFlow, InstanceID: NewID(100)}, wantResult: true},
+		{name: "已绑定有效实例(字符串)", process: Process{EngineType: EngineTypeFlowx, InstanceID: NewID("inst_100")}, wantResult: true},
 	}
 
 	for _, tc := range testCases {
@@ -55,7 +57,7 @@ func TestTicket_CanRestartProcess(t *testing.T) {
 			name: "启动失败且未绑定实例允许重启",
 			ticket: Ticket{
 				Status:  START_FAILED,
-				Process: Process{InstanceId: 0},
+				Process: Process{InstanceID: ""},
 			},
 			wantResult: true,
 		},
@@ -63,7 +65,7 @@ func TestTicket_CanRestartProcess(t *testing.T) {
 			name: "启动中且未绑定实例允许重启",
 			ticket: Ticket{
 				Status:  START,
-				Process: Process{InstanceId: 0},
+				Process: Process{InstanceID: ""},
 			},
 			wantResult: true,
 		},
@@ -71,7 +73,7 @@ func TestTicket_CanRestartProcess(t *testing.T) {
 			name: "已绑定流程实例不允许重启",
 			ticket: Ticket{
 				Status:  START_FAILED,
-				Process: Process{InstanceId: 100},
+				Process: Process{EngineType: EngineTypeEasyFlow, InstanceID: NewID(100)},
 			},
 			wantResult: false,
 		},
@@ -79,7 +81,7 @@ func TestTicket_CanRestartProcess(t *testing.T) {
 			name: "审批中状态不允许重启",
 			ticket: Ticket{
 				Status:  PROCESS,
-				Process: Process{InstanceId: 0},
+				Process: Process{InstanceID: ""},
 			},
 			wantResult: false,
 		},
@@ -87,7 +89,7 @@ func TestTicket_CanRestartProcess(t *testing.T) {
 			name: "已办结状态不允许重启",
 			ticket: Ticket{
 				Status:  END,
-				Process: Process{InstanceId: 0},
+				Process: Process{InstanceID: ""},
 			},
 			wantResult: false,
 		},
@@ -222,31 +224,35 @@ func TestTicket_CanBeRatedBy(t *testing.T) {
 	}
 }
 
-func TestTicketTaskView_ResolveStep(t *testing.T) {
+func TestTicket_ResolveViews(t *testing.T) {
 	t.Run("无待办步骤时自动回退为工单语义化状态", func(t *testing.T) {
-		view := TicketTaskView{
-			Ticket: Ticket{Status: WITHDRAW},
-		}
-		view.ResolveStep(nil, nil)
-		assert.Equal(t, "已撤回", view.CurrentStep)
+		ticket := Ticket{Status: WITHDRAW}
+		views := ticket.ResolveViews(nil, nil)
+		assert.Len(t, views, 1)
+		assert.Equal(t, "已撤回", views[0].CurrentStep)
 	})
 
 	t.Run("有待办步骤时解析节点名与处理人姓名", func(t *testing.T) {
-		view := TicketTaskView{
-			Ticket: Ticket{Status: PROCESS},
-		}
+		ticket := Ticket{Status: PROCESS}
 		now := time.Now()
-		steps := []Instance{
-			{CurrentNodeName: "技术主管审批", ApprovedBy: "leader1", TaskID: 666, CreateTime: &now},
+		steps := []TodoTask{
+			{NodeName: "技术主管审批", ApprovedBy: "leader1", TaskID: NewID(666), CreateTime: now},
+			{NodeName: "人事主管审批", ApprovedBy: "hr1", TaskID: NewID(667), CreateTime: now},
 		}
 		displayNames := map[string]string{
 			"leader1": "张主管",
+			"hr1":     "李人事",
 		}
-		view.ResolveStep(steps, displayNames)
-		assert.Equal(t, "技术主管审批", view.CurrentStep)
-		assert.Equal(t, "张主管", view.ApprovedBy)
-		assert.Equal(t, 666, view.TaskID)
-		assert.Equal(t, &now, view.ProcInstCreateTime)
+		views := ticket.ResolveViews(steps, displayNames)
+		assert.Len(t, views, 2)
+		assert.Equal(t, "技术主管审批", views[0].CurrentStep)
+		assert.Equal(t, "张主管", views[0].ApprovedBy)
+		assert.Equal(t, NewID(666), views[0].TaskID)
+		assert.Equal(t, &now, views[0].ProcInstCreateTime)
+
+		assert.Equal(t, "人事主管审批", views[1].CurrentStep)
+		assert.Equal(t, "李人事", views[1].ApprovedBy)
+		assert.Equal(t, NewID(667), views[1].TaskID)
 	})
 }
 

@@ -25,8 +25,8 @@ func buildTimelineFromTasks(allTasks []*model.Task) []model.TimelineEvent {
 
 		// 利用 lo.Reduce 函数式规约提取该节点批次下的最晚发生时间
 		occurredAt := lo.Reduce(tasks, func(acc time.Time, t *model.Task, _ int) time.Time {
-			if t.FinishTime != nil && t.FinishTime.After(acc) {
-				return *t.FinishTime
+			if !t.FinishTime.IsZero() && t.FinishTime.After(acc) {
+				return t.FinishTime
 			}
 			return acc
 		}, first.CreateTime)
@@ -36,9 +36,7 @@ func buildTimelineFromTasks(allTasks []*model.Task) []model.TimelineEvent {
 			NodeName:   first.NodeName,
 			BatchCode:  first.BatchCode,
 			OccurredAt: occurredAt,
-			Tasks: lo.Map(tasks, func(t *model.Task, _ int) model.Task {
-				return *t
-			}),
+			Tasks:      tasks,
 			IsFinished: lo.EveryBy(tasks, func(t *model.Task) bool {
 				return t.Status != model.TaskPending
 			}),
