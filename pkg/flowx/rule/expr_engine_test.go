@@ -47,6 +47,12 @@ func TestExprEngine_Evaluate(t *testing.T) {
 			env:        map[string]any{"days": 2, "dept": "HR", "role": "admin"},
 			wantResult: true,
 		},
+		{
+			name:       "标准分支条件",
+			expression: "$level in ('high') || $risk >= 3",
+			env:        map[string]any{"level": "high", "risk": 3},
+			wantResult: true,
+		},
 	}
 
 	for _, tc := range testCases {

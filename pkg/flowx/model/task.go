@@ -41,7 +41,7 @@ func NewTask(id, instanceID string, node NodeSpec, batchCode int, assignee strin
 		NodeID: node.ID, NodeName: node.Name,
 		BatchCode: batchCode, Assignee: assignee,
 		SignRule: node.SignRule,
-		Status: status, CreateTime: time.Now(),
+		Status:   status, CreateTime: time.Now(),
 	}
 }
 

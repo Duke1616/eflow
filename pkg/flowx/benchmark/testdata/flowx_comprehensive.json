@@ -1,0 +1,475 @@
+{
+  "nodes": [
+    {
+      "id": "comprehensive-node-1",
+      "type": "start",
+      "x": 100,
+      "y": 260,
+      "text": {
+        "x": 100,
+        "y": 260,
+        "value": "开始"
+      },
+      "properties": {
+        "id": "comprehensive-node-1",
+        "name": "开始"
+      }
+    },
+    {
+      "id": "comprehensive-node-2",
+      "type": "user",
+      "x": 230,
+      "y": 260,
+      "text": {
+        "x": 230,
+        "y": 260,
+        "value": "抄送提交人"
+      },
+      "properties": {
+        "id": "comprehensive-node-2",
+        "name": "抄送提交人",
+        "user_type": "submitter",
+        "approve_type": "or",
+        "is_cc": true,
+        "assignees": [
+          {
+            "rule": "founder",
+            "values": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "comprehensive-node-3",
+      "type": "inclusion",
+      "x": 360,
+      "y": 260,
+      "text": {
+        "x": 360,
+        "y": 260,
+        "value": "包容网关"
+      },
+      "properties": {
+        "id": "comprehensive-node-3",
+        "name": "技术线分流网关"
+      }
+    },
+    {
+      "id": "comprehensive-node-4",
+      "type": "user",
+      "x": 490,
+      "y": 140,
+      "text": {
+        "x": 490,
+        "y": 140,
+        "value": "后端"
+      },
+      "properties": {
+        "id": "comprehensive-node-4",
+        "name": "后端审批",
+        "user_type": "assignee",
+        "approve_type": "or",
+        "assignees": [
+          {
+            "rule": "appoint",
+            "values": [
+              "bob"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "comprehensive-node-5",
+      "type": "user",
+      "x": 490,
+      "y": 260,
+      "text": {
+        "x": 490,
+        "y": 260,
+        "value": "算法"
+      },
+      "properties": {
+        "id": "comprehensive-node-5",
+        "name": "算法审批",
+        "user_type": "assignee",
+        "approve_type": "or",
+        "assignees": [
+          {
+            "rule": "appoint",
+            "values": [
+              "dave"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "comprehensive-node-6",
+      "type": "user",
+      "x": 490,
+      "y": 380,
+      "text": {
+        "x": 490,
+        "y": 380,
+        "value": "前端"
+      },
+      "properties": {
+        "id": "comprehensive-node-6",
+        "name": "前端审批",
+        "user_type": "assignee",
+        "approve_type": "or",
+        "assignees": [
+          {
+            "rule": "appoint",
+            "values": [
+              "carol"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "comprehensive-node-7",
+      "type": "inclusion",
+      "x": 620,
+      "y": 260,
+      "text": {
+        "x": 620,
+        "y": 260,
+        "value": "包容网关"
+      },
+      "properties": {
+        "id": "comprehensive-node-7",
+        "name": "技术线汇聚网关"
+      }
+    },
+    {
+      "id": "comprehensive-node-8",
+      "type": "parallel",
+      "x": 750,
+      "y": 260,
+      "text": {
+        "x": 750,
+        "y": 260,
+        "value": "并行网关"
+      },
+      "properties": {
+        "id": "comprehensive-node-8",
+        "name": "管理层会签分流"
+      }
+    },
+    {
+      "id": "comprehensive-node-9",
+      "type": "user",
+      "x": 880,
+      "y": 190,
+      "text": {
+        "x": 880,
+        "y": 190,
+        "value": "领导"
+      },
+      "properties": {
+        "id": "comprehensive-node-9",
+        "name": "领导审批",
+        "user_type": "leader",
+        "approve_type": "and",
+        "is_cosigned": true,
+        "assignees": [
+          {
+            "rule": "appoint",
+            "values": [
+              "eve"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "comprehensive-node-10",
+      "type": "user",
+      "x": 880,
+      "y": 330,
+      "text": {
+        "x": 880,
+        "y": 330,
+        "value": "产品"
+      },
+      "properties": {
+        "id": "comprehensive-node-10",
+        "name": "产品确认",
+        "user_type": "assignee",
+        "approve_type": "and",
+        "is_cosigned": true,
+        "assignees": [
+          {
+            "rule": "appoint",
+            "values": [
+              "frank"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "comprehensive-node-11",
+      "type": "parallel",
+      "x": 1010,
+      "y": 260,
+      "text": {
+        "x": 1010,
+        "y": 260,
+        "value": "并行网关"
+      },
+      "properties": {
+        "id": "comprehensive-node-11",
+        "name": "管理层会签汇聚"
+      }
+    },
+    {
+      "id": "comprehensive-node-12",
+      "type": "automation",
+      "x": 1140,
+      "y": 260,
+      "text": {
+        "x": 1140,
+        "y": 260,
+        "value": "自动化-部署"
+      },
+      "properties": {
+        "id": "comprehensive-node-12",
+        "name": "自动化-部署"
+      }
+    },
+    {
+      "id": "comprehensive-node-13",
+      "type": "chat",
+      "x": 1260,
+      "y": 260,
+      "text": {
+        "x": 1260,
+        "y": 260,
+        "value": "群通知"
+      },
+      "properties": {
+        "id": "comprehensive-node-13",
+        "name": "群通知"
+      }
+    },
+    {
+      "id": "comprehensive-node-14",
+      "type": "end",
+      "x": 1370,
+      "y": 260,
+      "text": {
+        "x": 1370,
+        "y": 260,
+        "value": "结束"
+      },
+      "properties": {
+        "id": "comprehensive-node-14",
+        "name": "结束"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "comprehensive-node-15",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-1",
+      "targetNodeId": "comprehensive-node-2",
+      "text": {
+        "x": 165,
+        "y": 260,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "comprehensive-node-16",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-2",
+      "targetNodeId": "comprehensive-node-3",
+      "text": {
+        "x": 295,
+        "y": 260,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "comprehensive-node-17",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-3",
+      "targetNodeId": "comprehensive-node-4",
+      "text": {
+        "x": 425,
+        "y": 200,
+        "value": ""
+      },
+      "properties": {
+        "expression": "$scope == 'backend'"
+      }
+    },
+    {
+      "id": "comprehensive-node-18",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-3",
+      "targetNodeId": "comprehensive-node-5",
+      "text": {
+        "x": 425,
+        "y": 260,
+        "value": ""
+      },
+      "properties": {
+        "expression": "$scope == 'algo'"
+      }
+    },
+    {
+      "id": "comprehensive-node-19",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-3",
+      "targetNodeId": "comprehensive-node-6",
+      "text": {
+        "x": 425,
+        "y": 320,
+        "value": ""
+      },
+      "properties": {
+        "expression": "$scope == 'frontend'"
+      }
+    },
+    {
+      "id": "comprehensive-node-20",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-4",
+      "targetNodeId": "comprehensive-node-7",
+      "text": {
+        "x": 555,
+        "y": 200,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "comprehensive-node-21",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-5",
+      "targetNodeId": "comprehensive-node-7",
+      "text": {
+        "x": 555,
+        "y": 260,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "comprehensive-node-22",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-6",
+      "targetNodeId": "comprehensive-node-7",
+      "text": {
+        "x": 555,
+        "y": 320,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "comprehensive-node-23",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-7",
+      "targetNodeId": "comprehensive-node-8",
+      "text": {
+        "x": 685,
+        "y": 260,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "comprehensive-node-24",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-8",
+      "targetNodeId": "comprehensive-node-9",
+      "text": {
+        "x": 815,
+        "y": 225,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "comprehensive-node-25",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-8",
+      "targetNodeId": "comprehensive-node-10",
+      "text": {
+        "x": 815,
+        "y": 295,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "comprehensive-node-26",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-9",
+      "targetNodeId": "comprehensive-node-11",
+      "text": {
+        "x": 945,
+        "y": 225,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "comprehensive-node-27",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-10",
+      "targetNodeId": "comprehensive-node-11",
+      "text": {
+        "x": 945,
+        "y": 295,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "comprehensive-node-28",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-11",
+      "targetNodeId": "comprehensive-node-12",
+      "text": {
+        "x": 1075,
+        "y": 260,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "comprehensive-node-29",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-12",
+      "targetNodeId": "comprehensive-node-13",
+      "text": {
+        "x": 1200,
+        "y": 260,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "comprehensive-node-30",
+      "type": "polyline",
+      "sourceNodeId": "comprehensive-node-13",
+      "targetNodeId": "comprehensive-node-14",
+      "text": {
+        "x": 1315,
+        "y": 260,
+        "value": ""
+      },
+      "properties": {}
+    }
+  ]
+}

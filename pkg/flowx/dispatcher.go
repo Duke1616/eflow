@@ -33,15 +33,20 @@ func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession
 
 	// 1. 持久化未命中分支的 TaskSkipped 占位记录，供时间线渲染与汇聚感知
 	if len(dec.SkippedNodes) > 0 {
-		skippedTasks := lo.Map(dec.SkippedNodes, func(n model.NodeSpec, idx int) *model.Task {
+		skippedTasks := lo.FilterMap(dec.SkippedNodes, func(n model.NodeSpec, idx int) (*model.Task, bool) {
+			if n.IsGateway() {
+				return nil, false // 网关非物理审批节点，绝不生成 Task 记录
+			}
 			t := model.NewTask(e.idGen.GenTaskID(n.ID, "system_skip", batchCode, idx+1), inst.ID, n, batchCode, "system", model.TaskPending)
 			t.Skip("分支条件未满足，系统自动跳过")
-			return t
+			return t, true
 		})
-		_ = session.SaveTasks(ctx, skippedTasks)
+		if len(skippedTasks) > 0 {
+			_ = session.SaveTasks(ctx, skippedTasks)
 
-		for _, t := range skippedTasks {
-			e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, nil, t, "system", t.Comment))
+			for _, t := range skippedTasks {
+				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, nil, t, "system", t.Comment))
+			}
 		}
 	}
 

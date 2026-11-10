@@ -8,8 +8,8 @@ import (
 )
 
 var (
-	ErrInstanceNotFound = errors.New("流程实例不存在")
-	ErrTaskNotFound     = errors.New("流程任务不存在")
+	ErrInstanceNotFound   = errors.New("流程实例不存在")
+	ErrTaskNotFound       = errors.New("流程任务不存在")
 	ErrDefinitionNotFound = errors.New("流程定义未找到")
 )
 

@@ -26,6 +26,11 @@ func (p *simpleParser) Parse(condition string) *model.ConditionGroup {
 		return nil
 	}
 
+	// 复合逻辑表达式 (含 && 或 ||) 超出轻量解析器职责范畴，返回 nil 委托 expr 字节码引擎执行
+	if strings.Contains(cond, "&&") || strings.Contains(cond, "||") {
+		return nil
+	}
+
 	lower := strings.ToLower(cond)
 
 	// 1. 优先解析集合包含算子: "not in" 与 "in"

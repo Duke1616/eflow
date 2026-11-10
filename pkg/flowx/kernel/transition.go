@@ -149,7 +149,10 @@ func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables mode
 			}
 		} else if currNode.Type == model.NodeGatewayInclusive {
 			// 包容网关 (OR / 条件并行)：未满足条件的分支自动标记为跳过 (Skip)
-			result.SkippedTargets = append(result.SkippedTargets, targetNode)
+			// 注意：仅当目标是非网关节点时才记录为跳过目标，网关属于纯拓扑控制节点，严禁持久化 TaskSkipped 记录
+			if !targetNode.IsGateway() {
+				result.SkippedTargets = append(result.SkippedTargets, targetNode)
+			}
 		}
 	}
 

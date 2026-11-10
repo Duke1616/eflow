@@ -10,12 +10,12 @@ import (
 
 func TestParseConditionText(t *testing.T) {
 	testCases := []struct {
-		name       string
-		input      string
-		wantField  string
-		wantOp     model.Op
-		wantVal    any
-		wantNil    bool
+		name      string
+		input     string
+		wantField string
+		wantOp    model.Op
+		wantVal   any
+		wantNil   bool
 	}{
 		{
 			name:      "大于数值",

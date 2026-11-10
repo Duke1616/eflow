@@ -125,10 +125,10 @@ func TestEvaluateRuleGroup_InWithSliceAndJSON(t *testing.T) {
 
 func TestEvaluateRuleGroup_SliceAdaptation(t *testing.T) {
 	vars := map[string]any{
-		"env_slice":   []any{"frontend", "backend"},
-		"env_empty":   []any{},
+		"env_slice":      []any{"frontend", "backend"},
+		"env_empty":      []any{},
 		"env_json_empty": "[]",
-		"env_scalar":  "backend",
+		"env_scalar":     "backend",
 	}
 
 	// 1. 等于 (OpEqual): 切片中包含即为 true

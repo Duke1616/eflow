@@ -1196,7 +1196,7 @@ func TestEngine_GetExecutionView_OrSignPassNotOverwrittenBySkipped(t *testing.T)
 			{ID: "start", Type: model.NodeStart, Name: "开始"},
 			{
 				ID: "hr_node", Type: model.NodeApproval, Name: "人事",
-				SignRule: model.SignOneVote,
+				SignRule:  model.SignOneVote,
 				Assignees: []string{"luankz", "peicg"},
 			},
 			{ID: "end", Type: model.NodeEnd, Name: "结束"},

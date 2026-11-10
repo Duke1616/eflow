@@ -43,9 +43,9 @@ func TestStorage_ListPendingTasksByInstances(t *testing.T) {
 	require.NoError(t, s.SaveTasks(ctx, tasks))
 
 	testCases := []struct {
-		name      string
-		instIDs   []string
-		wantCount int
+		name        string
+		instIDs     []string
+		wantCount   int
 		wantTaskIDs []string
 	}{
 		{
@@ -54,15 +54,15 @@ func TestStorage_ListPendingTasksByInstances(t *testing.T) {
 			wantCount: 0,
 		},
 		{
-			name:      "命中单个实例且仅返回待办任务",
-			instIDs:   []string{"inst_1"},
-			wantCount: 1,
+			name:        "命中单个实例且仅返回待办任务",
+			instIDs:     []string{"inst_1"},
+			wantCount:   1,
 			wantTaskIDs: []string{"task_1"},
 		},
 		{
-			name:      "跨多个实例批量拉取待办任务",
-			instIDs:   []string{"inst_1", "inst_2"},
-			wantCount: 2,
+			name:        "跨多个实例批量拉取待办任务",
+			instIDs:     []string{"inst_1", "inst_2"},
+			wantCount:   2,
 			wantTaskIDs: []string{"task_1", "task_3"},
 		},
 		{

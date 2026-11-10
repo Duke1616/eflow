@@ -1,0 +1,139 @@
+{
+  "nodes": [
+    {
+      "id": "linear-node-1",
+      "type": "start",
+      "x": 160,
+      "y": 200,
+      "text": {
+        "x": 160,
+        "y": 200,
+        "value": "开始"
+      },
+      "properties": {
+        "id": "linear-node-1",
+        "name": "开始"
+      }
+    },
+    {
+      "id": "linear-node-2",
+      "type": "user",
+      "x": 340,
+      "y": 200,
+      "text": {
+        "x": 340,
+        "y": 200,
+        "value": "部门主管审批"
+      },
+      "properties": {
+        "id": "linear-node-2",
+        "name": "部门主管审批",
+        "user_type": "leader",
+        "approve_type": "or",
+        "assignees": [
+          {
+            "rule": "appoint",
+            "values": [
+              "bob"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "linear-node-3",
+      "type": "automation",
+      "x": 520,
+      "y": 200,
+      "text": {
+        "x": 520,
+        "y": 200,
+        "value": "自动化任务执行"
+      },
+      "properties": {
+        "id": "linear-node-3",
+        "name": "自动化任务执行"
+      }
+    },
+    {
+      "id": "linear-node-4",
+      "type": "chat",
+      "x": 700,
+      "y": 200,
+      "text": {
+        "x": 700,
+        "y": 200,
+        "value": "结果群通知"
+      },
+      "properties": {
+        "id": "linear-node-4",
+        "name": "结果群通知"
+      }
+    },
+    {
+      "id": "linear-node-5",
+      "type": "end",
+      "x": 880,
+      "y": 200,
+      "text": {
+        "x": 880,
+        "y": 200,
+        "value": "结束"
+      },
+      "properties": {
+        "id": "linear-node-5",
+        "name": "结束"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "linear-node-6",
+      "type": "polyline",
+      "sourceNodeId": "linear-node-1",
+      "targetNodeId": "linear-node-2",
+      "text": {
+        "x": 250,
+        "y": 200,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "linear-node-7",
+      "type": "polyline",
+      "sourceNodeId": "linear-node-2",
+      "targetNodeId": "linear-node-3",
+      "text": {
+        "x": 430,
+        "y": 200,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "linear-node-8",
+      "type": "polyline",
+      "sourceNodeId": "linear-node-3",
+      "targetNodeId": "linear-node-4",
+      "text": {
+        "x": 610,
+        "y": 200,
+        "value": ""
+      },
+      "properties": {}
+    },
+    {
+      "id": "linear-node-9",
+      "type": "polyline",
+      "sourceNodeId": "linear-node-4",
+      "targetNodeId": "linear-node-5",
+      "text": {
+        "x": 790,
+        "y": 200,
+        "value": ""
+      },
+      "properties": {}
+    }
+  ]
+}
