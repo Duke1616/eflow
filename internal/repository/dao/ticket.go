@@ -181,20 +181,22 @@ func (g *gormTicketDAO) UpdateStatusByProcessInstance(ctx context.Context, insta
 }
 
 func (g *gormTicketDAO) RegisterProcessInstanceId(ctx context.Context, id int64, instanceId int, status uint8) error {
+	// 终态保护：若工单在引擎启动过程中已秒级流转至终态 (END 或 WITHDRAW)，严禁回退状态为流转中
 	return g.db.WithContext(ctx).Model(&Ticket{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"process_instance_id": instanceId,
 		"engine_type":         "easy-workflow",
-		"status":              status,
+		"status":              gorm.Expr("CASE WHEN status IN (?, ?) THEN status ELSE ? END", domain.END.ToUint8(), domain.WITHDRAW.ToUint8(), status),
 		"process_start_error": "",
 		"utime":               time.Now().UnixMilli(),
 	}).Error
 }
 
 func (g *gormTicketDAO) RegisterProcessInstanceKey(ctx context.Context, id int64, instanceKey string, status uint8) error {
+	// 终态保护：若工单在引擎启动过程中已秒级流转至终态 (END 或 WITHDRAW)，严禁回退状态为流转中
 	return g.db.WithContext(ctx).Model(&Ticket{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"process_instance_key": instanceKey,
 		"engine_type":          "flowx",
-		"status":               status,
+		"status":               gorm.Expr("CASE WHEN status IN (?, ?) THEN status ELSE ? END", domain.END.ToUint8(), domain.WITHDRAW.ToUint8(), status),
 		"process_start_error":  "",
 		"utime":                time.Now().UnixMilli(),
 	}).Error
