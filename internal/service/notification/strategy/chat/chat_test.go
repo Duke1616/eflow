@@ -91,7 +91,7 @@ func (s *ChatTestSuite) TestSend_ExistingGroup() {
 
 	s.mockBase.EXPECT().SafeGo(gomock.Any(), gomock.Any(), gomock.Any()).Do(func(ctx context.Context, timeout time.Duration, f func(context.Context)) {
 		f(ctx)
-	})
+	}).AnyTimes()
 
 	s.mockBase.EXPECT().IsGlobalNotify(gomock.Any()).Return(true)
 	s.mockTeam.EXPECT().GetChatGroupByIds(gomock.Any(), gomock.Any()).Return(&teamv1.GetChatGroupByIdsResponse{
@@ -181,22 +181,26 @@ func (s *ChatTestSuite) TestSend_CreateGroup_ReuseExisting() {
 
 	s.mockBase.EXPECT().SafeGo(gomock.Any(), gomock.Any(), gomock.Any()).Do(func(ctx context.Context, timeout time.Duration, f func(context.Context)) {
 		f(ctx)
-	})
+	}).AnyTimes()
 
 	s.mockBase.EXPECT().IsGlobalNotify(gomock.Any()).Return(true)
 
-	// 模拟查询当前租户默认/公共群聊，返回同名既有群聊
+	// 模拟查询当前租户默认/公共群聊，返回同名既有临时群聊
 	s.mockTeam.EXPECT().GetDefaultChatGroups(gomock.Any(), gomock.Any()).Return(&teamv1.GetDefaultChatGroupsResponse{
 		Groups: []*teamv1.ChatGroup{
 			{
-				Id:      88,
-				TeamId:  0,
-				Name:    "【ECMDB】- 产线环境发版",
-				ChatId:  "oc_reused_chat_123",
-				Channel: notificationv1.Channel_LARK_CARD,
+				Id:          88,
+				TeamId:      0,
+				Name:        "【ECMDB】- 产线环境发版",
+				ChatId:      "oc_reused_chat_123",
+				Channel:     notificationv1.Channel_LARK_CARD,
+				IsTemporary: true,
 			},
 		},
 	}, nil)
+
+	// 预期触发续期调用
+	s.mockTeam.EXPECT().UpdateChatGroup(gomock.Any(), gomock.Any()).Return(&teamv1.UpdateChatGroupResponse{}, nil).AnyTimes()
 
 	s.mockSender.EXPECT().BatchSend(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context,
 		ns []notification.Notification) (notification.Response, error) {

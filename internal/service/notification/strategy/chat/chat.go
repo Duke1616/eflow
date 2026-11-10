@@ -139,6 +139,11 @@ func (n *Notification) handleExistingGroups(ctx context.Context, info strategy.I
 	}), nil
 }
 
+const (
+	// defaultTemporaryChatGroupTTL 动态创建的流程协同群默认存活保留时间 (24小时)
+	defaultTemporaryChatGroupTTL = 24 * time.Hour
+)
+
 // handleCreateGroup 处理动态建群：同名租户公共群优先复用，未命中则按需新建并登记为默认群
 func (n *Notification) handleCreateGroup(ctx context.Context, info strategy.Info, data *chatContext) ([]recipient, error) {
 	rpcCtx := withTenantContext(ctx, info.Ticket.TenantID)
@@ -151,6 +156,12 @@ func (n *Notification) handleCreateGroup(ctx context.Context, info strategy.Info
 	// 1. 同名租户已有群优先复用
 	if chat, _ := n.findExistingChatGroup(rpcCtx, chatName); chat != nil {
 		n.syncMembersToExistingChat(ctx, chat.ChatId, data)
+		// 命中已有临时群，异步触发自动续期 24 小时
+		if chat.IsTemporary {
+			n.SafeGo(ctx, 30*time.Second, func(renewCtx context.Context) {
+				n.asyncRenewGroup(withTenantContext(renewCtx, info.Ticket.TenantID), chat)
+			})
+		}
 		return []recipient{{
 			chatID:  chat.ChatId,
 			channel: strategy.GetChatChannel(chat.Channel.String()),
@@ -163,8 +174,10 @@ func (n *Notification) handleCreateGroup(ctx context.Context, info strategy.Info
 		return nil, fmt.Errorf("创建飞书通知群组失败: %w", err)
 	}
 
-	// 3. 异步关联租户公共群（生命周期脱钩解耦，TeamID 统一归属于租户流程公共资产）
-	go n.asyncBindGroup(withTenantContext(context.WithoutCancel(ctx), info.Ticket.TenantID), chatName, chatID)
+	// 3. 异步关联租户公共群（生命周期脱钩解耦，TeamID 统一归属于租户流程公共资产，设置临时群与到期时间）
+	n.SafeGo(ctx, 30*time.Second, func(bindCtx context.Context) {
+		n.asyncBindGroup(withTenantContext(bindCtx, info.Ticket.TenantID), chatName, chatID)
+	})
 
 	return []recipient{{chatID: chatID, channel: notification.Channel(info.Channel)}}, nil
 }
@@ -197,14 +210,24 @@ func withTenantContext(ctx context.Context, tenantID int64) context.Context {
 func (n *Notification) asyncBindGroup(ctx context.Context, chatName, chatID string) {
 	_, err := n.teamSvc.BindChatGroup(ctx, &teamv1.BindChatGroupRequest{
 		Group: &teamv1.ChatGroup{
-			TeamId:  0, // 动态创建的流程群统一作为租户公共资产归宿 (TeamID = 0)
-			Name:    chatName,
-			ChatId:  chatID,
-			Channel: notificationv1.Channel_LARK_CARD,
+			TeamId:      0, // 动态创建的流程群统一作为租户公共资产归宿 (TeamID = 0)
+			Name:        chatName,
+			ChatId:      chatID,
+			Channel:     notificationv1.Channel_LARK_CARD,
+			IsTemporary: true,
+			ExpireTime:  time.Now().Add(defaultTemporaryChatGroupTTL).UnixMilli(),
 		},
 	})
 	if err != nil {
 		n.Logger().Error("异步绑定群组到租户默认群失败", elog.FieldErr(err), elog.String("chatName", chatName), elog.String("chatId", chatID))
+	}
+}
+
+// asyncRenewGroup 异步对已存在的临时协同群执行有效期顺延续期
+func (n *Notification) asyncRenewGroup(ctx context.Context, chat *teamv1.ChatGroup) {
+	chat.ExpireTime = time.Now().Add(defaultTemporaryChatGroupTTL).UnixMilli()
+	if _, err := n.teamSvc.UpdateChatGroup(ctx, &teamv1.UpdateChatGroupRequest{Group: chat}); err != nil {
+		n.Logger().Warn("异步续期临时协同群失败", elog.FieldErr(err), elog.String("chatId", chat.ChatId))
 	}
 }
 
