@@ -3,6 +3,7 @@ package flowx
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/Duke1616/eflow/pkg/flowx/model"
 )
@@ -46,4 +47,48 @@ func (r *workerRegistry) Get(workerType string) (TaskWorker, bool) {
 	defer r.mu.RUnlock()
 	w, ok := r.workers[workerType]
 	return w, ok
+}
+
+// wrapWithRetry 使用函数式装饰器模式为 TaskWorker 赋予弹性退避重试能力，调度器主干零侵入
+func wrapWithRetry(worker TaskWorker, policy *model.RetryPolicy) TaskWorker {
+	if worker == nil || policy == nil || policy.MaxAttempts <= 1 {
+		return worker
+	}
+
+	return func(ctx context.Context, taskCtx *TaskContext) (*TaskResult, error) {
+		interval := policy.InitialInterval
+		if interval <= 0 {
+			interval = 100 * time.Millisecond
+		}
+		factor := policy.BackoffFactor
+		if factor < 1.0 {
+			factor = 1.0
+		}
+
+		for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
+			if taskCtx != nil {
+				taskCtx.Attempt = attempt
+			}
+
+			res, err := worker(ctx, taskCtx)
+			if err == nil || attempt == policy.MaxAttempts {
+				return res, err
+			}
+
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(interval):
+			}
+
+			if factor > 1.0 {
+				nextInterval := time.Duration(float64(interval) * factor)
+				if policy.MaxInterval > 0 && nextInterval > policy.MaxInterval {
+					nextInterval = policy.MaxInterval
+				}
+				interval = nextInterval
+			}
+		}
+		return nil, nil
+	}
 }

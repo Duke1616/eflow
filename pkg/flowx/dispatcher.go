@@ -208,7 +208,7 @@ func (x *taskNodeExecutor) Execute(ctx context.Context, session *flowSession, no
 	}
 
 	inst := session.Instance()
-	res, workerErr := worker(ctx, &TaskContext{
+	res, workerErr := wrapWithRetry(worker, node.RetryPolicy)(ctx, &TaskContext{
 		Instance:  inst,
 		Node:      &node,
 		Variables: inst.Variables,
