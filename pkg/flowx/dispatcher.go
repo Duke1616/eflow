@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Duke1616/eflow/pkg/flowx/kernel"
 	"github.com/Duke1616/eflow/pkg/flowx/model"
@@ -197,7 +196,7 @@ func (x *approvalNodeExecutor) Execute(ctx context.Context, session *flowSession
 	return nil
 }
 
-// taskNodeExecutor 自动化任务节点执行器 (职责明确：弹性重试执行作业、自动推进状态机)
+// taskNodeExecutor 自动化任务节点执行器 (职责明确：分发执行作业、自动推进状态机)
 type taskNodeExecutor struct {
 	engine *flowEngine
 }
@@ -209,49 +208,11 @@ func (x *taskNodeExecutor) Execute(ctx context.Context, session *flowSession, no
 	}
 
 	inst := session.Instance()
-	var (
-		res       *TaskResult
-		workerErr error
-	)
-
-	// 带退避重试执行
-	attempts := 1
-	if node.RetryPolicy != nil && node.RetryPolicy.MaxAttempts > 1 {
-		attempts = node.RetryPolicy.MaxAttempts
-	}
-
-	interval := 100 * time.Millisecond
-	if node.RetryPolicy != nil && node.RetryPolicy.InitialInterval > 0 {
-		interval = node.RetryPolicy.InitialInterval
-	}
-
-	for i := 1; i <= attempts; i++ {
-		res, workerErr = worker(ctx, &TaskContext{
-			Instance:  inst,
-			Node:      &node,
-			Variables: inst.Variables,
-			Attempt:   i,
-		})
-		if workerErr == nil {
-			break
-		}
-		if i < attempts {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(interval):
-			}
-			// 根据指数退避倍数计算下一次重试等待时长，并应用最大封顶上限
-			if node.RetryPolicy != nil && node.RetryPolicy.BackoffFactor > 1.0 {
-				nextInterval := time.Duration(float64(interval) * node.RetryPolicy.BackoffFactor)
-				if node.RetryPolicy.MaxInterval > 0 && nextInterval > node.RetryPolicy.MaxInterval {
-					nextInterval = node.RetryPolicy.MaxInterval
-				}
-				interval = nextInterval
-			}
-		}
-	}
-
+	res, workerErr := worker(ctx, &TaskContext{
+		Instance:  inst,
+		Node:      &node,
+		Variables: inst.Variables,
+	})
 	if workerErr != nil {
 		return fmt.Errorf("自动化任务 [%s] 执行失败: %w", node.ID, workerErr)
 	}

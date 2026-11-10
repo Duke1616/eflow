@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/Duke1616/eflow/pkg/flowx/middleware"
 	"github.com/Duke1616/eflow/pkg/flowx/model"
@@ -1424,49 +1423,6 @@ func TestParallelBranch_AsyncAutomationTaskNotSkipped(t *testing.T) {
 	finalInst, err := store.GetInstance(ctx, instID)
 	require.NoError(t, err)
 	assert.Equal(t, model.InstanceFinished, finalInst.Status, "所有分支完成后流程实例必须圆满办结")
-}
-
-// TestTaskWorker_RetryBackoff 验证自动化任务失败退避倍数与封顶间隔生效
-func TestTaskWorker_RetryBackoff(t *testing.T) {
-	ctx := context.Background()
-	store := memory.NewStorage()
-	engine := NewEngine(store)
-
-	var attempts []time.Time
-	engine.RegisterWorker("flaky_worker", func(_ context.Context, tc *TaskContext) (*TaskResult, error) {
-		attempts = append(attempts, time.Now())
-		if tc.Attempt < 3 {
-			return nil, errors.New("模拟偶发故障")
-		}
-		return &TaskResult{Variables: map[string]any{"status": "ok"}}, nil
-	})
-
-	def := NewProcess("retry_proc", "重试测试").
-		Start("start", "开始").
-		TaskWithRetry("task_retry", "弹性任务", "flaky_worker", model.RetryPolicy{
-			MaxAttempts:     3,
-			InitialInterval: 50 * time.Millisecond,
-			BackoffFactor:   2.0,
-			MaxInterval:     200 * time.Millisecond,
-		}).
-		End("end", "结束").
-		Edge("start", "task_retry").
-		Edge("task_retry", "end").
-		Build()
-
-	_, err := engine.Deploy(ctx, def)
-	require.NoError(t, err)
-
-	_, err = engine.Start(ctx, StartReq{
-		Key:     "retry_proc",
-		Starter: "tom",
-	})
-	require.NoError(t, err)
-
-	require.Len(t, attempts, 3, "应该重试3次")
-	// 验证间隔确实大于等于 initialInterval (50ms)
-	diff1 := attempts[1].Sub(attempts[0])
-	assert.GreaterOrEqual(t, diff1, 40*time.Millisecond)
 }
 
 // BenchmarkFlowxFullProcess 基准测试：单次完整综合流程（启动 -> 或签通过 -> 条件分流 -> 会签双人通过 -> 自动办结）
