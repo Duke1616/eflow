@@ -195,6 +195,9 @@ func (c *AutomationNodeConverter) Convert(_ *ConvertContext, node *flowdsl.Node)
 		if autoCfg.RunnerID > 0 {
 			props["runner_id"] = autoCfg.RunnerID
 		}
+		if autoCfg.MaxExecutionSeconds > 0 {
+			props["max_execution_seconds"] = autoCfg.MaxExecutionSeconds
+		}
 	}
 
 	return model.NodeSpec{

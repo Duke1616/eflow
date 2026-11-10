@@ -121,6 +121,7 @@ type rawAutoProp struct {
 	IsNotify           bool            `json:"is_notify"`
 	Schedule           *ScheduleConfig `json:"schedule"`
 	CompensationNodeID string          `json:"compensation_node_id"`
+	MaxExecutionSeconds int64          `json:"max_execution_seconds"`
 
 	// 历史遗留定时调度字段
 	IsTiming      bool   `json:"is_timing"`
@@ -133,12 +134,13 @@ type rawAutoProp struct {
 
 func (p *rawAutoProp) toAutoTaskConfig() *AutoTaskConfig {
 	cfg := &AutoTaskConfig{
-		CodebookID:         p.CodebookID,
-		RunnerID:           p.RunnerID,
-		NotifyMethod:       p.NotifyMethod,
-		IsNotify:           p.IsNotify,
-		Schedule:           p.Schedule,
-		CompensationNodeID: p.CompensationNodeID,
+		CodebookID:          p.CodebookID,
+		RunnerID:            p.RunnerID,
+		NotifyMethod:        p.NotifyMethod,
+		IsNotify:            p.IsNotify,
+		Schedule:            p.Schedule,
+		CompensationNodeID:  p.CompensationNodeID,
+		MaxExecutionSeconds: p.MaxExecutionSeconds,
 	}
 
 	if cfg.Schedule != nil {

@@ -41,11 +41,13 @@ func TestDispatchClassifiesSubmissionError(t *testing.T) {
 			dispatcher := NewTaskDispatcher(client)
 			executionID, err := dispatcher.Dispatch(context.Background(), domain.TaskAttempt{
 				RequestID: "eflow:1:1", RunnerID: 10,
-				Input: domain.TaskArgs{"ticket_id": 1},
+				Input:               domain.TaskArgs{"ticket_id": 1},
+				MaxExecutionSeconds: 600,
 			})
 
 			require.Equal(t, testCase.wantID, executionID)
 			require.Equal(t, int64(10), clientStub.request.GetRunnerId())
+			require.Equal(t, int64(600), clientStub.request.GetMaxExecutionSeconds())
 			require.Equal(t, testCase.wantRejected, errors.Is(err, ErrRejected))
 			if testCase.err == nil {
 				require.NoError(t, err)

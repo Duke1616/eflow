@@ -233,9 +233,10 @@ type TaskAttempt struct {
 	RequestID       string
 	DefaultRunnerID int64
 	RunnerID        int64
-	RouteRuleID     int64
-	ExecutionID     int64
-	Status          AttemptStatus
+	RouteRuleID         int64
+	ExecutionID         int64
+	MaxExecutionSeconds int64
+	Status              AttemptStatus
 	Input           TaskArgs
 	Output          string
 	Error           string

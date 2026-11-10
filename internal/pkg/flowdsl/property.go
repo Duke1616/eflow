@@ -182,6 +182,7 @@ type AutoTaskConfig struct {
 	IsNotify           bool            `json:"is_notify"`                      // 是否开启消息提醒
 	Schedule           *ScheduleConfig `json:"schedule,omitempty"`             // 任务延期或计划调度配置
 	CompensationNodeID string          `json:"compensation_node_id,omitempty"` // 撤回时的补偿冲正节点 ID
+	MaxExecutionSeconds int64          `json:"max_execution_seconds,omitempty"` // 任务最大执行超时时间（秒），<= 0 使用系统默认兜底
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

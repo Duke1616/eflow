@@ -46,10 +46,11 @@ func TestParse_LogicFlow(t *testing.T) {
 				"id":   "auto_1",
 				"type": "automation", // 测试历史别名自动规整
 				"properties": map[string]any{
-					"name":        "自动回调",
-					"codebook_id": 1001,
-					"runner_id":   2002,
-					"is_notify":   true,
+					"name":                  "自动回调",
+					"codebook_id":           1001,
+					"runner_id":             2002,
+					"max_execution_seconds": 1800,
+					"is_notify":             true,
 				},
 			},
 			{
@@ -121,6 +122,7 @@ func TestParse_LogicFlow(t *testing.T) {
 	assert.True(t, hasAuto)
 	assert.Equal(t, int64(1001), autoCfg.CodebookID)
 	assert.Equal(t, int64(2002), autoCfg.RunnerID)
+	assert.Equal(t, int64(1800), autoCfg.MaxExecutionSeconds)
 
 	// 4. 验证边拓扑与表达式
 	outEdges := graph.GetOutEdges("approve_1")

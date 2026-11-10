@@ -22,13 +22,14 @@ const (
 )
 
 type RunRunnerRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	RunnerId      int64                  `protobuf:"varint,2,opt,name=runner_id,json=runnerId,proto3" json:"runner_id,omitempty"`
-	Params        map[string]string      `protobuf:"bytes,3,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Variables     map[string]string      `protobuf:"bytes,4,rep,name=variables,proto3" json:"variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	RequestId           string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	RunnerId            int64                  `protobuf:"varint,2,opt,name=runner_id,json=runnerId,proto3" json:"runner_id,omitempty"`
+	Params              map[string]string      `protobuf:"bytes,3,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Variables           map[string]string      `protobuf:"bytes,4,rep,name=variables,proto3" json:"variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	MaxExecutionSeconds int64                  `protobuf:"varint,5,opt,name=max_execution_seconds,json=maxExecutionSeconds,proto3" json:"max_execution_seconds,omitempty"` // 任务最大执行超时秒数，<= 0 则使用系统默认兜底
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *RunRunnerRequest) Reset() {
@@ -87,6 +88,13 @@ func (x *RunRunnerRequest) GetVariables() map[string]string {
 		return x.Variables
 	}
 	return nil
+}
+
+func (x *RunRunnerRequest) GetMaxExecutionSeconds() int64 {
+	if x != nil {
+		return x.MaxExecutionSeconds
+	}
+	return 0
 }
 
 type RunRunnerResponse struct {
@@ -249,19 +257,20 @@ var File_etask_scheduler_v1_scheduler_proto protoreflect.FileDescriptor
 
 const file_etask_scheduler_v1_scheduler_proto_rawDesc = "" +
 	"\n" +
-	"\"etask/scheduler/v1/scheduler.proto\x12\x12etask.scheduler.v1\"\xea\x02\n" +
+	"\"etask/scheduler/v1/scheduler.proto\x12\x12etask.scheduler.v1\"\x98\x03\n" +
 	"\x10RunRunnerRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
 	"\trunner_id\x18\x02 \x01(\x03R\brunnerId\x12H\n" +
 	"\x06params\x18\x03 \x03(\v20.etask.scheduler.v1.RunRunnerRequest.ParamsEntryR\x06params\x12Q\n" +
-	"\tvariables\x18\x04 \x03(\v23.etask.scheduler.v1.RunRunnerRequest.VariablesEntryR\tvariables\x1a9\n" +
+	"\tvariables\x18\x04 \x03(\v23.etask.scheduler.v1.RunRunnerRequest.VariablesEntryR\tvariables\x122\n" +
+	"\x15max_execution_seconds\x18\x05 \x01(\x03R\x13maxExecutionSeconds\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a<\n" +
 	"\x0eVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x05\x10\x06\"P\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"P\n" +
 	"\x11RunRunnerResponse\x12!\n" +
 	"\fexecution_id\x18\x01 \x01(\x03R\vexecutionId\x12\x18\n" +
 	"\acreated\x18\x02 \x01(\bR\acreated\"u\n" +

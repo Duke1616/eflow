@@ -79,12 +79,12 @@ func TestResolveRunnerUsesDefaultRunner(t *testing.T) {
 	}
 
 	decision, err := svc.resolveRunner(context.Background(), 1, "node-1",
-		flowdsl.AutoTaskConfig{CodebookID: 20, RunnerID: 20},
+		flowdsl.AutoTaskConfig{CodebookID: 20, RunnerID: 20, MaxExecutionSeconds: 7200},
 		domain.TaskArgs{"environment": "test"})
 
 	require.NoError(t, err)
 	require.Equal(t, domain.RunnerRouteDecision{
-		DefaultRunnerID: 20, SelectedRunnerID: 20,
+		DefaultRunnerID: 20, SelectedRunnerID: 20, MaxExecutionSeconds: 7200,
 	}, decision)
 }
 

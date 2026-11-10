@@ -16,9 +16,10 @@ type Dispatch struct {
 // RunnerRouteDecision 是一次执行尝试使用的 Runner 路由快照。
 // RuleID 为 0 表示没有命中规则，最终使用节点默认 Runner。
 type RunnerRouteDecision struct {
-	DefaultRunnerID  int64
-	SelectedRunnerID int64
-	RuleID           int64
+	DefaultRunnerID     int64
+	SelectedRunnerID    int64
+	RuleID              int64
+	MaxExecutionSeconds int64
 }
 
 func (d RunnerRouteDecision) Routed() bool { return d.RuleID > 0 }

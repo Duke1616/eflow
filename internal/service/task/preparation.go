@@ -83,7 +83,10 @@ func (s *taskService) resolvePreparation(ctx context.Context, task domain.Task,
 
 func (s *taskService) resolveRunner(ctx context.Context, templateID int64, nodeID string,
 	automation flowdsl.AutoTaskConfig, input domain.TaskArgs) (domain.RunnerRouteDecision, error) {
-	decision := domain.RunnerRouteDecision{DefaultRunnerID: automation.RunnerID}
+	decision := domain.RunnerRouteDecision{
+		DefaultRunnerID:     automation.RunnerID,
+		MaxExecutionSeconds: automation.MaxExecutionSeconds,
+	}
 	if templateID > 0 {
 		runner, ruleID, err := s.resolveRunnerByDispatch(ctx, templateID, nodeID, automation.CodebookID, input)
 		if err != nil {
