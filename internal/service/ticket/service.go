@@ -356,27 +356,32 @@ func (s *ticketService) Pass(ctx context.Context, ticketId int64, taskId string,
 		return err
 	}
 
-	// 8. 原子合并工单业务数据（直接复用前置加载的工单实体，避免重复查库）
+	// 8. 驱动工作流引擎推进当前任务审批流转 (先流转防卫，流转成功后方才生效业务数据)
+	if err = s.engine.Pass(ctx, domain.TaskPassReq{
+		EngineType: engineType,
+		TaskId:     opCtx.tID,
+		Operator:   operator,
+		Comment:    comment,
+		Variables:  mergeData,
+	}); err != nil {
+		return err
+	}
+
+	// 9. 引擎流转成功后，原子合并工单业务数据
 	if len(mergeData) > 0 {
 		if err = s.repo.MergeTicketData(ctx, opCtx.ticket.Id, mergeData); err != nil {
 			return fmt.Errorf("物理合并工单数据失败: %w", err)
 		}
 	}
 
-	// 9. 记录当前审批步骤下的快照
+	// 10. 记录当前审批步骤下的表单快照
 	if len(formValues) > 0 {
 		if err = s.repo.CreateTaskForm(ctx, opCtx.tID, opCtx.ticket.Id, formValues); err != nil {
 			return fmt.Errorf("物理归档任务快照失败: %w", err)
 		}
 	}
 
-	return s.engine.Pass(ctx, domain.TaskPassReq{
-		EngineType: engineType,
-		TaskId:     opCtx.tID,
-		Operator:   operator,
-		Comment:    comment,
-		Variables:  mergeData,
-	})
+	return nil
 }
 
 // collectAndValidateFields 校验表单字段约束，并分别汇总待合并入工单的业务属性和快照属性

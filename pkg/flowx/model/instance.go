@@ -77,6 +77,16 @@ func (i *Instance) MergeVariables(patch Variables) {
 	i.Variables.Merge(patch)
 }
 
+// Clone 创建流程实例的副本（变量深拷贝），用于事件广播快照与并发隔离
+func (i *Instance) Clone() *Instance {
+	if i == nil {
+		return nil
+	}
+	cpy := *i
+	cpy.Variables = i.Variables.Clone()
+	return &cpy
+}
+
 // ExecutionView 流程实例的执行态综合视图快照（供前端渲染拓扑与连线高亮）
 type ExecutionView struct {
 	ProcessKey     string              `json:"process_key"`

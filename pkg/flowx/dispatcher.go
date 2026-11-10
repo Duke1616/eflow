@@ -42,7 +42,9 @@ func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession
 			return t, true
 		})
 		if len(skippedTasks) > 0 {
-			_ = session.SaveTasks(ctx, skippedTasks)
+			if err := session.SaveTasks(ctx, skippedTasks); err != nil {
+				return fmt.Errorf("持久化跳过占位任务失败: %w", err)
+			}
 
 			for _, t := range skippedTasks {
 				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, nil, t, "system", t.Comment))
@@ -85,38 +87,19 @@ func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession
 func (e *flowEngine) activateNodes(ctx context.Context, session *flowSession, nodes []model.NodeSpec, batchCode int, operator string) error {
 	inst := session.Instance()
 
-	// 判定本轮决策是否包含未办结的活跃等待态节点 (通过能力契约判断，彻底消除硬编码)
-	hasActiveNodes := lo.SomeBy(nodes, func(n model.NodeSpec) bool {
-		return n.IsWaitState()
+	// 1. 先过滤并执行非结束节点（审批、任务、抄送、群通知等），确保待办与异步挂起任务正确落库
+	nonEndNodes := lo.Filter(nodes, func(n model.NodeSpec, _ int) bool {
+		return n.Type != model.NodeEnd
+	})
+	endNodes := lo.Filter(nodes, func(n model.NodeSpec, _ int) bool {
+		return n.Type == model.NodeEnd
 	})
 
-	for _, node := range nodes {
+	for _, node := range nonEndNodes {
 		inst.CurrentNode = node.ID
 
 		// 广播节点激活进入事件 (便于抄送知会、群通知及流程点亮追踪)
 		e.eventBus.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &node, operator, ""))
-
-		// 若当前节点为 End 且当前流转中已无任何等待态节点，全单圆满办结
-		if node.Type == model.NodeEnd {
-			if !hasActiveNodes {
-				// 终态防卫清理：流程全单办结时，确保所有残留的在途 Pending 任务全部置为 TaskSkipped
-				pendingTasks := lo.Filter(session.AllTasks(), func(t *model.Task, _ int) bool {
-					return t.IsPending()
-				})
-				if len(pendingTasks) > 0 {
-					pendingIDs := lo.Map(pendingTasks, func(t *model.Task, _ int) string { return t.ID })
-					_ = session.UpdateTasksStatus(ctx, pendingIDs, model.TaskSkipped)
-					for _, pt := range pendingTasks {
-						nodeSpec := session.Plan().NodesMap[pt.NodeID]
-						e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, &nodeSpec, pt, "system", "流程办结，系统自动跳过"))
-					}
-				}
-
-				inst.Finish(node.ID)
-				e.eventBus.Publish(ctx, NewNodeEvent(EventProcessFinished, inst, &node, operator, ""))
-			}
-			continue
-		}
 
 		executor, ok := e.executors[node.Type]
 		if !ok {
@@ -125,6 +108,21 @@ func (e *flowEngine) activateNodes(ctx context.Context, session *flowSession, no
 
 		if err := executor.Execute(ctx, session, node, batchCode, operator); err != nil {
 			return err
+		}
+	}
+
+	// 2. 调度到达结束节点：仅当全局会话中不存在任何未完结的在途待办/挂起任务时，流程实例才全单圆满办结
+	if len(endNodes) > 0 {
+		endNode := endNodes[0]
+		inst.CurrentNode = endNode.ID
+		e.eventBus.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &endNode, operator, ""))
+
+		hasInFlightTasks := lo.SomeBy(session.AllTasks(), func(t *model.Task) bool {
+			return t.IsPending()
+		})
+		if !hasInFlightTasks {
+			inst.Finish(endNode.ID)
+			e.eventBus.Publish(ctx, NewNodeEvent(EventProcessFinished, inst, &endNode, operator, ""))
 		}
 	}
 
@@ -242,6 +240,14 @@ func (x *taskNodeExecutor) Execute(ctx context.Context, session *flowSession, no
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-time.After(interval):
+			}
+			// 根据指数退避倍数计算下一次重试等待时长，并应用最大封顶上限
+			if node.RetryPolicy != nil && node.RetryPolicy.BackoffFactor > 1.0 {
+				nextInterval := time.Duration(float64(interval) * node.RetryPolicy.BackoffFactor)
+				if node.RetryPolicy.MaxInterval > 0 && nextInterval > node.RetryPolicy.MaxInterval {
+					nextInterval = node.RetryPolicy.MaxInterval
+				}
+				interval = nextInterval
 			}
 		}
 	}

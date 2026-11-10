@@ -3,6 +3,7 @@ package flowx
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -177,6 +178,8 @@ const (
 	EventTaskRevoked EventType = "TASK_REVOKED"
 	// EventTaskSkipped 任务因或签竞争或分支未满足被跳过
 	EventTaskSkipped EventType = "TASK_SKIPPED"
+	// EventTaskTransferred 任务被转签指派给新处理人
+	EventTaskTransferred EventType = "TASK_TRANSFERRED"
 )
 
 // Event 流程运行时生命周期不可变事件快照
@@ -189,6 +192,21 @@ type Event struct {
 	Operator  string          `json:"operator,omitempty"`  // 操作人
 	Comment   string          `json:"comment,omitempty"`   // 操作意见或说明
 	Variables model.Variables `json:"variables,omitempty"` // 瞬时运行时变量
+}
+
+// Clone 创建事件只读深拷贝副本，供异步监听器/后台 Goroutine 安全读取，彻底杜绝与主流程的数据竞争 (Data Race)
+func (e Event) Clone() Event {
+	cp := e
+	if e.Instance != nil {
+		cp.Instance = e.Instance.Clone()
+	}
+	if e.Task != nil {
+		cp.Task = e.Task.Clone()
+	}
+	if e.Variables != nil {
+		cp.Variables = e.Variables.Clone()
+	}
+	return cp
 }
 
 // NewProcessEvent 构建流程级生命周期事件 (启动/办结/驳回/撤回等无具体任务关联的事件)
@@ -267,7 +285,7 @@ func (b *EventBus) AddListener(listener IEventListener) {
 	b.listeners = append(b.listeners, listener)
 }
 
-// Publish 广播生命周期事件给所有匹配的监听器（带 panic 恢复兜底，不影响主流转）
+// Publish 广播生命周期事件给所有匹配的监听器（带 panic 恢复兜底与异常日志记录）
 func (b *EventBus) Publish(ctx context.Context, event Event) {
 	b.mu.RLock()
 	matched := make([]IEventListener, 0, len(b.listeners))
@@ -283,11 +301,13 @@ func (b *EventBus) Publish(ctx context.Context, event Event) {
 		func(l IEventListener) {
 			defer func() {
 				if r := recover(); r != nil {
-					// 防止用户自定义监听器中的 panic 导致引擎主流程崩溃
-					_ = r
+					// 捕获异常输出日志，防止用户自定义监听器中的 panic 导致引擎主流程崩溃
+					log.Printf("[flowx.EventBus] 事件监听器执行 panic: %v, eventType=%s", r, event.Type)
 				}
 			}()
-			_ = l.OnEvent(ctx, event)
+			if err := l.OnEvent(ctx, event); err != nil {
+				log.Printf("[flowx.EventBus] 事件监听器处理失败: %v, eventType=%s", err, event.Type)
+			}
 		}(listener)
 	}
 }

@@ -93,6 +93,15 @@ func (t *Task) IsTerminal() bool {
 	return t.Status != TaskPending
 }
 
+// Clone 创建任务实体的浅拷贝，用于事件通知快照与并发隔离
+func (t *Task) Clone() *Task {
+	if t == nil {
+		return nil
+	}
+	cpy := *t
+	return &cpy
+}
+
 // FilterLatestBatchTasks 纯函数：从任务切片中提取出属于最新执行批次 (Max BatchCode) 的任务快照集合
 func FilterLatestBatchTasks(tasks []*Task) []*Task {
 	if len(tasks) == 0 {

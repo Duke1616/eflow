@@ -237,8 +237,9 @@ func (s *Storage) ListPendingTasksByAssignee(ctx context.Context, assignee strin
 
 func (s *Storage) UpdateTask(ctx context.Context, task *model.Task) error {
 	po := toTaskPO(task)
+	// 乐观状态防卫：流转中任务的更新仅允许在原状态为 TaskPending(0) 时发生
 	res := s.db.WithContext(ctx).Model(&FlowTaskPO{}).
-		Where("id = ?", po.ID).
+		Where("id = ? AND status = ?", po.ID, uint8(model.TaskPending)).
 		Updates(map[string]any{
 			"status":   po.Status,
 			"comment":  po.Comment,
@@ -249,7 +250,20 @@ func (s *Storage) UpdateTask(ctx context.Context, task *model.Task) error {
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return storage.ErrTaskNotFound
+		var current FlowTaskPO
+		err := s.db.WithContext(ctx).Select("id, status").Where("id = ?", po.ID).First(&current).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return storage.ErrTaskNotFound
+			}
+			return err
+		}
+		// 任务已处于非待办终态（并发竞争已被其他并发操作办结）
+		if current.Status != uint8(model.TaskPending) {
+			return errors.New("任务已被处理或不处于待办状态")
+		}
+		// 状态仍为 Pending 且值完全无变化（如转签给相同处理人），视作幂等成功
+		return nil
 	}
 	return nil
 }

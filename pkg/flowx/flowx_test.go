@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Duke1616/eflow/pkg/flowx/middleware"
 	"github.com/Duke1616/eflow/pkg/flowx/model"
@@ -1293,6 +1294,179 @@ func TestEngine_ChatGroupNodeTraversalAndTask(t *testing.T) {
 	assert.Contains(t, view.TraversedEdges["start"], "chat_node", "start 到 chat_node 的边必须高亮")
 	assert.Contains(t, view.TraversedEdges["chat_node"], "end", "chat_node 到 end 的边必须高亮")
 	assert.Equal(t, int(model.TaskPassed), view.NodeStatusMap["chat_node"])
+}
+
+// TestTransferSemantics 测试转签语义、防卫及审计事件广播
+func TestTransferSemantics(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+
+	var transferredEvents []Event
+	engine.Subscribe([]EventType{EventTaskTransferred}, func(_ context.Context, ev Event) error {
+		transferredEvents = append(transferredEvents, ev)
+		return nil
+	})
+
+	def := NewProcess("transfer_proc", "转签流程").
+		Start("start", "开始").
+		Approval("audit", "初审", model.SignOneVote, "alice").
+		End("end", "结束").
+		Edge("start", "audit").
+		Edge("audit", "end").
+		Build()
+
+	_, err := engine.Deploy(ctx, def)
+	require.NoError(t, err)
+
+	instID, err := engine.Start(ctx, StartReq{
+		Key:     "transfer_proc",
+		Starter: "tom",
+	})
+	require.NoError(t, err)
+
+	tasks, err := store.ListTasksByInstance(ctx, instID)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	task := tasks[0]
+	assert.Equal(t, "alice", task.Assignee)
+
+	// 1. 空目标人校验
+	err = engine.Transfer(ctx, task.ID, []string{"", "  "})
+	assert.ErrorContains(t, err, "转签目标用户不能为空")
+
+	// 2. 正常转签给 bob
+	err = engine.Transfer(ctx, task.ID, []string{"bob"})
+	require.NoError(t, err)
+
+	updatedTask, _ := store.GetTask(ctx, task.ID)
+	assert.Equal(t, "bob", updatedTask.Assignee)
+	require.Len(t, transferredEvents, 1)
+	assert.Equal(t, EventTaskTransferred, transferredEvents[0].Type)
+	assert.Equal(t, "alice", transferredEvents[0].Operator)
+
+	// 3. 幂等转签给同一个人
+	err = engine.Transfer(ctx, task.ID, []string{"bob"})
+	require.NoError(t, err)
+
+	// 4. 审批通过后已是终态，再次转签应被拦截
+	err = engine.Pass(ctx, PassReq{TaskID: task.ID, Operator: "bob"})
+	require.NoError(t, err)
+
+	err = engine.Transfer(ctx, task.ID, []string{"charlie"})
+	assert.ErrorIs(t, err, ErrTaskNotPending)
+}
+
+// TestParallelBranch_AsyncAutomationTaskNotSkipped 验证并行分支下一路到达 End 时，挂起中的异步自动化任务绝不被提前误杀为 Skipped
+func TestParallelBranch_AsyncAutomationTaskNotSkipped(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+
+	// 注册异步自动化任务执行器：返回 nil 代表异步挂起，等待外部系统回调唤醒
+	engine.RegisterWorker("async_job", func(_ context.Context, _ *TaskContext) (*TaskResult, error) {
+		return nil, nil
+	})
+
+	def := NewProcess("parallel_async_proc", "并行异步测试").
+		Start("start", "开始").
+		ParallelGateway("fork", "并行网关").
+		Approval("approval_branch", "人工审批", model.SignOneVote, "alice").
+		Task("async_branch", "异步自动化", "async_job").
+		End("end_approval", "审批分支结束").
+		End("end_async", "异步分支结束").
+		Edge("start", "fork").
+		Edge("fork", "approval_branch").
+		Edge("fork", "async_branch").
+		Edge("approval_branch", "end_approval").
+		Edge("async_branch", "end_async").
+		Build()
+
+	_, err := engine.Deploy(ctx, def)
+	require.NoError(t, err)
+
+	instID, err := engine.Start(ctx, StartReq{
+		Key:     "parallel_async_proc",
+		Starter: "tom",
+	})
+	require.NoError(t, err)
+
+	tasks, err := store.ListTasksByInstance(ctx, instID)
+	require.NoError(t, err)
+
+	approvalTask, ok1 := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "approval_branch" })
+	asyncTask, ok2 := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "async_branch" })
+	require.True(t, ok1 && ok2)
+	assert.True(t, approvalTask.IsPending())
+	assert.True(t, asyncTask.IsPending())
+
+	// 审批分支通过，直接走向 end_approval
+	err = engine.Pass(ctx, PassReq{TaskID: approvalTask.ID, Operator: "alice"})
+	require.NoError(t, err)
+
+	// 核心断言：由于 async_branch 仍在异步挂起中，流程实例状态必须依然是 Running，且 asyncTask 必须依然是 Pending 状态！
+	inst, err := store.GetInstance(ctx, instID)
+	require.NoError(t, err)
+	assert.Equal(t, model.InstanceRunning, inst.Status, "异步任务仍在挂起中，流程绝对不能提前办结")
+
+	latestAsyncTask, err := store.GetTask(ctx, asyncTask.ID)
+	require.NoError(t, err)
+	assert.Equal(t, model.TaskPending, latestAsyncTask.Status, "异步挂起任务绝不能被误置为 TaskSkipped")
+
+	// 外部异步回调唤醒完成该自动化任务
+	err = engine.CompleteTask(ctx, CompleteTaskReq{
+		TaskID:  asyncTask.ID,
+		Comment: "第三方异步回调完成",
+	})
+	require.NoError(t, err)
+
+	// 全流程所有分支均已到达终点且无在途任务，此时流程实例才圆满办结
+	finalInst, err := store.GetInstance(ctx, instID)
+	require.NoError(t, err)
+	assert.Equal(t, model.InstanceFinished, finalInst.Status, "所有分支完成后流程实例必须圆满办结")
+}
+
+// TestTaskWorker_RetryBackoff 验证自动化任务失败退避倍数与封顶间隔生效
+func TestTaskWorker_RetryBackoff(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+
+	var attempts []time.Time
+	engine.RegisterWorker("flaky_worker", func(_ context.Context, tc *TaskContext) (*TaskResult, error) {
+		attempts = append(attempts, time.Now())
+		if tc.Attempt < 3 {
+			return nil, errors.New("模拟偶发故障")
+		}
+		return &TaskResult{Variables: map[string]any{"status": "ok"}}, nil
+	})
+
+	def := NewProcess("retry_proc", "重试测试").
+		Start("start", "开始").
+		TaskWithRetry("task_retry", "弹性任务", "flaky_worker", model.RetryPolicy{
+			MaxAttempts:     3,
+			InitialInterval: 50 * time.Millisecond,
+			BackoffFactor:   2.0,
+			MaxInterval:     200 * time.Millisecond,
+		}).
+		End("end", "结束").
+		Edge("start", "task_retry").
+		Edge("task_retry", "end").
+		Build()
+
+	_, err := engine.Deploy(ctx, def)
+	require.NoError(t, err)
+
+	_, err = engine.Start(ctx, StartReq{
+		Key:     "retry_proc",
+		Starter: "tom",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, attempts, 3, "应该重试3次")
+	// 验证间隔确实大于等于 initialInterval (50ms)
+	diff1 := attempts[1].Sub(attempts[0])
+	assert.GreaterOrEqual(t, diff1, 40*time.Millisecond)
 }
 
 // BenchmarkFlowxFullProcess 基准测试：单次完整综合流程（启动 -> 或签通过 -> 条件分流 -> 会签双人通过 -> 自动办结）

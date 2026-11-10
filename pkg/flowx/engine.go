@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Duke1616/eflow/pkg/flowx/idgen"
@@ -227,15 +228,46 @@ func (e *flowEngine) GetInstance(ctx context.Context, instanceID string) (*model
 }
 
 func (e *flowEngine) Transfer(ctx context.Context, taskID string, targetUsers []string) error {
-	if len(targetUsers) == 0 {
+	validUsers := lo.Filter(targetUsers, func(u string, _ int) bool {
+		return strings.TrimSpace(u) != ""
+	})
+	if len(validUsers) == 0 {
 		return errors.New("转签目标用户不能为空")
 	}
-	task, err := e.storage.GetTaskForUpdate(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	task.Assignee = targetUsers[0]
-	return e.storage.UpdateTask(ctx, task)
+	targetUser := strings.TrimSpace(validUsers[0])
+
+	return e.DoTx(ctx, func(txCtx context.Context, txEngine Engine) error {
+		txEng := txEngine.(*flowEngine)
+		task, inst, err := txEng.loadAndValidateTask(txCtx, taskID)
+		if err != nil {
+			return err
+		}
+		if !task.IsPending() {
+			return errors.New("仅允许对待办任务进行转签")
+		}
+		// 若已指派给相同处理人，幂等返回
+		if task.Assignee == targetUser {
+			return nil
+		}
+
+		oldAssignee := task.Assignee
+		task.Assignee = targetUser
+		if err := txEng.storage.UpdateTask(txCtx, task); err != nil {
+			return err
+		}
+
+		// 广播转签事件，供通知中心与时间线审计追踪
+		def, _ := txEng.storage.GetDefinition(txCtx, inst.ProcKey, inst.Version)
+		plan := kernel.NewExecutionPlan(def)
+		var nodeSpec *model.NodeSpec
+		if plan != nil {
+			if n, ok := plan.NodesMap[task.NodeID]; ok {
+				nodeSpec = &n
+			}
+		}
+		txEng.eventBus.Publish(txCtx, NewTaskEvent(EventTaskTransferred, inst, nodeSpec, task, oldAssignee, fmt.Sprintf("由 [%s] 转签给 [%s]", oldAssignee, targetUser)))
+		return nil
+	})
 }
 
 func (e *flowEngine) Deploy(ctx context.Context, def model.ProcessDefinition) (model.ProcessDefinition, error) {
@@ -287,12 +319,14 @@ func (e *flowEngine) Start(ctx context.Context, req StartReq) (string, error) {
 		Extra:      make(map[string]any),
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
-		id, err := e.doStart(c, req)
-		if err != nil {
-			return err
-		}
-		ac.InstanceID = id
-		return nil
+		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
+			id, err := txEngine.(*flowEngine).doStart(txCtx, req)
+			if err != nil {
+				return err
+			}
+			ac.InstanceID = id
+			return nil
+		})
 	}
 	if err := middleware.Compose(e.middlewares, core)(ctx, actCtx); err != nil {
 		return "", err
@@ -362,7 +396,9 @@ func (e *flowEngine) Pass(ctx context.Context, req PassReq) error {
 		Extra:      make(map[string]any),
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
-		return e.doPass(c, req)
+		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
+			return txEngine.(*flowEngine).doPass(txCtx, req)
+		})
 	}
 	return middleware.Compose(e.middlewares, core)(ctx, actCtx)
 }
@@ -399,7 +435,9 @@ func (e *flowEngine) CompleteTask(ctx context.Context, req CompleteTaskReq) erro
 		Extra:      make(map[string]any),
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
-		return e.doCompleteTask(c, req, comment)
+		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
+			return txEngine.(*flowEngine).doCompleteTask(txCtx, req, comment)
+		})
 	}
 	return middleware.Compose(e.middlewares, core)(ctx, actCtx)
 }
@@ -475,7 +513,9 @@ func (e *flowEngine) Reject(ctx context.Context, req RejectReq) error {
 		Extra:      make(map[string]any),
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
-		return e.doReject(c, req)
+		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
+			return txEngine.(*flowEngine).doReject(txCtx, req)
+		})
 	}
 	return middleware.Compose(e.middlewares, core)(ctx, actCtx)
 }
@@ -503,7 +543,9 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 	e.eventBus.Publish(ctx, NewTaskEvent(EventTaskRejected, session.Instance(), &node, task, req.Operator, req.Comment))
 
 	// 2. 原子清理当前批次中其余未处理的兄弟任务
-	e.cancelPendingSiblingTasks(ctx, session, task)
+	if err := e.cancelPendingSiblingTasks(ctx, session, task); err != nil {
+		return err
+	}
 
 	// 3. 若明确指定直接终止，流程置为终态 Rejected 并广播流程终止事件
 	if req.Terminate {
@@ -566,7 +608,9 @@ func (e *flowEngine) Revoke(ctx context.Context, req RevokeReq) error {
 		Extra:      make(map[string]any),
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
-		return e.doRevoke(c, req)
+		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
+			return txEngine.(*flowEngine).doRevoke(txCtx, req)
+		})
 	}
 	return middleware.Compose(e.middlewares, core)(ctx, actCtx)
 }
@@ -624,13 +668,16 @@ func (e *flowEngine) doRevoke(ctx context.Context, req RevokeReq) error {
 }
 
 // cancelPendingSiblingTasks 原子清理同批次中其余未处理的兄弟任务（驳回时联动取消）
-func (e *flowEngine) cancelPendingSiblingTasks(ctx context.Context, session *flowSession, task *model.Task) {
+func (e *flowEngine) cancelPendingSiblingTasks(ctx context.Context, session *flowSession, task *model.Task) error {
 	cancelIDs := lo.FilterMap(session.AllTasks(), func(t *model.Task, _ int) (string, bool) {
 		return t.ID, t.ID != task.ID && t.BatchCode == task.BatchCode && t.IsPending()
 	})
 	if len(cancelIDs) > 0 {
-		_ = session.UpdateTasksStatus(ctx, cancelIDs, model.TaskCancelled)
+		if err := session.UpdateTasksStatus(ctx, cancelIDs, model.TaskCancelled); err != nil {
+			return fmt.Errorf("联动取消兄弟任务失败: %w", err)
+		}
 	}
+	return nil
 }
 
 func (e *flowEngine) buildStarterTask(node model.NodeSpec, instID, starter string, batchCode int, comment string) *model.Task {
