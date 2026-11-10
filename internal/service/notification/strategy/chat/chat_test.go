@@ -139,6 +139,79 @@ func (s *ChatTestSuite) TestSend_ExistingGroup() {
 	s.NotNil(resp)
 }
 
+func (s *ChatTestSuite) TestSend_CreateGroup_ReuseExisting() {
+	ctx := context.Background()
+	info := strategy.Info{
+		FlowContext: strategy.FlowContext{
+			InstID: 601,
+			CurrentNode: &strategy.CurrentNode{
+				NodeID: "chat_node_create",
+			},
+			Ticket: domain.Ticket{
+				Id:       2002,
+				TenantID: 2,
+				Provide:  domain.SYSTEM,
+			},
+		},
+	}
+
+	s.mockBase.EXPECT().GetNode(gomock.Any(), "chat_node_create").Return([]*flowdsl.Node{}, &flowdsl.Node{
+		ID:   "chat_node_create",
+		Type: flowdsl.NodeChatGroup,
+		ChatGroup: &flowdsl.ChatGroupConfig{
+			Mode: flowdsl.ChatGroupCreate,
+			Create: &flowdsl.CreateChatGroup{
+				Name:    "【ECMDB】- {{template}}",
+				Channel: "LARK_CARD",
+			},
+			Assignees: []flowdsl.Assignee{
+				{Rule: "team", Values: []string{"5"}},
+			},
+			Title:      "发版结果通知",
+			OutputMode: []flowdsl.OutputMode{flowdsl.OutputTicketData},
+		},
+	}, nil)
+
+	s.mockBase.EXPECT().FetchRequiredData(gomock.Any(), gomock.Any(), gomock.Any()).Return(&strategy.NotificationData{
+		TName:     "产线环境发版",
+		StartUser: domain.User{DisplayName: "陆安"},
+	}, nil)
+
+	s.mockBase.EXPECT().ResolveAssignees(gomock.Any(), gomock.Any(), gomock.Any()).Return([]domain.User{}, nil).AnyTimes()
+
+	s.mockBase.EXPECT().SafeGo(gomock.Any(), gomock.Any(), gomock.Any()).Do(func(ctx context.Context, timeout time.Duration, f func(context.Context)) {
+		f(ctx)
+	})
+
+	s.mockBase.EXPECT().IsGlobalNotify(gomock.Any()).Return(true)
+
+	// 模拟查询当前租户默认/公共群聊，返回同名既有群聊
+	s.mockTeam.EXPECT().GetDefaultChatGroups(gomock.Any(), gomock.Any()).Return(&teamv1.GetDefaultChatGroupsResponse{
+		Groups: []*teamv1.ChatGroup{
+			{
+				Id:      88,
+				TeamId:  0,
+				Name:    "【ECMDB】- 产线环境发版",
+				ChatId:  "oc_reused_chat_123",
+				Channel: notificationv1.Channel_LARK_CARD,
+			},
+		},
+	}, nil)
+
+	s.mockSender.EXPECT().BatchSend(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context,
+		ns []notification.Notification) (notification.Response, error) {
+		s.Len(ns, 1)
+		noti := ns[0]
+		s.Equal("oc_reused_chat_123", noti.Receiver)
+		s.Equal("发版结果通知", noti.Template.Title)
+		return notification.Response{}, nil
+	})
+
+	resp, err := s.strategy.Send(ctx, info)
+	s.NoError(err)
+	s.NotNil(resp)
+}
+
 func TestChatSuite(t *testing.T) {
 	suite.Run(t, new(ChatTestSuite))
 }
