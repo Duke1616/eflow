@@ -119,19 +119,30 @@ func (l *FlowxNotificationListener) runInstanceWorker(instanceKey string, q *que
 			if q.Len() == 0 {
 				l.instanceQueues.Delete(instanceKey)
 				// 二次兜底：排空 Delete 期间极小概率并发追加的残留任务
-				for q.Len() > 0 {
-					if drainCtx, drainCancel := context.WithTimeout(context.Background(), time.Second); drainCtx.Err() == nil {
-						if t, drainErr := q.Dequeue(drainCtx); drainErr == nil {
-							t()
-						}
-						drainCancel()
-					}
-				}
+				l.drainRemainingTasks(q)
 				return
 			}
 			continue
 		}
 
+		task()
+	}
+}
+
+// drainRemainingTasks 排空并消费队列中残留的任务，带严格超时保护与 defer cancel 防泄漏
+func (l *FlowxNotificationListener) drainRemainingTasks(q *queue.ConcurrentLinkedBlockingQueue[func()]) {
+	if q.Len() == 0 {
+		return
+	}
+
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer drainCancel()
+
+	for q.Len() > 0 {
+		task, err := q.Dequeue(drainCtx)
+		if err != nil {
+			break
+		}
 		task()
 	}
 }
