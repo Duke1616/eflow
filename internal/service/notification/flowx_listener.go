@@ -3,6 +3,7 @@ package notification
 import (
 	"context"
 	"strconv"
+	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
@@ -11,6 +12,8 @@ import (
 	"github.com/Duke1616/eflow/pkg/flowx"
 	flowxModel "github.com/Duke1616/eflow/pkg/flowx/model"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
+	"github.com/ecodeclub/ekit/queue"
+	"github.com/ecodeclub/ekit/syncx"
 	"github.com/gotomicro/ego/core/elog"
 )
 
@@ -22,6 +25,9 @@ type FlowxNotificationListener struct {
 	dispatcher  *strategy.Dispatcher
 	logger      *elog.Component
 	syncMode    bool
+
+	// instanceQueues 针对同一流程实例的串行任务队列映射（基于 ekit 泛型并发 Map，彻底消灭互斥锁竞争）
+	instanceQueues syncx.Map[string, *queue.ConcurrentLinkedBlockingQueue[func()]]
 }
 
 // Option 配置 FlowxNotificationListener 可选参数
@@ -62,7 +68,7 @@ func (l *FlowxNotificationListener) InterestIn() []flowx.EventType {
 	}
 }
 
-// OnEvent 响应流程引擎广播的生命周期事件（异步非阻塞脱钩主事务）
+// OnEvent 响应流程引擎广播的生命周期事件（异步非阻塞脱钩主事务，单实例严格保序）
 func (l *FlowxNotificationListener) OnEvent(ctx context.Context, evt flowx.Event) error {
 	if evt.Instance == nil || evt.Instance.ID == "" {
 		return nil
@@ -83,10 +89,51 @@ func (l *FlowxNotificationListener) OnEvent(ctx context.Context, evt flowx.Event
 	if l.syncMode {
 		process()
 	} else {
-		go process()
+		l.dispatchAsync(evt.Instance.ID, process)
 	}
 
 	return nil
+}
+
+// dispatchAsync 投递任务到对应实例的串行队列中（基于 ekit 并发阻塞队列与并发 Map），保障同流程实例下不同类型通知因果时序严格有序
+func (l *FlowxNotificationListener) dispatchAsync(instanceKey string, fn func()) {
+	newQ := queue.NewConcurrentLinkedBlockingQueue[func()](0)
+	q, loaded := l.instanceQueues.LoadOrStore(instanceKey, newQ)
+	if !loaded {
+		// 仅由首个创建队列的协程启动该流程实例的单消费者 Worker
+		go l.runInstanceWorker(instanceKey, newQ)
+	}
+
+	_ = q.Enqueue(context.Background(), fn)
+}
+
+// runInstanceWorker 单流程实例专属消费协程，空闲超时自动清理退出防止内存泄露
+func (l *FlowxNotificationListener) runInstanceWorker(instanceKey string, q *queue.ConcurrentLinkedBlockingQueue[func()]) {
+	for {
+		// 单次等待空闲超时为 2 分钟，超时未有新任务则自动清理退出，防止内存泄漏
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*2)
+		task, err := q.Dequeue(ctx)
+		cancel()
+
+		if err != nil {
+			if q.Len() == 0 {
+				l.instanceQueues.Delete(instanceKey)
+				// 二次兜底：排空 Delete 期间极小概率并发追加的残留任务
+				for q.Len() > 0 {
+					if drainCtx, drainCancel := context.WithTimeout(context.Background(), time.Second); drainCtx.Err() == nil {
+						if t, drainErr := q.Dequeue(drainCtx); drainErr == nil {
+							t()
+						}
+						drainCancel()
+					}
+				}
+				return
+			}
+			continue
+		}
+
+		task()
+	}
 }
 
 func (l *FlowxNotificationListener) handleEvent(safeCtx context.Context, evt flowx.Event) {

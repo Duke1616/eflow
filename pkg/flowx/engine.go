@@ -340,13 +340,13 @@ func (e *flowEngine) doStart(ctx context.Context, req StartReq) (string, error) 
 
 	session := newFlowSession(e.storage, inst, plan, nil)
 
-	// 2. 统一调度下一阶段动作（自动Skip占位、办结或激活待办；若无有效出路则由调度器统一拦截断流）
+	// 2. 优先广播流程启动事件（确保提单人通知/撤销卡片在流转前第一时间发出，杜绝审批待办抢跑乱序）
+	e.eventBus.Publish(ctx, NewNodeEvent(EventProcessStarted, session.Instance(), &startNode, req.Starter, ""))
+
+	// 3. 统一调度下一阶段动作（自动Skip占位、办结或激活待办；若无有效出路则由调度器统一拦截断流）
 	if err := e.applyStepDecision(ctx, session, decision, 1, req.Starter); err != nil {
 		return "", err
 	}
-
-	// 3. 广播流程启动事件
-	e.eventBus.Publish(ctx, NewNodeEvent(EventProcessStarted, session.Instance(), &startNode, req.Starter, ""))
 
 	return instID, nil
 }

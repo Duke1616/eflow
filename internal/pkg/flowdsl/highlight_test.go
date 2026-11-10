@@ -159,3 +159,50 @@ func TestHighlightCanvas_AntV_X6(t *testing.T) {
 	data := edgeCell["data"].(map[string]any)
 	assert.Equal(t, true, data["is_pass"])
 }
+
+func TestHighlightCanvas_LogicFlow_SkippedEdge(t *testing.T) {
+	rawCanvas := map[string]any{
+		"nodes": []any{
+			map[string]any{"id": "fork", "type": "gateway"},
+			map[string]any{"id": "frontend", "type": "userTask"},
+			map[string]any{"id": "join", "type": "gateway"},
+		},
+		"edges": []any{
+			map[string]any{
+				"id":           "e_fork_fe",
+				"sourceNodeId": "fork",
+				"targetNodeId": "frontend",
+			},
+			map[string]any{
+				"id":           "e_fe_join",
+				"sourceNodeId": "frontend",
+				"targetNodeId": "join",
+			},
+		},
+	}
+
+	trace := flowdsl.ExecutionTrace{
+		TraversedEdges: map[string][]string{
+			"fork":     {"frontend"},
+			"frontend": {"join"},
+		},
+		NodeStatusMap: map[string]int{
+			"fork":     1, // 通过
+			"frontend": 5, // 跳过
+			"join":     0, // 等待
+		},
+	}
+
+	highlighted, err := flowdsl.HighlightCanvas(rawCanvas, trace)
+	require.NoError(t, err)
+
+	edges := highlighted["edges"].([]any)
+	require.Len(t, edges, 2)
+
+	for _, e := range edges {
+		edgeMap := e.(map[string]any)
+		props := edgeMap["properties"].(map[string]any)
+		assert.Equal(t, true, props["is_skipped"], "跳过分支的边必须被打上 is_skipped 属性")
+		assert.Nil(t, props["is_pass"])
+	}
+}

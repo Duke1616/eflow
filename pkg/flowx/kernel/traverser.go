@@ -62,9 +62,11 @@ func (t *executionTracer) markTaskNodes(tasks []*model.Task) {
 	for nodeID, nodeTasks := range tasksByNode {
 		latestTasks := model.FilterLatestBatchTasks(nodeTasks)
 
-		// 若最新批次全为系统跳过任务，说明属于未命中分支，不参与流转高亮投影，严格遵循用户的实际选择
+		// 若最新批次全为系统跳过任务，标记为已到达且已办结（供跳过分支虚线投影感知）
 		isAllSkipped := len(latestTasks) > 0 && lo.EveryBy(latestTasks, func(tk *model.Task) bool { return tk.Status == model.TaskSkipped })
 		if isAllSkipped {
+			t.activated[nodeID] = true
+			t.completed[nodeID] = true
 			continue
 		}
 

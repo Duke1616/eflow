@@ -3,7 +3,9 @@ package notification
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	pkgNotification "github.com/Duke1616/eflow/internal/pkg/notification"
@@ -199,5 +201,41 @@ func TestFlowxNotificationListener_OnEvent(t *testing.T) {
 
 			tc.assertFn(t, startMock, userMock, ccMock, chatMock)
 		})
+	}
+}
+
+func TestFlowxNotificationListener_AsyncSerialOrdering(t *testing.T) {
+	listenerObj := NewFlowxNotificationListener(nil, nil, nil)
+	listener, ok := listenerObj.(*FlowxNotificationListener)
+	require.True(t, ok)
+
+	const taskCount = 10
+	results := make([]int, 0, taskCount)
+	var mu sync.Mutex
+	done := make(chan struct{})
+
+	for i := 0; i < taskCount; i++ {
+		val := i
+		listener.dispatchAsync("inst_test_serial", func() {
+			mu.Lock()
+			results = append(results, val)
+			if len(results) == taskCount {
+				close(done)
+			}
+			mu.Unlock()
+		})
+	}
+
+	select {
+	case <-done:
+	case <-time.After(time.Second * 3):
+		t.Fatal("等待异步串行队列执行超时")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, results, taskCount)
+	for i := 0; i < taskCount; i++ {
+		assert.Equal(t, i, results[i], "基于 ekit 阻塞队列的消费必须严格遵循 FIFO 保序")
 	}
 }
