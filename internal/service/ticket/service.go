@@ -570,9 +570,55 @@ func (s *ticketService) GetTaskFormConfig(ctx context.Context, ticketId int64, t
 		fields = userCfg.Fields
 	}
 
-	values := make(map[string]interface{}, len(opCtx.ticket.Data))
+	// 1. 检索当前工单历史所有步骤已存盘的表单快照（已按创建时间倒序排重锁定最新值）
+	taskForms, err := s.repo.FindTaskFormsByTicketID(ctx, opCtx.ticket.Id)
+	if err != nil {
+		s.l.Warn("查询历史表单快照失败，降级使用工单主表数据", elog.FieldErr(err), elog.Int64("ticket_id", opCtx.ticket.Id))
+	}
+
+	snapshotByKey := make(map[string]interface{}, len(taskForms))
+	snapshotByName := make(map[string]interface{}, len(taskForms))
+	for _, tf := range taskForms {
+		if tf.Value != nil {
+			if tf.Key != "" {
+				snapshotByKey[tf.Key] = tf.Value
+			}
+			if tf.Name != "" {
+				snapshotByName[tf.Name] = tf.Value
+			}
+		}
+	}
+
+	// 2. 初始化回填字典，首先继承工单主表已有的全局业务数据
+	values := make(map[string]interface{}, len(opCtx.ticket.Data)+len(fields)*2)
 	for k, v := range opCtx.ticket.Data {
 		values[k] = v
+	}
+
+	// 3. 针对当前待办节点所需填写的每一个表单字段，精准推导历史提交值并回填回显 (Prefill)
+	for _, field := range fields {
+		var prefillVal interface{}
+
+		// 优先级 1: 历史步骤快照中按控件 Key 匹配
+		if val, ok := snapshotByKey[field.Key]; ok && val != nil && val != "" {
+			prefillVal = val
+		} else if val, ok := snapshotByName[field.Name]; ok && val != nil && val != "" {
+			// 优先级 2: 历史步骤快照中按字段 Name 匹配
+			prefillVal = val
+		} else if val, ok := opCtx.ticket.Data[field.Key]; ok && val != nil && val != "" {
+			// 优先级 3: 工单主表按控件 Key 匹配
+			prefillVal = val
+		} else if val, ok := opCtx.ticket.Data[field.Name]; ok && val != nil && val != "" {
+			// 优先级 4: 工单主表按字段 Name 匹配
+			prefillVal = val
+		}
+
+		if prefillVal != nil {
+			values[field.Key] = prefillVal
+			if field.Name != "" {
+				values[field.Name] = prefillVal
+			}
+		}
 	}
 
 	return TaskFormConfig{

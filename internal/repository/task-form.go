@@ -13,7 +13,7 @@ func (repo *ticketRepository) CreateTaskForm(ctx context.Context, taskId domain.
 	forms := slice.Map(fields, func(idx int, src domain.FormValue) dao.TaskForm {
 		return dao.TaskForm{
 			TicketId: ticketId,
-			TaskId:   taskId.Int(),
+			TaskId:   taskId.Int64(),
 			Name:     src.Name,
 			Key:      src.Key,
 			Type:     src.Type,
@@ -31,7 +31,7 @@ func (repo *ticketRepository) FindTaskFormsBatch(ctx context.Context, taskIds []
 
 	res := make(map[int][]domain.FormValue)
 	for _, f := range forms {
-		res[f.TaskId] = append(res[f.TaskId], domain.FormValue{
+		res[int(f.TaskId)] = append(res[int(f.TaskId)], domain.FormValue{
 			Name:  f.Name,
 			Key:   f.Key,
 			Type:  f.Type,

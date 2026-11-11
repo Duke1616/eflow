@@ -190,56 +190,23 @@ func (p *ExecutionPlan) collectUntakenActivities(untaken, taken []model.NodeSpec
 	}
 
 	takenReachable := p.reachableFrom(taken)
-	skipped := make([]model.NodeSpec, 0, len(untaken))
-	visited := make(map[string]struct{})
-
-	queue := append([]model.NodeSpec{}, untaken...)
-	for len(queue) > 0 {
-		node := queue[0]
-		queue = queue[1:]
-
-		if _, seen := visited[node.ID]; seen {
-			continue
+	return p.walk(nodeIDs(untaken), true, func(n model.NodeSpec) walkAction {
+		if _, ok := takenReachable[n.ID]; ok {
+			return walkAction{}
 		}
-		visited[node.ID] = struct{}{}
-
-		if _, ok := takenReachable[node.ID]; ok {
-			continue
-		}
-
 		// 网关属于纯拓扑控制节点，自身不落 Task 记录，但必须继续向下穿透以覆盖多层级联落选分支
-		if node.IsActivity() {
-			skipped = append(skipped, node)
-		}
-		for _, edge := range p.OutEdges[node.ID] {
-			if next, ok := p.NodesMap[edge.Target]; ok {
-				queue = append(queue, next)
-			}
-		}
-	}
-	return skipped
+		return walkAction{Collect: n.IsActivity(), Descend: true}
+	})
 }
 
-// reachableFrom 沿出边正向广度遍历，求解给定根节点集合的完整可达域
+// reachableFrom 沿出边正向遍历，求解给定根节点集合的完整可达域
 func (p *ExecutionPlan) reachableFrom(roots []model.NodeSpec) map[string]struct{} {
-	reachable := make(map[string]struct{})
-	queue := append([]model.NodeSpec{}, roots...)
-	for len(queue) > 0 {
-		node := queue[0]
-		queue = queue[1:]
-
-		if _, seen := reachable[node.ID]; seen {
-			continue
-		}
-		reachable[node.ID] = struct{}{}
-
-		for _, edge := range p.OutEdges[node.ID] {
-			if next, ok := p.NodesMap[edge.Target]; ok {
-				queue = append(queue, next)
-			}
-		}
-	}
-	return reachable
+	reachable := p.walk(nodeIDs(roots), true, func(model.NodeSpec) walkAction {
+		return walkAction{Collect: true, Descend: true}
+	})
+	return lo.SliceToMap(reachable, func(n model.NodeSpec) (string, struct{}) {
+		return n.ID, struct{}{}
+	})
 }
 
 // evaluateEdge 优先面向标准 RuleGroup 规则组进行求值；若无 RuleGroup 但配置了文本表达式，则委托表达式引擎求值

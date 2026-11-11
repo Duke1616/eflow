@@ -95,8 +95,8 @@ func (t *executionTracer) resolveThroughGateways() {
 		if !n.IsGateway() {
 			continue
 		}
-		upCompleted := t.canReach(n.ID, false, func(id string) bool { return t.completed[id] }, make(map[string]bool))
-		downActivated := t.canReach(n.ID, true, func(id string) bool { return t.activated[id] }, make(map[string]bool))
+		upCompleted := t.canReach(n.ID, false, func(id string) bool { return t.completed[id] })
+		downActivated := t.canReach(n.ID, true, func(id string) bool { return t.activated[id] })
 		if upCompleted && downActivated {
 			t.completed[n.ID] = true
 			t.activated[n.ID] = true
@@ -128,32 +128,17 @@ func (t *executionTracer) resolveWaitingGateways() {
 }
 
 // canReach 沿指定方向（isForward: true 为顺流向，false 为逆流向）穿透网关寻找命中 matcher 判定条件的业务节点
-func (t *executionTracer) canReach(currID string, isForward bool, matcher func(string) bool, visited map[string]bool) bool {
-	edges := lo.Ternary(isForward, t.plan.OutEdges[currID], t.plan.InEdges[currID])
-	for _, edge := range edges {
-		nextID := lo.Ternary(isForward, edge.Target, edge.Source)
-		if visited[nextID] {
-			continue
+func (t *executionTracer) canReach(currID string, isForward bool, matcher func(string) bool) bool {
+	found := t.plan.walk(t.plan.neighborIDs(currID, isForward), isForward, func(n model.NodeSpec) walkAction {
+		if n.IsGateway() {
+			return walkAction{Descend: true}
 		}
-		visited[nextID] = true
-
-		nextNode, exists := t.plan.NodesMap[nextID]
-		if !exists {
-			continue
-		}
-
-		if !nextNode.IsGateway() {
-			if matcher(nextID) {
-				return true
-			}
-		} else if t.canReach(nextID, isForward, matcher, visited) {
-			return true
-		}
-	}
-	return false
+		return walkAction{Collect: matcher(n.ID)}
+	})
+	return len(found) > 0
 }
 
-// collectTraversedEdges 从开始节点顺流推进，严格按拓扑连通性收集当前生命周期的已流转有向边
+// collectTraversedEdges 严格按拓扑连通性收集当前生命周期的已流转有向边
 func (t *executionTracer) collectTraversedEdges() map[string][]string {
 	traversed := make(map[string][]string)
 	startID := t.plan.StartNode.ID
@@ -162,28 +147,21 @@ func (t *executionTracer) collectTraversedEdges() map[string][]string {
 		return traversed
 	}
 
-	queue := []string{startID}
-	visited := map[string]bool{startID: true}
+	// 先求出自起点顺流可达且已完成流转的节点域：只有这些节点的出边才可能真实流转过。
+	// 待办或驳回终止的节点不再向下推导，其出边严格阻断
+	advanced := t.plan.walk([]string{startID}, true, func(n model.NodeSpec) walkAction {
+		done := t.activated[n.ID] && t.completed[n.ID]
+		return walkAction{Collect: done, Descend: done}
+	})
 
-	for len(queue) > 0 {
-		curr := queue[0]
-		queue = queue[1:]
-
-		for _, edge := range t.plan.OutEdges[curr] {
-			target := edge.Target
+	for _, n := range advanced {
+		for _, edge := range t.plan.OutEdges[n.ID] {
 			// 仅当目标节点确实已被当前流转激活才纳入
-			if !t.activated[target] {
+			if !t.activated[edge.Target] {
 				continue
 			}
-
-			if !slices.Contains(traversed[curr], target) {
-				traversed[curr] = append(traversed[curr], target)
-			}
-
-			// 目标节点已完成流转且未访问，继续向下推导；若为待办或驳回终止，出边严格阻断
-			if t.completed[target] && !visited[target] {
-				visited[target] = true
-				queue = append(queue, target)
+			if !slices.Contains(traversed[n.ID], edge.Target) {
+				traversed[n.ID] = append(traversed[n.ID], edge.Target)
 			}
 		}
 	}

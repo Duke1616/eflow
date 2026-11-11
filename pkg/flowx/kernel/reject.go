@@ -42,29 +42,18 @@ func (p *ExecutionPlan) filterMostImmediateNodes(nodes []model.NodeSpec) []model
 	if len(nodes) <= 1 {
 		return nodes
 	}
-	isAncestor := make(map[string]bool)
-	for _, n := range nodes {
-		queue := []string{n.ID}
-		visited := make(map[string]bool)
-		for len(queue) > 0 {
-			curr := queue[0]
-			queue = queue[1:]
-			if visited[curr] {
-				continue
-			}
-			visited[curr] = true
-			if curr != n.ID && lo.SomeBy(nodes, func(item model.NodeSpec) bool { return item.ID == curr }) {
-				isAncestor[n.ID] = true
-				break
-			}
-			for _, edge := range p.OutEdges[curr] {
-				queue = append(queue, edge.Target)
-			}
-		}
-	}
+
+	candidates := lo.SliceToMap(nodes, func(n model.NodeSpec) (string, struct{}) {
+		return n.ID, struct{}{}
+	})
 
 	return lo.Filter(nodes, func(n model.NodeSpec, _ int) bool {
-		return !isAncestor[n.ID]
+		// 自候选顺流下探，若能抵达任一其他候选，说明它是更远的祖先，应被剔除
+		downstream := p.walk([]string{n.ID}, true, func(other model.NodeSpec) walkAction {
+			_, isCandidate := candidates[other.ID]
+			return walkAction{Collect: isCandidate && other.ID != n.ID, Descend: true}
+		})
+		return len(downstream) == 0
 	})
 }
 
@@ -80,44 +69,29 @@ func (p *ExecutionPlan) FindUpstreamApprovalNode(currentNodeID string) (model.No
 // searchUpstreamCandidates 逆向广度优先搜索，寻找最近一层的审批候选节点与开始节点
 // 若分支上的审批节点未实际审批通过（未激活、被跳过或根本未参与），自动穿透跨越继续向上寻找更上游节点
 func (p *ExecutionPlan) searchUpstreamCandidates(startNodeID string, tasks []*model.Task) (approvals []model.NodeSpec, starts []model.NodeSpec) {
-	queue := lo.Map(p.InEdges[startNodeID], func(e model.EdgeSpec, _ int) string { return e.Source })
-	visited := make(map[string]bool)
-
-	for len(queue) > 0 {
-		currID := queue[0]
-		queue = queue[1:]
-
-		if visited[currID] {
-			continue
-		}
-		visited[currID] = true
-
-		node, ok := p.NodesMap[currID]
-		if !ok {
-			continue
-		}
-
+	found := p.walk(p.neighborIDs(startNodeID, false), false, func(n model.NodeSpec) walkAction {
 		switch {
-		case node.Type == model.NodeApproval:
-			if isNodeActuallyPassed(node.ID, tasks) {
-				// 节点在当前流转中实际审批通过，收集为有效驳回目标并阻断该分支继续向上探索
-				approvals = append(approvals, node)
-			} else {
-				// 节点未走通、被跳过或未参与，自动穿透跨越，将上游入边全部入队继续寻找
-				for _, edge := range p.InEdges[currID] {
-					queue = append(queue, edge.Source)
-				}
-			}
-		case node.Type == model.NodeStart:
-			// 遇到流程开始节点，收集为提单起点候选
-			starts = append(starts, node)
-		case node.IsGateway() || node.Type == model.NodeCarbonCopy ||
-			node.Type == model.NodeChatGroup || node.Type == model.NodeTask:
-			// 穿透纯路由网关与瞬时穿透型节点（抄送/群聊/自动化任务），将上游前驱全部入队继续探索
-			for _, edge := range p.InEdges[currID] {
-				queue = append(queue, edge.Source)
-			}
+		case n.Type == model.NodeApproval:
+			// 节点在当前流转中实际审批通过，收集为有效驳回目标并阻断该分支继续向上探索；
+			// 未走通、被跳过或未参与则穿透跨越，继续向上寻找
+			passed := isNodeActuallyPassed(n.ID, tasks)
+			return walkAction{Collect: passed, Descend: !passed}
+		case n.Type == model.NodeStart:
+			return walkAction{Collect: true}
+		case n.IsGateway() || n.Type == model.NodeCarbonCopy ||
+			n.Type == model.NodeChatGroup || n.Type == model.NodeTask:
+			// 穿透纯路由网关与瞬时穿透型节点（抄送/群聊/自动化任务）
+			return walkAction{Descend: true}
 		}
+		return walkAction{}
+	})
+
+	for _, n := range found {
+		if n.Type == model.NodeStart {
+			starts = append(starts, n)
+			continue
+		}
+		approvals = append(approvals, n)
 	}
 	return approvals, starts
 }
@@ -164,51 +138,26 @@ func (p *ExecutionPlan) FindAllUpstreamRejectTargets(currentNodeID string, allTa
 		tasks = allTasks[0]
 	}
 
-	queue := lo.Map(inEdges, func(e model.EdgeSpec, _ int) string { return e.Source })
-	visited := make(map[string]bool)
-	var approvals []model.NodeSpec
-	var startNodes []model.NodeSpec
+	found := p.walk(p.neighborIDs(currentNodeID, false), false, func(n model.NodeSpec) walkAction {
+		switch n.Type {
+		case model.NodeStart:
+			return walkAction{Collect: true}
+		case model.NodeApproval:
+			// 与顺序驳回不同：自由驳回需要收集沿途全部历史审批环节，命中后仍须继续向上穿透
+			return walkAction{Collect: isNodeActuallyPassed(n.ID, tasks), Descend: true}
+		}
+		return walkAction{Descend: true}
+	})
 
-	for len(queue) > 0 {
-		currID := queue[0]
-		queue = queue[1:]
-
-		if visited[currID] {
+	var startNodes, approvals []model.NodeSpec
+	for _, n := range found {
+		if n.Type == model.NodeStart {
+			startNodes = append(startNodes, n)
 			continue
 		}
-		visited[currID] = true
-
-		node, ok := p.NodesMap[currID]
-		if !ok {
-			continue
-		}
-
-		if node.Type == model.NodeStart {
-			startNodes = append(startNodes, node)
-			continue
-		}
-
-		if node.Type == model.NodeApproval {
-			if isNodeActuallyPassed(node.ID, tasks) {
-				approvals = append(approvals, node)
-			}
-		}
-
-		for _, edge := range p.InEdges[currID] {
-			queue = append(queue, edge.Source)
-		}
+		approvals = append(approvals, n)
 	}
 
-	var result []model.NodeSpec
-	if len(startNodes) > 0 {
-		result = append(result, lo.UniqBy(startNodes, func(n model.NodeSpec) string { return n.ID })...)
-	}
-	if len(approvals) > 0 {
-		uniqApprovals := lo.UniqBy(approvals, func(n model.NodeSpec) string { return n.ID })
-		for i := len(uniqApprovals) - 1; i >= 0; i-- {
-			result = append(result, uniqApprovals[i])
-		}
-	}
-
-	return result, nil
+	// 按因果流转拓扑顺序呈现：靠近起点在前，靠近当前节点在后
+	return append(startNodes, lo.Reverse(approvals)...), nil
 }

@@ -14,7 +14,7 @@ type TaskForm struct {
 	Id       int64                       `gorm:"primaryKey;column:id;type:bigint;autoIncrement;comment:'任务快照自增ID'"`
 	TenantID int64                       `gorm:"column:tenant_id;type:bigint;not null;index;comment:'多租户隔离标识'"`
 	TicketId int64                       `gorm:"column:ticket_id;type:bigint;not null;index;comment:'关联的工单单据ID'"`
-	TaskId   int                         `gorm:"column:task_id;type:int;not null;index;comment:'关联工作流步骤节点任务ID'"`
+	TaskId   int64                       `gorm:"column:task_id;type:bigint;not null;index;comment:'关联工作流步骤节点任务ID'"`
 	Name     string                      `gorm:"column:name;type:varchar(128);not null;comment:'快照步骤展现名称'"`
 	Key      string                      `gorm:"column:key;type:varchar(128);not null;index;comment:'快照表单控件唯一Key'"`
 	Type     string                      `gorm:"column:type;type:varchar(64);comment:'表单字段组件渲染类型'"`

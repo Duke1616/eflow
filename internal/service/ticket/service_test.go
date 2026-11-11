@@ -767,6 +767,61 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 					},
 				}, nil)
 
+				repo.EXPECT().FindTaskFormsByTicketID(gomock.Any(), int64(1001)).Return(nil, nil).AnyTimes()
+
+				return repo, dispatcher, wfSvc
+			},
+			wantLen: 1,
+			wantErr: false,
+		},
+		{
+			name:       "驳回后从历史提交快照中精准回填上次操作信息",
+			taskId:     "304",
+			workflowId: 10,
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine, *workflowmocks.MockService) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
+				dispatcher := enginemocks.NewMockIEngine(ctrl)
+				wfSvc := workflowmocks.NewMockService(ctrl)
+
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("304")).Return(domain.TaskContext{
+					TaskID:            domain.NewID("304"),
+					ProcessInstanceID: domain.NewID(4),
+					ProcessID:         10,
+					ProcessVersion:    1,
+					NodeID:            "node-algo",
+				}, nil)
+
+				wfSvc.EXPECT().FindInstanceFlow(gomock.Any(), int64(10), 10, 1, domain.EngineTypeEasyFlow).Return(domain.Workflow{
+					FlowData: domain.CanvasData{
+						"nodes": []any{
+							map[string]any{
+								"id":   "node-algo",
+								"type": "user",
+								"properties": map[string]interface{}{
+									"fields": []interface{}{
+										map[string]interface{}{
+											"name":     "算法 ID",
+											"key":      "algo_ci_id",
+											"type":     "input",
+											"required": true,
+										},
+									},
+								},
+							},
+						},
+					},
+				}, nil)
+
+				repo.EXPECT().FindTaskFormsByTicketID(gomock.Any(), int64(1001)).Return([]domain.FormValue{
+					{
+						Name:  "算法 ID",
+						Key:   "algo_ci_id",
+						Type:  "input",
+						Value: "gitlab-pipeline-9988",
+					},
+				}, nil)
+
 				return repo, dispatcher, wfSvc
 			},
 			wantLen: 1,
@@ -789,6 +844,10 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 				require.NoError(t, err)
 				assert.Len(t, cfg.Fields, tc.wantLen)
 				assert.Equal(t, "10.0.0.1", cfg.Values["server_ip"])
+				if tc.taskId == "304" {
+					assert.Equal(t, "gitlab-pipeline-9988", cfg.Values["algo_ci_id"])
+					assert.Equal(t, "gitlab-pipeline-9988", cfg.Values["算法 ID"])
+				}
 			}
 		})
 	}

@@ -82,26 +82,15 @@ func resolveBranchState(node model.NodeSpec, nodeTasks []*model.Task) BranchStat
 	}
 }
 
-// FindEffectivePrecedingTaskNodes 逆向递归溯源指定节点的有效任务前置节点（穿透纯路由性质的网关）
+// FindEffectivePrecedingTaskNodes 逆向溯源指定节点的有效任务前置节点（穿透纯路由性质的网关）
 func (p *ExecutionPlan) FindEffectivePrecedingTaskNodes(nodeID string) []model.NodeSpec {
-	inEdges := p.InEdges[nodeID]
-	if len(inEdges) == 0 {
-		return nil
-	}
-
-	res := lo.FlatMap(inEdges, func(edge model.EdgeSpec, _ int) []model.NodeSpec {
-		src, ok := p.NodesMap[edge.Source]
-		if !ok {
-			return nil
+	return p.walk(p.neighborIDs(nodeID, false), false, func(n model.NodeSpec) walkAction {
+		switch {
+		case n.IsActivity():
+			return walkAction{Collect: true}
+		case n.IsGateway():
+			return walkAction{Descend: true}
 		}
-		if src.IsActivity() {
-			return []model.NodeSpec{src}
-		}
-		if src.IsGateway() {
-			return p.FindEffectivePrecedingTaskNodes(src.ID)
-		}
-		return nil
+		return walkAction{}
 	})
-
-	return lo.UniqBy(res, func(n model.NodeSpec) string { return n.ID })
 }
