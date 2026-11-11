@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 
@@ -143,6 +144,11 @@ func (s *taskService) resolveRunnerByDispatch(ctx context.Context, templateID in
 	return runner, matched.Id, nil
 }
 
+// assembleRuntimeArgs 组装任务执行时的动态运行时参数。
+//
+// NOTE(架构兼容契约):
+// user_info 包含工单发起人账号与上下文属性，下游存量自动化脚本深度依赖此参数进行权限绑定与身份反查。
+// 需保持向后兼容，若远端用户服务异常，必须兜底提供包含基础账号标识的 JSON 结构，防止下游脚本解析中断。
 func (s *taskService) assembleRuntimeArgs(ctx context.Context, ticket domain.Ticket) (domain.TaskArgs, error) {
 	input := maps.Clone(ticket.Data)
 	if input == nil {
@@ -155,5 +161,30 @@ func (s *taskService) assembleRuntimeArgs(ctx context.Context, ticket domain.Tic
 	for _, form := range forms {
 		input[form.Key] = form.Value
 	}
+
+	if userInfo := s.resolveUserInfo(ctx, ticket.CreateBy); userInfo != "" {
+		input["user_info"] = userInfo
+	}
+
 	return input, nil
+}
+
+// resolveUserInfo 解析并序列化发起人凭证信息，提供安全兜底以保障下游脚本的健壮性。
+func (s *taskService) resolveUserInfo(ctx context.Context, username string) string {
+	if username == "" {
+		return ""
+	}
+	if s.users != nil {
+		if user, err := s.users.FindByUsername(ctx, username); err == nil && user != nil {
+			if data, marshalErr := json.Marshal(user); marshalErr == nil {
+				return string(data)
+			}
+		}
+	}
+	// 查询失败或未提供客户端时，兜底生成基础结构保障下游脚本兼容
+	fallback, _ := json.Marshal(map[string]any{
+		"username":     username,
+		"display_name": username,
+	})
+	return string(fallback)
 }

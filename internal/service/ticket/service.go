@@ -50,12 +50,20 @@ type Service interface {
 	ListTaskFormsByTicketID(ctx context.Context, ticketID int64) ([]domain.FormValue, error)
 	// Pass 同意当前代办节点审批，统一执行领域自卫校验、变量合并与必填校验并驱动引擎推进
 	Pass(ctx context.Context, ticketId int64, taskId string, operator string, isAdmin bool, comment string, extraData map[string]interface{}) error
-	// Reject 驳回当前节点审批，统一执行领域自卫校验并驱动引擎执行驳回流转
-	Reject(ctx context.Context, ticketId int64, taskId string, operator string, isAdmin bool, comment string) error
+	// Reject 驳回当前节点审批，支持指定驳回目标节点或直接终止
+	Reject(ctx context.Context, ticketId int64, taskId string, operator string, isAdmin bool, comment string, targetNodeId string, terminate bool) error
 	// Transfer 将当前审批任务转签指派给其他用户
 	Transfer(ctx context.Context, ticketId int64, taskId string, operator string, isAdmin bool, targetUsers []string) error
-	// GetTaskFormConfig 获取指定任务节点在当时流程版本中定义的表单字段列表
-	GetTaskFormConfig(ctx context.Context, ticketId int64, taskId string, workflowId int64) ([]flowdsl.Field, error)
+	// GetTaskFormConfig 获取指定任务节点在当时流程版本中定义的表单字段列表与历史预填值
+	GetTaskFormConfig(ctx context.Context, ticketId int64, taskId string, workflowId int64) (TaskFormConfig, error)
+	// GetRejectTargets 查询当前任务节点允许驳回的目标节点候选列表
+	GetRejectTargets(ctx context.Context, ticketId int64, taskId string) ([]domain.RejectTarget, error)
+}
+
+// TaskFormConfig 承载任务节点表单定义与当前工单的历史预填值
+type TaskFormConfig struct {
+	Fields []flowdsl.Field        `json:"fields"`
+	Values map[string]interface{} `json:"values"`
 }
 
 type ticketService struct {
@@ -189,6 +197,7 @@ func (s *ticketService) GetByProcessInstance(ctx context.Context, instanceID dom
 		}
 		return domain.Ticket{}, fmt.Errorf("根据流程实例标识 [%s] 获取工单失败: %w", instanceID, err)
 	}
+	ticket.FlowPolicy = s.resolveTicketPolicy(ctx, ticket)
 	return ticket, nil
 }
 
@@ -200,6 +209,7 @@ func (s *ticketService) GetByID(ctx context.Context, id int64) (domain.Ticket, e
 		}
 		return domain.Ticket{}, fmt.Errorf("获取工单详情失败: %w", err)
 	}
+	ticket.FlowPolicy = s.resolveTicketPolicy(ctx, ticket)
 	return ticket, nil
 }
 
@@ -416,19 +426,51 @@ func (s *ticketService) collectAndValidateFields(fields []flowdsl.Field, extraDa
 	return mergeData, formValues, nil
 }
 
-// Reject 审批节点驳回
-func (s *ticketService) Reject(ctx context.Context, ticketId int64, taskId string, operator string, isAdmin bool, comment string) error {
+// Reject 审批节点驳回，支持指定驳回目标节点或直接终止
+func (s *ticketService) Reject(ctx context.Context, ticketId int64, taskId string, operator string, isAdmin bool, comment string, targetNodeId string, terminate bool) error {
 	opCtx, err := s.prepareOperableTask(ctx, ticketId, taskId, operator, "驳回", isAdmin)
 	if err != nil {
 		return err
 	}
 
+	policy := s.getTaskPolicy(ctx, opCtx)
+	if err := policy.ValidateReject(terminate); err != nil {
+		return err
+	}
+
 	return s.engine.Reject(ctx, domain.TaskRejectReq{
-		EngineType: opCtx.ticket.Process.ResolveEngineType(),
-		TaskId:     opCtx.tID,
-		Operator:   operator,
-		Comment:    comment,
+		EngineType:   opCtx.ticket.Process.ResolveEngineType(),
+		TaskId:       opCtx.tID,
+		Operator:     operator,
+		Comment:      comment,
+		TargetNodeId: targetNodeId,
+		Terminate:    terminate,
 	})
+}
+
+// GetRejectTargets 查询当前任务节点允许驳回的目标节点候选列表
+func (s *ticketService) GetRejectTargets(ctx context.Context, ticketId int64, taskId string) ([]domain.RejectTarget, error) {
+	opCtx, err := s.loadTaskContext(ctx, ticketId, taskId)
+	if err != nil {
+		return nil, err
+	}
+
+	engineType := opCtx.ticket.Process.ResolveEngineType()
+	targets, err := s.engine.GetRejectTargets(ctx, engineType, opCtx.tID)
+	if err != nil {
+		return nil, err
+	}
+
+	policy := s.getTaskPolicy(ctx, opCtx)
+	allowStarter := policy.AllowsMode(domain.RejectModeStarter)
+	allowHistory := policy.AllowsMode(domain.RejectModeHistory)
+
+	return lo.Filter(targets, func(t domain.RejectTarget, _ int) bool {
+		if t.IsStarter {
+			return allowStarter
+		}
+		return allowHistory
+	}), nil
 }
 
 // Transfer 审批任务转签指派
@@ -442,6 +484,11 @@ func (s *ticketService) Transfer(ctx context.Context, ticketId int64, taskId str
 		return err
 	}
 
+	policy := s.getTaskPolicy(ctx, opCtx)
+	if err := policy.ValidateTransfer(); err != nil {
+		return err
+	}
+
 	return s.engine.Transfer(ctx, domain.TaskTransferReq{
 		EngineType:  opCtx.ticket.Process.ResolveEngineType(),
 		TaskId:      opCtx.tID,
@@ -449,11 +496,50 @@ func (s *ticketService) Transfer(ctx context.Context, ticketId int64, taskId str
 	})
 }
 
-// GetTaskFormConfig 获取指定任务节点在流程版本中定义的表单字段配置
-func (s *ticketService) GetTaskFormConfig(ctx context.Context, ticketId int64, taskId string, workflowId int64) ([]flowdsl.Field, error) {
+// getTaskPolicy 获取任务操作适用的流转与审批治理策略
+func (s *ticketService) getTaskPolicy(ctx context.Context, opCtx *operableTaskContext) domain.FlowPolicy {
+	if opCtx.ticket.FlowPolicy.AllowReject || opCtx.ticket.FlowPolicy.AllowTransfer || len(opCtx.ticket.FlowPolicy.RejectModes) > 0 {
+		return opCtx.ticket.FlowPolicy
+	}
+	return s.resolveTicketPolicy(ctx, opCtx.ticket, opCtx.taskInfo)
+}
+
+// resolveTicketPolicy 解析工单适用的流转与审批治理策略（优先快照版本回溯，兜底最新工作流定义）
+func (s *ticketService) resolveTicketPolicy(ctx context.Context, ticket domain.Ticket, taskInfo ...domain.TaskContext) domain.FlowPolicy {
+	if s.workflowSvc == nil || ticket.WorkflowId <= 0 {
+		return domain.DefaultFlowxPolicy()
+	}
+
+	engineType := ticket.Process.ResolveEngineType()
+	var procID, procVer int
+	if len(taskInfo) > 0 && taskInfo[0].ProcessID > 0 {
+		procID = taskInfo[0].ProcessID
+		procVer = taskInfo[0].ProcessVersion
+	}
+
+	// 1. 若具备版本快照坐标，优先从快照回溯策略（保障历史版本隔离）
+	if procID > 0 && procVer > 0 {
+		if snapWf, err := s.workflowSvc.FindInstanceFlow(ctx, ticket.WorkflowId, procID, procVer, engineType); err == nil {
+			policy := snapWf.ResolveFlowPolicy()
+			if policy.AllowReject || policy.AllowTransfer || len(policy.RejectModes) > 0 {
+				return policy
+			}
+		}
+	}
+
+	// 2. 快照未定义或无版本坐标时，回退到所属工作流当前策略
+	wf, err := s.workflowSvc.Find(ctx, ticket.WorkflowId)
+	if err != nil {
+		return domain.DefaultFlowxPolicy()
+	}
+	return wf.ResolveFlowPolicy()
+}
+
+// GetTaskFormConfig 获取指定任务节点在流程版本中定义的表单字段配置及历史填报值
+func (s *ticketService) GetTaskFormConfig(ctx context.Context, ticketId int64, taskId string, workflowId int64) (TaskFormConfig, error) {
 	opCtx, err := s.loadTaskContext(ctx, ticketId, taskId)
 	if err != nil {
-		return nil, err
+		return TaskFormConfig{}, err
 	}
 
 	wfID := workflowId
@@ -464,23 +550,35 @@ func (s *ticketService) GetTaskFormConfig(ctx context.Context, ticketId int64, t
 	engineType := opCtx.ticket.Process.ResolveEngineType()
 	targetWf, err := s.workflowSvc.FindInstanceFlow(ctx, wfID, opCtx.taskInfo.ProcessID, opCtx.taskInfo.ProcessVersion, engineType)
 	if err != nil {
-		return nil, err
+		return TaskFormConfig{}, err
 	}
 
 	graph, err := flowdsl.Parse(targetWf.FlowData)
 	if err != nil {
-		return nil, fmt.Errorf("解析流程拓扑失败: %w", err)
+		return TaskFormConfig{}, fmt.Errorf("解析流程拓扑失败: %w", err)
 	}
 	node, ok := graph.GetNode(opCtx.taskInfo.NodeID)
 	if !ok {
-		return []flowdsl.Field{}, nil
+		return TaskFormConfig{
+			Fields: []flowdsl.Field{},
+			Values: opCtx.ticket.Data,
+		}, nil
 	}
 
+	var fields []flowdsl.Field
 	if userCfg, isUser := node.AsUserTask(); isUser {
-		return userCfg.Fields, nil
+		fields = userCfg.Fields
 	}
 
-	return []flowdsl.Field{}, nil
+	values := make(map[string]interface{}, len(opCtx.ticket.Data))
+	for k, v := range opCtx.ticket.Data {
+		values[k] = v
+	}
+
+	return TaskFormConfig{
+		Fields: fields,
+		Values: values,
+	}, nil
 }
 
 // validateField 校验表单字段的规则约束

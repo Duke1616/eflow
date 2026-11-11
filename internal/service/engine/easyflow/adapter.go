@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,7 +32,7 @@ const (
 )
 
 // NewEngine 实例化面向 easyflow 的引擎实现
-func NewEngine(repo repository.IEngineRepository) engine.IEngine {
+func NewEngine(repo repository.IEngineRepository) engine.IDriver {
 	return &adapter{
 		repo: repo,
 	}
@@ -41,7 +42,7 @@ func (a *adapter) EngineType() domain.EngineType {
 	return domain.EngineTypeEasyFlow
 }
 
-func (a *adapter) Deploy(ctx context.Context, _ domain.EngineType, rawDef any) (domain.DeployInfo, error) {
+func (a *adapter) Deploy(ctx context.Context, rawDef any) (domain.DeployInfo, error) {
 	process, ok := rawDef.(*model.Process)
 	if !ok {
 		return domain.DeployInfo{}, errors.New("easyflow 流程定义编译产物类型错误")
@@ -115,6 +116,18 @@ func (a *adapter) Reject(ctx context.Context, req domain.TaskRejectReq) error {
 	return nil
 }
 
+func (a *adapter) GetRejectTargets(ctx context.Context, taskID domain.ID) ([]domain.RejectTarget, error) {
+	// easyflow 遗留引擎兼容实现：提供流程起点作为通用驳回目标
+	return []domain.RejectTarget{
+		{
+			NodeID:    "Start",
+			NodeName:  "发起人 (重新填报)",
+			NodeType:  "START",
+			IsStarter: true,
+		},
+	}, nil
+}
+
 // toEasyVariables 纯函数：将变量字典单向序列化为 easy-workflow 所需的 []model.Variable 格式
 func toEasyVariables(variables domain.Variables) string {
 	if len(variables) == 0 {
@@ -145,7 +158,7 @@ func ensureEssentialVariables(vars domain.Variables, starter string, ticketID in
 	return result
 }
 
-func (a *adapter) GetTaskContext(ctx context.Context, _ domain.EngineType, taskID domain.ID) (domain.TaskContext, error) {
+func (a *adapter) GetTaskContext(ctx context.Context, taskID domain.ID) (domain.TaskContext, error) {
 	id := taskID.Int()
 	if id <= 0 {
 		return domain.TaskContext{}, fmt.Errorf("easyflow 任务 ID 非法: %s", taskID)
@@ -175,7 +188,7 @@ func (a *adapter) GetTaskContext(ctx context.Context, _ domain.EngineType, taskI
 	}, nil
 }
 
-func (a *adapter) GetTimeline(ctx context.Context, _ domain.EngineType, instanceID domain.ID) ([]domain.TimelineNode, error) {
+func (a *adapter) GetTimeline(ctx context.Context, instanceID domain.ID) ([]domain.TimelineNode, error) {
 	procInstID := instanceID.Int()
 	if procInstID <= 0 {
 		return nil, fmt.Errorf("%w: easyflow 流程实例 ID 无效: %s", engine.ErrInvalidParameter, instanceID)
@@ -236,7 +249,7 @@ func formatTimeString(t *database.LocalTime) string {
 	return t.String()
 }
 
-func (a *adapter) GetInstanceExecutionView(ctx context.Context, _ domain.EngineType, instanceID domain.ID, status uint8) (domain.InstanceExecutionView, error) {
+func (a *adapter) GetInstanceExecutionView(ctx context.Context, instanceID domain.ID) (domain.InstanceExecutionView, error) {
 	procInstID := instanceID.Int()
 	if procInstID <= 0 {
 		return domain.InstanceExecutionView{}, fmt.Errorf("%w: easyflow 流程实例 ID 无效: %s", engine.ErrInvalidParameter, instanceID)
@@ -278,7 +291,7 @@ func (a *adapter) GetInstanceExecutionView(ctx context.Context, _ domain.EngineT
 		return "", false
 	}))
 
-	edgeMap, err := calculateTraversedEdges(ctx, a.repo, tasks, procInstID, inst.ProcID, inst.ProcVersion, status)
+	edgeMap, err := calculateTraversedEdges(ctx, a.repo, tasks, inst.ProcID, inst.ProcVersion)
 	if err != nil {
 		return domain.InstanceExecutionView{}, fmt.Errorf("easyflow 计算已流转边失败: %w", err)
 	}
@@ -331,7 +344,7 @@ func (a *adapter) Transfer(ctx context.Context, req domain.TaskTransferReq) erro
 	return err
 }
 
-func (a *adapter) GetAutomationTask(ctx context.Context, _ domain.EngineType, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
+func (a *adapter) GetAutomationTask(ctx context.Context, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
 	procInstID := instanceID.Int()
 	if procInstID <= 0 {
 		return domain.TaskRecord{}, fmt.Errorf("easyflow 流程实例 ID 非法: %s", instanceID)
@@ -339,6 +352,10 @@ func (a *adapter) GetAutomationTask(ctx context.Context, _ domain.EngineType, in
 
 	task, err := a.repo.GetAutomationTask(ctx, nodeID, procInstID)
 	if err != nil {
+		// 统一收敛为引擎层哨兵错误，屏蔽底层 ORM 差异，供上层基于 errors.Is 精准识别"节点任务已不存在"
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.TaskRecord{}, fmt.Errorf("%w: easyflow 自动化节点任务不存在 [node_id=%s]", engine.ErrTaskNotFound, nodeID)
+		}
 		return domain.TaskRecord{}, err
 	}
 
@@ -357,7 +374,7 @@ func (a *adapter) GetAutomationTask(ctx context.Context, _ domain.EngineType, in
 	}, nil
 }
 
-func (a *adapter) GetTasksByCurrentNode(ctx context.Context, _ domain.EngineType, instanceID domain.ID, nodeID string) ([]domain.TaskRecord, error) {
+func (a *adapter) GetTasksByCurrentNode(ctx context.Context, instanceID domain.ID, nodeID string) ([]domain.TaskRecord, error) {
 	procInstID := instanceID.Int()
 	if procInstID <= 0 {
 		return nil, fmt.Errorf("easyflow 流程实例 ID 非法: %s", instanceID)
@@ -466,7 +483,7 @@ func (a *adapter) ListPendingSteps(ctx context.Context, processes []domain.Proce
 	}), nil
 }
 
-func (a *adapter) GetTaskRecords(ctx context.Context, _ domain.EngineType, instanceID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error) {
+func (a *adapter) GetTaskRecords(ctx context.Context, instanceID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error) {
 	procInstID := instanceID.Int()
 	if procInstID <= 0 {
 		return nil, 0, fmt.Errorf("%w: easyflow 流程实例 ID 非法: %s", engine.ErrInvalidParameter, instanceID)
@@ -510,7 +527,7 @@ func (a *adapter) GetTaskRecords(ctx context.Context, _ domain.EngineType, insta
 	return domainRecords, total, nil
 }
 
-func (a *adapter) GetTaskTimeline(ctx context.Context, _ domain.EngineType, instanceID domain.ID, offset, limit int) ([]domain.TaskTimelineGroup, int64, error) {
+func (a *adapter) GetTaskTimeline(ctx context.Context, instanceID domain.ID, offset, limit int) ([]domain.TaskTimelineGroup, int64, error) {
 	procInstID := instanceID.Int()
 	if procInstID <= 0 {
 		return nil, 0, fmt.Errorf("%w: easyflow 流程实例 ID 非法: %s", engine.ErrInvalidParameter, instanceID)
@@ -569,4 +586,71 @@ func (a *adapter) GetTaskTimeline(ctx context.Context, _ domain.EngineType, inst
 	})
 
 	return timelineGroups, total, nil
+}
+
+// GetActiveReject 获取流程实例当前正处于待处理/待响应状态的最新驳回上下文（若无驳回或已重新推进闭环，返回 nil）
+func (a *adapter) GetActiveReject(ctx context.Context, instanceID domain.ID) (*domain.RejectSnapshot, error) {
+	procInstID := instanceID.Int()
+	if procInstID <= 0 {
+		return nil, nil
+	}
+
+	ts, _, err := a.GetTaskRecords(ctx, instanceID, 0, 1000)
+	if err != nil {
+		return nil, err
+	}
+
+	rejectTasks := lo.Filter(ts, func(t domain.TaskRecord, _ int) bool {
+		return t.IsRejected()
+	})
+	if len(rejectTasks) == 0 {
+		return nil, nil
+	}
+
+	sort.SliceStable(rejectTasks, func(i, j int) bool {
+		if rejectTasks[i].BatchCode != rejectTasks[j].BatchCode {
+			return rejectTasks[i].BatchCode > rejectTasks[j].BatchCode
+		}
+		return fmt.Sprintf("%v", rejectTasks[i].FinishedTime) > fmt.Sprintf("%v", rejectTasks[j].FinishedTime)
+	})
+	latest := rejectTasks[0]
+
+	latestBatch, _ := strconv.Atoi(latest.BatchCode)
+	latestFinished := fmt.Sprintf("%v", latest.FinishedTime)
+
+	hasAdvancedAfterReject := lo.SomeBy(ts, func(t domain.TaskRecord) bool {
+		if t.TaskID == latest.TaskID {
+			return false
+		}
+		if t.Status != 1 && t.Status != 3 {
+			return false
+		}
+		b, _ := strconv.Atoi(t.BatchCode)
+		if b > latestBatch {
+			return true
+		}
+		tFinished := fmt.Sprintf("%v", t.FinishedTime)
+		if tFinished != "" && latestFinished != "" && tFinished > latestFinished {
+			return true
+		}
+		return false
+	})
+	if hasAdvancedAfterReject {
+		return nil, nil
+	}
+
+	hasPendingTasks := lo.SomeBy(ts, func(t domain.TaskRecord) bool {
+		return t.Status == 0 && t.IsFinished == 0
+	})
+	if !hasPendingTasks {
+		return nil, nil
+	}
+
+	return &domain.RejectSnapshot{
+		Operator:   latest.ApprovedBy,
+		NodeID:     latest.NodeID,
+		NodeName:   latest.NodeName,
+		Comment:    latest.Comment,
+		FinishTime: fmt.Sprintf("%v", latest.FinishedTime),
+	}, nil
 }

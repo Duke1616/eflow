@@ -202,30 +202,49 @@ func (s *Storage) ListPendingTasksByInstances(ctx context.Context, instIDs []str
 	}), nil
 }
 
-func (s *Storage) buildListPendingTasksQuery(tx *gorm.DB, assignee string) *gorm.DB {
-	query := tx.Model(&FlowTaskPO{}).Where("status = ?", uint8(model.TaskPending))
-	if assignee != "" {
-		query = query.Where("assignee = ?", assignee)
+func (s *Storage) buildListPendingTasksQuery(tx *gorm.DB, query model.PendingTaskQuery) *gorm.DB {
+	q := tx.Model(&FlowTaskPO{}).Where("flow_task.status = ?", uint8(model.TaskPending))
+	if query.Assignee != "" {
+		q = q.Where("flow_task.assignee = ?", query.Assignee)
 	}
-	return query
+	if query.ProcessName != "" {
+		// flow_task 不冗余流程名，需经实例回溯到当时执行的定义版本。
+		// 这里刻意用子查询而非 JOIN：flow_instance 与 flow_task 存在 id/status/ctime 同名列，
+		// JOIN 后 SELECT * 会让任务列被实例列覆盖，子查询可保持外层单表扫描语义
+		sub := tx.Session(&gorm.Session{NewDB: true}).
+			Table("flow_instance AS fi").
+			Select("fi.id").
+			Joins("JOIN flow_definition AS fd ON fd.proc_key = fi.proc_key AND fd.version = fi.version").
+			Where("fd.name = ?", query.ProcessName)
+		q = q.Where("flow_task.instance_id IN (?)", sub)
+	}
+	return q
 }
 
-func (s *Storage) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
+func (s *Storage) ListPendingTasks(ctx context.Context, query model.PendingTaskQuery) ([]*model.Task, int64, error) {
 	var (
 		pos   []FlowTaskPO
 		total int64
 	)
-	query := s.buildListPendingTasksQuery(s.db.WithContext(ctx), assignee)
+	q := s.buildListPendingTasksQuery(s.db.WithContext(ctx), query)
 
-	if err := query.Count(&total).Error; err != nil {
+	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	if total == 0 {
 		return nil, 0, nil
 	}
 
-	err := query.Order("ctime DESC").Offset(offset).Limit(limit).Find(&pos).Error
-	if err != nil {
+	order := "flow_task.ctime DESC"
+	if query.SortByAsc {
+		order = "flow_task.ctime ASC"
+	}
+	q = q.Order(order).Offset(query.Offset)
+	// GORM 的 Limit(0) 会生成 LIMIT 0 从而返回零行，因此仅在正数时施加条数限制
+	if query.Limit > 0 {
+		q = q.Limit(query.Limit)
+	}
+	if err := q.Find(&pos).Error; err != nil {
 		return nil, 0, err
 	}
 

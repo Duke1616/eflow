@@ -2,7 +2,9 @@ package flowx
 
 import (
 	"context"
+	"sort"
 	"testing"
+	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	repomocks "github.com/Duke1616/eflow/internal/repository/mocks"
@@ -10,9 +12,9 @@ import (
 	"github.com/Duke1616/eflow/pkg/flowx/kernel"
 	flowxModel "github.com/Duke1616/eflow/pkg/flowx/model"
 	flowxMem "github.com/Duke1616/eflow/pkg/flowx/storage/memory"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/samber/lo"
 	"go.uber.org/mock/gomock"
 )
 
@@ -27,7 +29,7 @@ func TestFlowxAdapter_EndToEndLifecycle(t *testing.T) {
 	require.Equal(t, domain.EngineTypeFlowx, adapter.EngineType())
 
 	// 2. 部署流程定义
-	deployInfo, err := adapter.Deploy(ctx, domain.EngineTypeFlowx, flowxModel.ProcessDefinition{
+	deployInfo, err := adapter.Deploy(ctx, flowxModel.ProcessDefinition{
 		Key:  "wf_888",
 		Name: "请假审批工作流",
 		Nodes: []flowxModel.NodeSpec{
@@ -86,7 +88,7 @@ func TestFlowxAdapter_EndToEndLifecycle(t *testing.T) {
 	assert.Equal(t, "leader_zhang", todoTasks[0].ApprovedBy)
 
 	// 5. 获取任务上下文 (GetTaskContext)
-	taskCtx, err := adapter.GetTaskContext(ctx, domain.EngineTypeFlowx, taskID)
+	taskCtx, err := adapter.GetTaskContext(ctx, taskID)
 	require.NoError(t, err)
 	assert.Equal(t, domain.EngineTypeFlowx, taskCtx.EngineType)
 	assert.Equal(t, 888, taskCtx.ProcessID)
@@ -106,7 +108,7 @@ func TestFlowxAdapter_EndToEndLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	// 7. 查询流转记录 (GetTaskRecords)
-	records, recordTotal, err := adapter.GetTaskRecords(ctx, domain.EngineTypeFlowx, launchRes.InstanceID, 0, 10)
+	records, recordTotal, err := adapter.GetTaskRecords(ctx, launchRes.InstanceID, 0, 10)
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, recordTotal, int64(1))
 	require.NotEmpty(t, records)
@@ -115,13 +117,13 @@ func TestFlowxAdapter_EndToEndLifecycle(t *testing.T) {
 	assert.Equal(t, "同意请假", records[0].Comment)
 
 	// 8. 查询时间线事件 (GetTaskTimeline)
-	timelineGroups, groupTotal, err := adapter.GetTaskTimeline(ctx, domain.EngineTypeFlowx, launchRes.InstanceID, 0, 10)
+	timelineGroups, groupTotal, err := adapter.GetTaskTimeline(ctx, launchRes.InstanceID, 0, 10)
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, groupTotal, int64(1))
 	require.NotEmpty(t, timelineGroups)
 
 	// 8.1 运行态点亮视图 (GetInstanceExecutionView)
-	execView, err := adapter.GetInstanceExecutionView(ctx, domain.EngineTypeFlowx, launchRes.InstanceID, 1)
+	execView, err := adapter.GetInstanceExecutionView(ctx, launchRes.InstanceID)
 	require.NoError(t, err)
 	assert.Equal(t, 888, execView.ProcessID)
 	assert.Equal(t, 1, execView.ProcessVersion)
@@ -243,7 +245,7 @@ func TestFlowxAdapter_PrebindInstanceBeforeEngineEvents(t *testing.T) {
 
 	adapter := NewEngine(coreEngine, ticketMock)
 
-	_, err := adapter.Deploy(ctx, domain.EngineTypeFlowx, flowxModel.ProcessDefinition{
+	_, err := adapter.Deploy(ctx, flowxModel.ProcessDefinition{
 		Key:  "wf_88",
 		Name: "前置绑定测试流程",
 		Nodes: []flowxModel.NodeSpec{
@@ -278,6 +280,42 @@ func TestFlowxAdapter_PrebindInstanceBeforeEngineEvents(t *testing.T) {
 	assert.Equal(t, boundInstanceID, launchRes.InstanceID)
 }
 
+// TestFlowxAdapter_RevokePrebindWhenEngineStartFails 校验引擎启动失败时适配层就地精确解绑预分配的实例标识
+// 若残留预绑定，工单将永久滞留 PROCESS 且 IsBound 为真，消费者与重启 Job 的重试通道被彻底堵死
+func TestFlowxAdapter_RevokePrebindWhenEngineStartFails(t *testing.T) {
+	ctx := context.Background()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	store := flowxMem.NewStorage()
+	coreEngine := flowx.NewEngine(store)
+	ticketMock := repomocks.NewMockTicketRepository(ctrl)
+	adapter := NewEngine(coreEngine, ticketMock)
+
+	var boundInstanceID domain.ID
+	ticketMock.EXPECT().RegisterProcess(gomock.Any(), int64(9999), domain.EngineTypeFlowx, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ int64, _ domain.EngineType, instID domain.ID) error {
+			boundInstanceID = instID
+			return nil
+		}).Times(1)
+
+	ticketMock.EXPECT().RevokeProcessBinding(gomock.Any(), int64(9999), gomock.Any()).
+		DoAndReturn(func(_ context.Context, ticketId int64, instID domain.ID) error {
+			assert.Equal(t, int64(9999), ticketId)
+			assert.Equal(t, boundInstanceID, instID, "必须精确回滚本次预绑定的那个实例标识")
+			return nil
+		}).Times(1)
+
+	_, err := adapter.Start(ctx, domain.ProcessLaunchReq{
+		EngineType: domain.EngineTypeFlowx,
+		TicketId:   9999,
+		WorkflowId: 777, // 未发布任何版本，必然触发引擎启动失败
+		Starter:    "alice",
+	})
+	require.Error(t, err)
+	assert.False(t, boundInstanceID.IsZero(), "预绑定应已真实发生")
+}
+
 func TestFlowxEngine_ListPendingSteps_BatchQuery(t *testing.T) {
 	ctx := context.Background()
 	store := flowxMem.NewStorage()
@@ -285,7 +323,7 @@ func TestFlowxEngine_ListPendingSteps_BatchQuery(t *testing.T) {
 	adapter := NewEngine(coreEngine, nil)
 
 	// 部署流程
-	_, err := adapter.Deploy(ctx, domain.EngineTypeFlowx, flowxModel.ProcessDefinition{
+	_, err := adapter.Deploy(ctx, flowxModel.ProcessDefinition{
 		Key:  "wf_99",
 		Name: "批量拉取测试流程",
 		Nodes: []flowxModel.NodeSpec{
@@ -338,4 +376,206 @@ func TestFlowxEngine_ListPendingSteps_BatchQuery(t *testing.T) {
 		assert.Equal(t, "财务审核", todo.NodeName)
 		assert.Equal(t, "cfo", todo.ApprovedBy)
 	}
+}
+
+// TestFlowxAdapter_ListTodoTasks_ProcessNameAndSort 端到端验证 flowx 侧待办检索：
+// 流程名筛选必须真实生效（历史实现静默丢弃该条件），排序方向必须透传，total 必须是不受分页影响的真实计数
+func TestFlowxAdapter_ListTodoTasks_ProcessNameAndSort(t *testing.T) {
+	ctx := context.Background()
+	store := flowxMem.NewStorage()
+	coreEngine := flowx.NewEngine(store)
+	adapter := NewEngine(coreEngine, nil)
+
+	for _, def := range []flowxModel.ProcessDefinition{
+		{Key: "wf_leave", Name: "请假审批工作流"},
+		{Key: "wf_expense", Name: "报销审批工作流"},
+	} {
+		def.Nodes = []flowxModel.NodeSpec{
+			{ID: "start", Type: flowxModel.NodeStart},
+			{ID: "audit", Name: "主管审批", Type: flowxModel.NodeApproval, Assignees: []string{"leader_zhang"}},
+			{ID: "end", Type: flowxModel.NodeEnd},
+		}
+		def.Edges = []flowxModel.EdgeSpec{
+			{Source: "start", Target: "audit"},
+			{Source: "audit", Target: "end"},
+		}
+		_, err := adapter.Deploy(ctx, def)
+		require.NoError(t, err)
+	}
+
+	leaveInstIDs := make([]string, 0, 2)
+	for i := 0; i < 2; i++ {
+		id, err := coreEngine.Start(ctx, flowx.StartReq{Key: "wf_leave", Starter: "employee_wang"})
+		require.NoError(t, err)
+		leaveInstIDs = append(leaveInstIDs, id)
+	}
+	expenseInstID, err := coreEngine.Start(ctx, flowx.StartReq{Key: "wf_expense", Starter: "employee_wang"})
+	require.NoError(t, err)
+
+	instIDsOf := func(tasks []domain.TodoTask) []string {
+		return lo.Map(tasks, func(item domain.TodoTask, _ int) string { return item.InstanceID.String() })
+	}
+
+	t.Run("流程名筛选只命中该流程的待办", func(t *testing.T) {
+		tasks, total, err := adapter.ListTodoTasks(ctx, domain.TodoQueryReq{
+			Username:    "leader_zhang",
+			ProcessName: "请假审批工作流",
+			Limit:       10,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), total)
+		assert.ElementsMatch(t, leaveInstIDs, instIDsOf(tasks))
+	})
+
+	t.Run("不带流程名时返回全部待办", func(t *testing.T) {
+		tasks, total, err := adapter.ListTodoTasks(ctx, domain.TodoQueryReq{Username: "leader_zhang", Limit: 10})
+		require.NoError(t, err)
+		assert.Equal(t, int64(3), total)
+		assert.ElementsMatch(t, append(leaveInstIDs, expenseInstID), instIDsOf(tasks))
+	})
+
+	t.Run("流程名无匹配时返回空", func(t *testing.T) {
+		tasks, total, err := adapter.ListTodoTasks(ctx, domain.TodoQueryReq{
+			Username:    "leader_zhang",
+			ProcessName: "不存在的流程",
+			Limit:       10,
+		})
+		require.NoError(t, err)
+		assert.Zero(t, total)
+		assert.Empty(t, tasks)
+	})
+
+	t.Run("分页切片不影响真实总数", func(t *testing.T) {
+		tasks, total, err := adapter.ListTodoTasks(ctx, domain.TodoQueryReq{Username: "leader_zhang", Offset: 2, Limit: 1})
+		require.NoError(t, err)
+		assert.Equal(t, int64(3), total)
+		assert.Len(t, tasks, 1)
+	})
+
+	for _, asc := range []bool{false, true} {
+		name := "默认按创建时间降序"
+		if asc {
+			name = "升序方向被透传到底层引擎"
+		}
+		t.Run(name, func(t *testing.T) {
+			tasks, _, err := adapter.ListTodoTasks(ctx, domain.TodoQueryReq{
+				Username:  "leader_zhang",
+				SortByAsc: asc,
+				Limit:     10,
+			})
+			require.NoError(t, err)
+			require.Len(t, tasks, 3)
+			times := lo.Map(tasks, func(item domain.TodoTask, _ int) time.Time { return item.CreateTime })
+			assert.True(t, sort.SliceIsSorted(times, func(i, j int) bool {
+				if asc {
+					return times[i].Before(times[j])
+				}
+				return times[i].After(times[j])
+			}))
+		})
+	}
+}
+
+func TestFlowxAdapter_GetActiveReject_Lifecycle(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. 初始化 FlowX 内存引擎
+	store := flowxMem.NewStorage()
+	coreEngine := flowx.NewEngine(store)
+	adapter := NewEngine(coreEngine, nil)
+
+	// 2. 部署流程：开始 -> 提单人录入 -> 主管审批 -> 结束
+	_, err := adapter.Deploy(ctx, flowxModel.ProcessDefinition{
+		Key:  "wf_reject_test",
+		Name: "驳回闭环测试流程",
+		Nodes: []flowxModel.NodeSpec{
+			{ID: "start", Type: flowxModel.NodeStart},
+			{ID: "submitter", Name: "提单人录入", Type: flowxModel.NodeApproval, Assignees: []string{"alice"}},
+			{ID: "auditor", Name: "主管审批", Type: flowxModel.NodeApproval, Assignees: []string{"bob"}},
+			{ID: "end", Type: flowxModel.NodeEnd},
+		},
+		Edges: []flowxModel.EdgeSpec{
+			{Source: "start", Target: "submitter"},
+			{Source: "submitter", Target: "auditor"},
+			{Source: "auditor", Target: "end"},
+		},
+	})
+	require.NoError(t, err)
+
+	// 3. 启动流程
+	instID, err := coreEngine.Start(ctx, flowx.StartReq{
+		Key:     "wf_reject_test",
+		Starter: "alice",
+	})
+	require.NoError(t, err)
+	instDomainID := domain.NewID(instID)
+
+	// 此时未发生驳回，GetActiveReject 必须为 nil
+	rejectSnap, err := adapter.GetActiveReject(ctx, instDomainID)
+	require.NoError(t, err)
+	assert.Nil(t, rejectSnap)
+
+	// 4. 提单人 alice 提交通过
+	allTasks, err := coreEngine.ListTasksByInstance(ctx, instID)
+	require.NoError(t, err)
+	submitTask, found := lo.Find(allTasks, func(t *flowxModel.Task) bool {
+		return t.NodeID == "submitter" && t.Status == flowxModel.TaskPending
+	})
+	require.True(t, found)
+
+	err = adapter.Pass(ctx, domain.TaskPassReq{
+		EngineType: domain.EngineTypeFlowx,
+		TaskId:     domain.NewID(submitTask.ID),
+		Operator:   "alice",
+		Comment:    "提交申请",
+	})
+	require.NoError(t, err)
+
+	// 5. 主管 bob 驳回回到提单人环节
+	allTasks, err = coreEngine.ListTasksByInstance(ctx, instID)
+	require.NoError(t, err)
+	auditTask, found := lo.Find(allTasks, func(t *flowxModel.Task) bool {
+		return t.NodeID == "auditor" && t.Status == flowxModel.TaskPending
+	})
+	require.True(t, found)
+
+	err = adapter.Reject(ctx, domain.TaskRejectReq{
+		EngineType:   domain.EngineTypeFlowx,
+		TaskId:       domain.NewID(auditTask.ID),
+		Operator:     "bob",
+		Comment:      "资料不全，请重新填写",
+		TargetNodeId: "submitter",
+	})
+	require.NoError(t, err)
+
+	// 6. 验证处于驳回重审待办中，GetActiveReject 正确返回快照
+	rejectSnap, err = adapter.GetActiveReject(ctx, instDomainID)
+	require.NoError(t, err)
+	require.NotNil(t, rejectSnap)
+	assert.Equal(t, "auditor", rejectSnap.NodeID)
+	assert.Equal(t, "主管审批", rejectSnap.NodeName)
+	assert.Equal(t, "bob", rejectSnap.Operator)
+	assert.Equal(t, "资料不全，请重新填写", rejectSnap.Comment)
+	assert.NotEmpty(t, rejectSnap.FinishTime)
+
+	// 7. 提单人 alice 重新修改后再次提交通过（走回来了）
+	allTasks, err = coreEngine.ListTasksByInstance(ctx, instID)
+	require.NoError(t, err)
+	newSubmitTask, found := lo.Find(allTasks, func(t *flowxModel.Task) bool {
+		return t.NodeID == "submitter" && t.Status == flowxModel.TaskPending
+	})
+	require.True(t, found)
+
+	err = adapter.Pass(ctx, domain.TaskPassReq{
+		EngineType: domain.EngineTypeFlowx,
+		TaskId:     domain.NewID(newSubmitTask.ID),
+		Operator:   "alice",
+		Comment:    "已补全材料重新提交",
+	})
+	require.NoError(t, err)
+
+	// 8. 验证走回来后，驳回快照自动消隐（返回 nil）
+	rejectSnapAfterAdvance, err := adapter.GetActiveReject(ctx, instDomainID)
+	require.NoError(t, err)
+	assert.Nil(t, rejectSnapAfterAdvance, "流程已被提单人响应并重新向前推进，旧驳回横幅必须自动消隐")
 }

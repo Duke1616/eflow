@@ -65,6 +65,7 @@ func (l *FlowxNotificationListener) InterestIn() []flowx.EventType {
 		flowx.EventProcessStarted, // 流程实例启动 -> 触发发起人撤单卡片
 		flowx.EventTaskCreated,    // 审批任务创建 -> 触发审批人待办审批卡片
 		flowx.EventNodeEntered,    // 节点进入 -> 触发抄送通知或群通知
+		flowx.EventTaskRejected,   // 审批任务驳回 -> 触发发起人驳回通知卡片
 	}
 }
 
@@ -209,7 +210,32 @@ func (l *FlowxNotificationListener) handleEvent(safeCtx context.Context, evt flo
 
 	case flowx.EventNodeEntered:
 		l.handleNodeEntered(safeCtx, instanceKey, ticket, wf, evt)
+
+	case flowx.EventTaskRejected:
+		l.handleTaskRejected(safeCtx, instanceKey, ticket, wf, evt)
 	}
+}
+
+func (l *FlowxNotificationListener) handleTaskRejected(ctx context.Context, instanceKey string, ticket domain.Ticket, wf domain.Workflow, evt flowx.Event) {
+	if evt.Task == nil {
+		return
+	}
+
+	rejectTime := ""
+	if !evt.Task.FinishTime.IsZero() {
+		rejectTime = evt.Task.FinishTime.Format("2006-01-02 15:04:05")
+	}
+	ticket.LatestReject = &domain.LatestReject{
+		RejectedBy:     evt.Task.Assignee,
+		RejectedByName: evt.Task.Assignee,
+		NodeID:         evt.Task.NodeID,
+		NodeName:       evt.Task.NodeName,
+		Reason:         evt.Task.Comment,
+		RejectedAt:     rejectTime,
+	}
+
+	info := l.buildNotificationInfo(strategy.Start, instanceKey, ticket, wf, evt.Task.NodeID, evt.Task.NodeName, []string{ticket.CreateBy})
+	l.sendSafe(ctx, info, "工单审批驳回通知")
 }
 
 func (l *FlowxNotificationListener) handleProcessStarted(ctx context.Context, instanceKey string, ticket domain.Ticket, wf domain.Workflow, evt flowx.Event) {

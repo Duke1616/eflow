@@ -101,8 +101,8 @@ type IProcessOperator interface {
 	GetInstance(ctx context.Context, instanceID string) (*model.Instance, error)
 	// Transfer 将当前审批任务转签/委托指派给新目标用户
 	Transfer(ctx context.Context, taskID string, targetUsers []string) error
-	// ListPendingTasks 分页查询指定处理人的未办结待办任务列表
-	ListPendingTasks(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error)
+	// ListPendingTasks 按条件分页查询未办结待办任务，按创建时间有序返回，并附带该条件下的真实总数
+	ListPendingTasks(ctx context.Context, query model.PendingTaskQuery) ([]*model.Task, int64, error)
 	// ListPendingTasksByInstances 批量拉取多个流程实例当前挂起的未办结审批任务（单次 SQL 批量检索）
 	ListPendingTasksByInstances(ctx context.Context, instanceIDs []string) ([]*model.Task, error)
 	// ListTasksByInstance 获取指定流程实例下的全部流转与历史任务列表
@@ -113,6 +113,8 @@ type IProcessOperator interface {
 	GetDefinition(ctx context.Context, key string, version int) (model.ProcessDefinition, error)
 	// GenInstanceID 预分配符合引擎规范的流程实例全局唯一标识
 	GenInstanceID(procKey string) string
+	// GetRejectTargets 查询指定任务允许驳回的目标节点集合（包含起点与历史已流转审批节点）
+	GetRejectTargets(ctx context.Context, taskID string) ([]model.NodeSpec, error)
 }
 
 // IProcessAdmin 流程定义部署与组件注册管理视角接口，供初始化、后台管理或运维脚手架使用
@@ -629,14 +631,29 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 		if !tn.CanRejectTo() {
 			return fmt.Errorf("%w: 驳回目标必须是人工审批或提单节点", ErrInvalidTargetNode)
 		}
+
+		// 防御校验：指定的驳回目标必须属于当前流转实际可达的合法候选（防止伪造请求向未走过的分支或跳过节点驳回）
+		validTargets, err := session.Plan().FindAllUpstreamRejectTargets(task.NodeID, session.AllTasks())
+		if err != nil {
+			return fmt.Errorf("推导合法驳回目标失败: %w", err)
+		}
+		if !lo.SomeBy(validTargets, func(item model.NodeSpec) bool { return item.ID == req.TargetNodeID }) {
+			return fmt.Errorf("%w: 节点 [%s] 未在当前实际执行路径中审批通过，不可作为驳回目标", ErrInvalidTargetNode, req.TargetNodeID)
+		}
+
 		targetNodes = []model.NodeSpec{tn}
 	} else {
 		nodes, err := session.Plan().FindUpstreamRejectNodes(task.NodeID, session.AllTasks())
-		if err != nil || len(nodes) == 0 {
+		if err != nil {
+			// 回溯失败属于拓扑异常，必须中断并回滚；严禁降级为终态驳回，否则工单侧收不到事件将永久滞留流转中
+			return fmt.Errorf("回溯上游驳回目标节点失败 [node_id=%s]: %w", task.NodeID, err)
+		}
+		if len(nodes) == 0 {
 			session.Instance().Reject() // 无可用上游审批节点，流程置为终态 Rejected
 			if err := session.SaveInstance(ctx); err != nil {
 				return err
 			}
+			e.publisher.Publish(ctx, NewProcessEvent(EventProcessRejected, session.Instance(), req.Operator, req.Comment))
 			return session.Flush(ctx)
 		}
 		targetNodes = nodes
@@ -771,9 +788,9 @@ func (e *flowEngine) GetTimeline(ctx context.Context, instanceID string) ([]mode
 	return buildTimelineFromTasks(allTasks), nil
 }
 
-// ListPendingTasks 分页查询指定处理人的未办结待办任务列表
-func (e *flowEngine) ListPendingTasks(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
-	return e.storage.ListPendingTasksByAssignee(ctx, assignee, offset, limit)
+// ListPendingTasks 按条件分页查询未办结待办任务列表
+func (e *flowEngine) ListPendingTasks(ctx context.Context, query model.PendingTaskQuery) ([]*model.Task, int64, error) {
+	return e.storage.ListPendingTasks(ctx, query)
 }
 
 // ListPendingTasksByInstances 批量拉取多个流程实例当前挂起的未办结审批任务（单次 SQL 批量检索）
@@ -878,4 +895,19 @@ func resolveNodeAggregateStatus(tasks []*model.Task) int {
 
 	// 5. 兜底返回最新批次的最后一个任务状态
 	return int(currentTasks[len(currentTasks)-1].Status)
+}
+
+// GetRejectTargets 查询指定任务允许驳回的目标节点集合（包含起点与历史已流转审批节点）
+func (e *flowEngine) GetRejectTargets(ctx context.Context, taskID string) ([]model.NodeSpec, error) {
+	task, inst, err := e.loadAndValidateTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("加载任务失败: %w", err)
+	}
+
+	session, err := e.newSessionForInstance(ctx, inst)
+	if err != nil {
+		return nil, fmt.Errorf("加载流程会话失败: %w", err)
+	}
+
+	return session.Plan().FindAllUpstreamRejectTargets(task.NodeID, session.AllTasks())
 }

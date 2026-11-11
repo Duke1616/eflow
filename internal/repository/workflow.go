@@ -134,6 +134,7 @@ func (repo *workflowRepository) CountByKeyword(ctx context.Context, keyword stri
 // --- Snapshot 流程版本快照仓储实现 ---
 
 func (repo *workflowRepository) CreateSnapshot(ctx context.Context, workflow domain.Workflow, processID, processVersion int) error {
+	policy := workflow.ResolveFlowPolicy()
 	return repo.dao.CreateSnapshot(ctx, dao.Snapshot{
 		WorkflowId:     workflow.Id,
 		ProcessId:      processID,
@@ -144,6 +145,10 @@ func (repo *workflowRepository) CreateSnapshot(ctx context.Context, workflow dom
 			Val:   workflow.FlowData,
 			Valid: len(workflow.FlowData) > 0,
 		},
+		FlowPolicy: sqlx.JsonField[domain.FlowPolicy]{
+			Val:   policy,
+			Valid: true,
+		},
 	})
 }
 
@@ -153,13 +158,16 @@ func (repo *workflowRepository) FindSnapshot(ctx context.Context, processID, pro
 		return domain.Workflow{}, err
 	}
 
-	return domain.Workflow{
+	wf := domain.Workflow{
 		Id:         s.WorkflowId,
 		ProcessId:  s.ProcessId,
 		EngineType: domain.EngineType(s.EngineType),
 		Name:       s.Name,
 		FlowData:   s.FlowData.Val,
-	}, nil
+		FlowPolicy: s.FlowPolicy.Val,
+	}
+	wf.FlowPolicy = wf.ResolveFlowPolicy()
+	return wf, nil
 }
 
 func (repo *workflowRepository) FindSnapshotByWorkflowVersion(ctx context.Context, workflowID int64, engineType domain.EngineType, version int) (domain.Workflow, error) {
@@ -168,13 +176,16 @@ func (repo *workflowRepository) FindSnapshotByWorkflowVersion(ctx context.Contex
 		return domain.Workflow{}, err
 	}
 
-	return domain.Workflow{
+	wf := domain.Workflow{
 		Id:         s.WorkflowId,
 		ProcessId:  s.ProcessId,
 		EngineType: domain.EngineType(s.EngineType),
 		Name:       s.Name,
 		FlowData:   s.FlowData.Val,
-	}, nil
+		FlowPolicy: s.FlowPolicy.Val,
+	}
+	wf.FlowPolicy = wf.ResolveFlowPolicy()
+	return wf, nil
 }
 
 func (repo *workflowRepository) GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...domain.EngineType) (int, error) {
@@ -187,6 +198,7 @@ func (repo *workflowRepository) GetMaxSnapshotVersion(ctx context.Context, workf
 // --- 实体与领域模型双向防腐转换辅助函数 ---
 
 func (repo *workflowRepository) toEntity(req domain.Workflow) dao.Workflow {
+	policy := req.ResolveFlowPolicy()
 	return dao.Workflow{
 		Id:           req.Id,
 		TemplateId:   req.TemplateId,
@@ -202,11 +214,15 @@ func (repo *workflowRepository) toEntity(req domain.Workflow) dao.Workflow {
 			Val:   req.FlowData,
 			Valid: len(req.FlowData) > 0,
 		},
+		FlowPolicy: sqlx.JsonField[domain.FlowPolicy]{
+			Val:   policy,
+			Valid: true,
+		},
 	}
 }
 
 func (repo *workflowRepository) toDomain(w dao.Workflow) domain.Workflow {
-	return domain.Workflow{
+	wf := domain.Workflow{
 		Id:           w.Id,
 		TemplateId:   w.TemplateId,
 		Name:         w.Name,
@@ -218,5 +234,8 @@ func (repo *workflowRepository) toDomain(w dao.Workflow) domain.Workflow {
 		NotifyMethod: domain.NotifyMethod(w.NotifyMethod),
 		IsNotify:     w.IsNotify,
 		FlowData:     w.FlowData.Val,
+		FlowPolicy:   w.FlowPolicy.Val,
 	}
+	wf.FlowPolicy = wf.ResolveFlowPolicy()
+	return wf
 }

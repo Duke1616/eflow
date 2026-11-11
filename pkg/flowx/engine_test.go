@@ -512,7 +512,15 @@ func (s *EngineTestSuite) TestReject() {
 				m.EXPECT().GetTaskForUpdate(gomock.Any(), "task_dir_1").Return(currTask, nil)
 				m.EXPECT().GetInstanceForUpdate(gomock.Any(), "inst_2").Return(inst, nil)
 				m.EXPECT().UpdateTask(gomock.Any(), gomock.Any()).Return(nil)
-				m.EXPECT().ListTasksByInstance(gomock.Any(), "inst_2").Return([]*model.Task{currTask, siblingTask}, nil)
+				passedLeaderTask := &model.Task{
+					ID:         "task_leader_1",
+					InstanceID: "inst_2",
+					NodeID:     "leader",
+					BatchCode:  1,
+					Assignee:   "leader_tom",
+					Status:     model.TaskPassed,
+				}
+				m.EXPECT().ListTasksByInstance(gomock.Any(), "inst_2").Return([]*model.Task{passedLeaderTask, currTask, siblingTask}, nil)
 				m.EXPECT().UpdateTasksStatus(gomock.Any(), []string{"task_dir_2"}, model.TaskCancelled).Return(nil)
 				m.EXPECT().GetDefinition(gomock.Any(), "two_step", 1).Return(twoStepDef, nil)
 				m.EXPECT().SaveTasks(gomock.Any(), gomock.Len(1)).

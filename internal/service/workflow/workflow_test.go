@@ -11,8 +11,8 @@ import (
 	"github.com/Duke1616/eflow/internal/repository"
 	repomocks "github.com/Duke1616/eflow/internal/repository/mocks"
 	"github.com/Duke1616/eflow/internal/service/engine"
-	enginemocks "github.com/Duke1616/eflow/internal/service/engine/mocks"
 	flowxAdapter "github.com/Duke1616/eflow/internal/service/engine/flowx"
+	enginemocks "github.com/Duke1616/eflow/internal/service/engine/mocks"
 	"github.com/Duke1616/eflow/pkg/flowx"
 	"github.com/Duke1616/eflow/pkg/flowx/storage/memory"
 	"github.com/stretchr/testify/assert"
@@ -125,7 +125,7 @@ func TestService_Deploy(t *testing.T) {
 		name        string
 		workflow    domain.Workflow
 		mockRepo    func(ctrl *gomock.Controller) repository.IWorkflowRepository
-		mockAdapter func(ctrl *gomock.Controller) engine.IEngine
+		mockAdapter func(ctrl *gomock.Controller) engine.IDriver
 		wantErr     string
 	}{
 		{
@@ -142,7 +142,7 @@ func TestService_Deploy(t *testing.T) {
 				repo.EXPECT().CreateSnapshot(gomock.Any(), gomock.Any(), 1001, 1).Return(nil)
 				return repo
 			},
-			mockAdapter: func(ctrl *gomock.Controller) engine.IEngine {
+			mockAdapter: func(ctrl *gomock.Controller) engine.IDriver {
 				return nil
 			},
 			wantErr: "",
@@ -161,10 +161,10 @@ func TestService_Deploy(t *testing.T) {
 				repo.EXPECT().CreateSnapshot(gomock.Any(), gomock.Any(), 999, 1).Return(nil)
 				return repo
 			},
-			mockAdapter: func(ctrl *gomock.Controller) engine.IEngine {
-				adapter := enginemocks.NewMockIEngine(ctrl)
+			mockAdapter: func(ctrl *gomock.Controller) engine.IDriver {
+				adapter := enginemocks.NewMockIDriver(ctrl)
 				adapter.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
-				adapter.EXPECT().Deploy(gomock.Any(), domain.EngineTypeEasyFlow, gomock.AssignableToTypeOf(&model.Process{})).Return(domain.DeployInfo{ProcessID: 999, Version: 1}, nil)
+				adapter.EXPECT().Deploy(gomock.Any(), gomock.AssignableToTypeOf(&model.Process{})).Return(domain.DeployInfo{ProcessID: 999, Version: 1}, nil)
 				return adapter
 			},
 			wantErr: "",
@@ -183,10 +183,10 @@ func TestService_Deploy(t *testing.T) {
 				repo.EXPECT().CreateSnapshot(gomock.Any(), gomock.Any(), 888, 2).Return(nil)
 				return repo
 			},
-			mockAdapter: func(ctrl *gomock.Controller) engine.IEngine {
-				adapter := enginemocks.NewMockIEngine(ctrl)
+			mockAdapter: func(ctrl *gomock.Controller) engine.IDriver {
+				adapter := enginemocks.NewMockIDriver(ctrl)
 				adapter.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
-				adapter.EXPECT().Deploy(gomock.Any(), domain.EngineTypeEasyFlow, gomock.AssignableToTypeOf(&model.Process{})).Return(domain.DeployInfo{ProcessID: 888, Version: 2}, nil)
+				adapter.EXPECT().Deploy(gomock.Any(), gomock.AssignableToTypeOf(&model.Process{})).Return(domain.DeployInfo{ProcessID: 888, Version: 2}, nil)
 				return adapter
 			},
 			wantErr: "",
@@ -202,7 +202,7 @@ func TestService_Deploy(t *testing.T) {
 			mockRepo: func(ctrl *gomock.Controller) repository.IWorkflowRepository {
 				return repomocks.NewMockIWorkflowRepository(ctrl)
 			},
-			mockAdapter: func(ctrl *gomock.Controller) engine.IEngine {
+			mockAdapter: func(ctrl *gomock.Controller) engine.IDriver {
 				return nil
 			},
 			wantErr: "不支持的流程引擎类型: unknown-engine",
@@ -219,7 +219,7 @@ func TestService_Deploy(t *testing.T) {
 			flowxEngine := flowx.NewEngine(memory.NewStorage())
 			flowxDrv := flowxAdapter.NewEngine(flowxEngine, nil)
 
-			adapters := []engine.IEngine{flowxDrv}
+			adapters := []engine.IDriver{flowxDrv}
 			if tc.mockAdapter != nil {
 				if a := tc.mockAdapter(ctrl); a != nil {
 					adapters = append(adapters, a)
@@ -246,8 +246,7 @@ func TestService_GetHighlightedGraph(t *testing.T) {
 	defer ctrl.Finish()
 
 	repo := repomocks.NewMockIWorkflowRepository(ctrl)
-	adapterMock := enginemocks.NewMockIEngine(ctrl)
-
+	adapterMock := enginemocks.NewMockIDriver(ctrl)
 	adapterMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
 
 	// 1. Mock Find (GetHighlightedGraph + FindInstanceFlow 共调用 2 次)
@@ -256,7 +255,7 @@ func TestService_GetHighlightedGraph(t *testing.T) {
 	}, nil).Times(2)
 
 	// 2. Mock GetInstanceExecutionView
-	adapterMock.EXPECT().GetInstanceExecutionView(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID(201), uint8(1)).Return(domain.InstanceExecutionView{
+	adapterMock.EXPECT().GetInstanceExecutionView(gomock.Any(), domain.NewID(201)).Return(domain.InstanceExecutionView{
 		ProcessID:      101,
 		ProcessVersion: 1,
 		TraversedEdges: map[string][]string{
@@ -290,7 +289,7 @@ func TestService_GetHighlightedGraph(t *testing.T) {
 	dispatcher := engine.NewEngineDispatcher(adapterMock)
 	svc := NewWorkflowService(repo, dispatcher, nil)
 
-	highlightedFlow, err := svc.GetHighlightedGraph(context.Background(), 10, domain.NewID(201), domain.Status(1))
+	highlightedFlow, err := svc.GetHighlightedGraph(context.Background(), 10, domain.NewID(201))
 	assert.NoError(t, err)
 
 	edges, ok := highlightedFlow.FlowData["edges"].([]any)

@@ -234,7 +234,7 @@ func (h *larkCallbackHandler) progress(ctx context.Context, ticketId int64, user
 		return err
 	}
 
-	view, err := h.engine.GetInstanceExecutionView(taskCtx, ticketDetail.Process.EngineType, ticketDetail.Process.InstanceID, ticketDetail.Status.ToUint8())
+	view, err := h.engine.GetInstanceExecutionView(taskCtx, ticketDetail.Process.EngineType, ticketDetail.Process.InstanceID)
 	if err != nil {
 		return err
 	}

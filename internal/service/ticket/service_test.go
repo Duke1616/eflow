@@ -9,6 +9,7 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	repomocks "github.com/Duke1616/eflow/internal/repository/mocks"
 	enginemocks "github.com/Duke1616/eflow/internal/service/engine/mocks"
+	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
 	workflowmocks "github.com/Duke1616/eflow/internal/service/workflow/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -388,13 +389,16 @@ func TestTicketService_Reject(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name     string
-		taskId   string
-		operator string
-		isAdmin  bool
-		comment  string
-		mock     func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine)
-		wantErr  error
+		name         string
+		taskId       string
+		operator     string
+		isAdmin      bool
+		comment      string
+		targetNodeId string
+		terminate    bool
+		mock         func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine)
+		mockWf       func(ctrl *gomock.Controller) workflowSvc.Service
+		wantErr      error
 	}{
 		{
 			name:     "任务已提前处理拦截驳回",
@@ -465,6 +469,49 @@ func TestTicketService_Reject(t *testing.T) {
 			},
 			wantErr: domain.ErrTaskUnauthorized,
 		},
+		{
+			name:         "指定驳回目标节点与终止流程成功透传",
+			taskId:       "204",
+			operator:     "auditor1",
+			isAdmin:      false,
+			comment:      "一票否决终止",
+			targetNodeId: "Start",
+			terminate:    true,
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
+				dispatcher := enginemocks.NewMockIEngine(ctrl)
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("204")).Return(domain.TaskContext{
+					EngineType:        domain.EngineTypeEasyFlow,
+					TaskID:            domain.NewID("204"),
+					ProcessInstanceID: domain.NewID(1),
+					Assignee:          "auditor1",
+					IsFinished:        false,
+				}, nil)
+				dispatcher.EXPECT().Reject(gomock.Any(), domain.TaskRejectReq{
+					EngineType:   domain.EngineTypeEasyFlow,
+					TaskId:       domain.NewID("204"),
+					Operator:     "auditor1",
+					Comment:      "一票否决终止",
+					TargetNodeId: "Start",
+					Terminate:    true,
+				}).Return(nil)
+				return repo, dispatcher
+			},
+			mockWf: func(ctrl *gomock.Controller) workflowSvc.Service {
+				wfSvc := workflowmocks.NewMockIWorkflowCoreService(ctrl)
+				wfSvc.EXPECT().Find(gomock.Any(), int64(10)).Return(domain.Workflow{
+					Id:         10,
+					EngineType: domain.EngineTypeEasyFlow,
+					FlowPolicy: domain.FlowPolicy{
+						AllowReject: true,
+						RejectModes: []domain.RejectMode{domain.RejectModeTerminate},
+					},
+				}, nil).AnyTimes()
+				return wfSvc
+			},
+			wantErr: nil,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -472,10 +519,14 @@ func TestTicketService_Reject(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
+			var wf workflowSvc.Service
+			if tc.mockWf != nil {
+				wf = tc.mockWf(ctrl)
+			}
 			repo, dispatcherStub := tc.mock(ctrl)
-			svc := NewService(repo, nil, dispatcherStub, nil, nil)
+			svc := NewService(repo, nil, dispatcherStub, wf, nil)
 
-			err := svc.Reject(context.Background(), 1001, tc.taskId, tc.operator, tc.isAdmin, tc.comment)
+			err := svc.Reject(context.Background(), 1001, tc.taskId, tc.operator, tc.isAdmin, tc.comment, tc.targetNodeId, tc.terminate)
 			if tc.wantErr != nil {
 				require.Error(t, err)
 				assert.True(t, errors.Is(err, tc.wantErr))
@@ -495,6 +546,14 @@ func TestTicketService_Transfer(t *testing.T) {
 			InstanceID: domain.NewID(1),
 		},
 	}
+	defaultFlowxTicket := domain.Ticket{
+		Id:         1001,
+		WorkflowId: 10,
+		Process: domain.Process{
+			EngineType: domain.EngineTypeFlowx,
+			InstanceID: domain.NewID("proc_1"),
+		},
+	}
 
 	testCases := []struct {
 		name        string
@@ -503,6 +562,7 @@ func TestTicketService_Transfer(t *testing.T) {
 		isAdmin     bool
 		targetUsers []string
 		mock        func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine)
+		mockWf      func(ctrl *gomock.Controller) workflowSvc.Service
 		wantErr     error
 	}{
 		{
@@ -545,20 +605,31 @@ func TestTicketService_Transfer(t *testing.T) {
 			targetUsers: []string{"bob"},
 			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine) {
 				repo := repomocks.NewMockTicketRepository(ctrl)
-				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultEasyTicket, nil).AnyTimes()
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(defaultFlowxTicket, nil).AnyTimes()
 				dispatcher := enginemocks.NewMockIEngine(ctrl)
-				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, domain.NewID("303")).Return(domain.TaskContext{
-					EngineType: domain.EngineTypeEasyFlow,
-					TaskID:     domain.NewID(303),
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("303")).Return(domain.TaskContext{
+					EngineType: domain.EngineTypeFlowx,
+					TaskID:     domain.NewID("303"),
 					Assignee:   "auditor1",
 					IsFinished: false,
 				}, nil)
 				dispatcher.EXPECT().Transfer(gomock.Any(), domain.TaskTransferReq{
-					EngineType:  domain.EngineTypeEasyFlow,
+					EngineType:  domain.EngineTypeFlowx,
 					TaskId:      domain.NewID("303"),
 					TargetUsers: []string{"bob"},
 				}).Return(nil)
 				return repo, dispatcher
+			},
+			mockWf: func(ctrl *gomock.Controller) workflowSvc.Service {
+				wfSvc := workflowmocks.NewMockIWorkflowCoreService(ctrl)
+				wfSvc.EXPECT().Find(gomock.Any(), int64(10)).Return(domain.Workflow{
+					Id:         10,
+					EngineType: domain.EngineTypeFlowx,
+					FlowPolicy: domain.FlowPolicy{
+						AllowTransfer: true,
+					},
+				}, nil).AnyTimes()
+				return wfSvc
 			},
 			wantErr: nil,
 		},
@@ -569,8 +640,12 @@ func TestTicketService_Transfer(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
+			var wf workflowSvc.Service
+			if tc.mockWf != nil {
+				wf = tc.mockWf(ctrl)
+			}
 			repo, dispatcherStub := tc.mock(ctrl)
-			svc := NewService(repo, nil, dispatcherStub, nil, nil)
+			svc := NewService(repo, nil, dispatcherStub, wf, nil)
 
 			err := svc.Transfer(context.Background(), 1001, tc.taskId, tc.operator, tc.isAdmin, tc.targetUsers)
 			if tc.wantErr != nil {
@@ -587,6 +662,9 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 	defaultEasyTicket := domain.Ticket{
 		Id:         1001,
 		WorkflowId: 10,
+		Data: domain.TicketData{
+			"server_ip": "10.0.0.1",
+		},
 		Process: domain.Process{
 			EngineType: domain.EngineTypeEasyFlow,
 			InstanceID: domain.NewID(1),
@@ -704,12 +782,13 @@ func TestTicketService_GetTaskFormConfig(t *testing.T) {
 			repo, dispatcherStub, wfStub := tc.mock(ctrl)
 			svc := NewService(repo, nil, dispatcherStub, wfStub, nil)
 
-			fields, err := svc.GetTaskFormConfig(context.Background(), 1001, tc.taskId, tc.workflowId)
+			cfg, err := svc.GetTaskFormConfig(context.Background(), 1001, tc.taskId, tc.workflowId)
 			if tc.wantErr {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
-				assert.Len(t, fields, tc.wantLen)
+				assert.Len(t, cfg.Fields, tc.wantLen)
+				assert.Equal(t, "10.0.0.1", cfg.Values["server_ip"])
 			}
 		})
 	}
@@ -784,6 +863,79 @@ func TestFormatVariableValue(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.expected, formatVariableValue(tc.input))
+		})
+	}
+}
+
+func TestTicketService_GetRejectTargets(t *testing.T) {
+	testCases := []struct {
+		name    string
+		mock    func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine)
+		mockWf  func(ctrl *gomock.Controller) workflowSvc.Service
+		wantLen int
+		wantErr bool
+	}{
+		{
+			name: "成功查询到可驳回目标节点",
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(domain.Ticket{
+					Id:         1001,
+					WorkflowId: 10,
+					Process: domain.Process{
+						EngineType: domain.EngineTypeFlowx,
+						InstanceID: domain.NewID("proc_1"),
+					},
+				}, nil)
+				dispatcher := enginemocks.NewMockIEngine(ctrl)
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("task_1")).Return(domain.TaskContext{
+					EngineType:        domain.EngineTypeFlowx,
+					TaskID:            domain.NewID("task_1"),
+					ProcessInstanceID: domain.NewID("proc_1"),
+				}, nil)
+				dispatcher.EXPECT().GetRejectTargets(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("task_1")).Return([]domain.RejectTarget{
+					{NodeID: "Start", NodeName: "发起人 (重新填报)", NodeType: "START", IsStarter: true},
+					{NodeID: "node_audit", NodeName: "主管审批", NodeType: "APPROVAL", IsStarter: false},
+				}, nil)
+				return repo, dispatcher
+			},
+			mockWf: func(ctrl *gomock.Controller) workflowSvc.Service {
+				wfSvc := workflowmocks.NewMockIWorkflowCoreService(ctrl)
+				wfSvc.EXPECT().Find(gomock.Any(), int64(10)).Return(domain.Workflow{
+					Id:         10,
+					EngineType: domain.EngineTypeFlowx,
+					FlowPolicy: domain.FlowPolicy{
+						AllowReject: true,
+						RejectModes: []domain.RejectMode{domain.RejectModeStarter, domain.RejectModeHistory},
+					},
+				}, nil).AnyTimes()
+				return wfSvc
+			},
+			wantLen: 2,
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			var wf workflowSvc.Service
+			if tc.mockWf != nil {
+				wf = tc.mockWf(ctrl)
+			}
+			repo, dispatcher := tc.mock(ctrl)
+			svc := NewService(repo, nil, dispatcher, wf, nil)
+
+			targets, err := svc.GetRejectTargets(context.Background(), 1001, "task_1")
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Len(t, targets, tc.wantLen)
+				assert.True(t, targets[0].IsStarter)
+			}
 		})
 	}
 }

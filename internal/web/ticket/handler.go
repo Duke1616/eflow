@@ -128,6 +128,42 @@ func (h *Handler) PrivateRoutes(server *gin.Engine) {
 		Needs(permission.Template.Get, permission.Manager.Get).
 		Bind(ginx.B[TaskFormConfigReq](h.GetTaskFormConfig)),
 	)
+	g.POST("/task/reject_targets", h.Define("可驳回目标节点", "reject_targets").
+		Group("工单中心/工单详情").
+		Needs(permission.Template.Get, permission.Manager.Get).
+		Bind(ginx.B[RejectTargetsReq](h.GetRejectTargets)),
+	)
+}
+
+func (h *Handler) GetRejectTargets(ctx *ginx.Context, req RejectTargetsReq) (ginx.Result, error) {
+	if req.TicketId <= 0 {
+		return ginx.Result{Code: 400, Msg: "工单 ID 非法"}, nil
+	}
+	if req.TaskId.IsZero() {
+		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
+	}
+
+	targets, err := h.svc.GetRejectTargets(ctx.Context, req.TicketId, req.TaskId.String())
+	if err != nil {
+		if res, handled := handleTaskOperationError(err); res.Code != 500 {
+			return res, handled
+		}
+		return systemErrorResult, err
+	}
+
+	voTargets := lo.Map(targets, func(t domain.RejectTarget, _ int) RejectTargetVO {
+		return RejectTargetVO{
+			NodeID:    t.NodeID,
+			NodeName:  t.NodeName,
+			NodeType:  t.NodeType,
+			IsStarter: t.IsStarter,
+		}
+	})
+
+	return ginx.Result{
+		Data: voTargets,
+		Msg:  "获取可驳回目标节点成功",
+	}, nil
 }
 
 func (h *Handler) GetTaskFormConfig(ctx *ginx.Context, req TaskFormConfigReq) (ginx.Result, error) {
@@ -138,7 +174,7 @@ func (h *Handler) GetTaskFormConfig(ctx *ginx.Context, req TaskFormConfigReq) (g
 		return ginx.Result{Code: 400, Msg: "任务 ID 非法"}, nil
 	}
 
-	fields, err := h.svc.GetTaskFormConfig(ctx.Context, req.TicketId, req.TaskId.String(), req.WorkflowId)
+	cfg, err := h.svc.GetTaskFormConfig(ctx.Context, req.TicketId, req.TaskId.String(), req.WorkflowId)
 	if err != nil {
 		if res, handled := handleTaskOperationError(err); res.Code != 500 {
 			return res, handled
@@ -147,8 +183,11 @@ func (h *Handler) GetTaskFormConfig(ctx *ginx.Context, req TaskFormConfigReq) (g
 	}
 
 	return ginx.Result{
-		Data: fields,
-		Msg:  "获取任务表单配置成功",
+		Data: TaskFormConfigResp{
+			Fields: cfg.Fields,
+			Values: cfg.Values,
+		},
+		Msg: "获取任务表单配置成功",
 	}, nil
 }
 
@@ -231,6 +270,8 @@ func handleTaskOperationError(err error) (ginx.Result, error) {
 
 	// 2. 兼容历史遗留哨兵错误
 	switch {
+	case errors.Is(err, domain.ErrForbidden):
+		return ginx.Result{Code: 403, Msg: err.Error()}, nil
 	case errors.Is(err, domain.ErrTaskUnauthorized), errors.Is(err, domain.ErrTicketUnauthorized),
 		errors.Is(err, ratingSvc.ErrTicketNotRateable):
 		return ginx.Result{Code: 403, Msg: err.Error()}, nil
@@ -368,7 +409,7 @@ func (h *Handler) Reject(ctx *ginx.Context, req RejectOrderReq) (ginx.Result, er
 		return systemErrorResult, err
 	}
 
-	err = h.svc.Reject(ctx.Context, req.TicketId, req.TaskId.String(), user.Username, user.IsAdmin, req.Comment)
+	err = h.svc.Reject(ctx.Context, req.TicketId, req.TaskId.String(), user.Username, user.IsAdmin, req.Comment, req.TargetNodeId, req.Terminate)
 	if err != nil {
 		return handleTaskOperationError(err)
 	}
@@ -430,6 +471,19 @@ func (h *Handler) Detail(ctx *ginx.Context, req DetailProcessInstIdReq) (ginx.Re
 	if exists {
 		result.Rating = toRatingVO(rating)
 	}
+
+	// 聚合最新驳回快照（用于前端顶部警示横幅提示提单人修改）
+	if latestReject, auditErr := h.querySvc.GetLatestReject(ctx.Context, req.ProcessInstanceId); auditErr == nil && latestReject != nil {
+		result.LatestReject = &LatestRejectVO{
+			RejectedBy:     latestReject.RejectedBy,
+			RejectedByName: latestReject.RejectedByName,
+			NodeID:         latestReject.NodeID,
+			NodeName:       latestReject.NodeName,
+			Reason:         latestReject.Reason,
+			RejectedAt:     latestReject.RejectedAt,
+		}
+	}
+
 	return ginx.Result{Data: result}, nil
 }
 
@@ -529,6 +583,17 @@ func (h *Handler) toVoTicket(req domain.Ticket) Ticket {
 		procInstID = InstanceID(req.Process.InstanceID.String())
 	}
 
+	var policyVO *FlowPolicyVO
+	if req.FlowPolicy.AllowReject || req.FlowPolicy.AllowTransfer || len(req.FlowPolicy.RejectModes) > 0 {
+		policyVO = &FlowPolicyVO{
+			AllowTransfer: req.FlowPolicy.AllowTransfer,
+			AllowReject:   req.FlowPolicy.AllowReject,
+			RejectModes: lo.Map(req.FlowPolicy.RejectModes, func(src domain.RejectMode, _ int) string {
+				return string(src)
+			}),
+		}
+	}
+
 	return Ticket{
 		Id:                   req.Id,
 		EngineType:           req.Process.EngineType.String(),
@@ -544,6 +609,7 @@ func (h *Handler) toVoTicket(req domain.Ticket) Ticket {
 		RevokeReason:         req.RevokeReason,
 		ProcessStartError:    req.ProcessStartError,
 		ProcessStartAttempts: req.ProcessStartAttempts,
+		FlowPolicy:           policyVO,
 	}
 }
 

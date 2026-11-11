@@ -90,17 +90,6 @@ func (b *ProcessBuilder) Task(id, name, workerType string) *ProcessBuilder {
 	})
 }
 
-// TaskWithRetry 添加具备失败重试退避特性的自动化执行节点
-func (b *ProcessBuilder) TaskWithRetry(id, name, workerType string, retry model.RetryPolicy) *ProcessBuilder {
-	return b.addNode(model.NodeSpec{
-		ID:          id,
-		Name:        name,
-		Type:        model.NodeTask,
-		WorkerType:  workerType,
-		RetryPolicy: &retry,
-	})
-}
-
 // ExclusiveGateway 添加排他网关节点 (XOR / 或网关：首个满足短路，仅走单条分支)
 func (b *ProcessBuilder) ExclusiveGateway(id, name string) *ProcessBuilder {
 	return b.addNode(model.NodeSpec{

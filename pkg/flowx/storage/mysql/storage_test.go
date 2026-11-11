@@ -113,31 +113,53 @@ func TestMySQLStorage_DoTxInterfaceGuard(t *testing.T) {
 	require.NotNil(t, txStore)
 }
 
-func TestMySQLStorage_ListPendingTasksByAssigneeSQL(t *testing.T) {
-	db := newTestDryRunDB(t)
-	s := NewStorage(db)
+func TestMySQLStorage_ListPendingTasksSQL(t *testing.T) {
+	testCases := []struct {
+		name        string
+		query       model.PendingTaskQuery
+		wantContain []string
+		wantAbsent  []string
+	}{
+		{
+			name:        "指定审批人查询待办",
+			query:       model.PendingTaskQuery{Assignee: "leader_zhang"},
+			wantContain: []string{"SELECT * FROM `flow_task`", "flow_task.status = 0", "flow_task.assignee = 'leader_zhang'"},
+			wantAbsent:  []string{"flow_instance", "flow_definition"},
+		},
+		{
+			name:        "空审批人查询全部待办",
+			query:       model.PendingTaskQuery{},
+			wantContain: []string{"SELECT * FROM `flow_task`", "flow_task.status = 0"},
+			wantAbsent:  []string{"assignee", "flow_instance"},
+		},
+		{
+			name:        "流程名过滤经子查询回溯定义表_外层保持单表避免同名列覆盖",
+			query:       model.PendingTaskQuery{Assignee: "leader_zhang", ProcessName: "请假审批"},
+			wantContain: []string{"SELECT * FROM `flow_task`", "flow_task.instance_id IN (SELECT", "flow_instance AS fi", "flow_definition AS fd", "fd.proc_key = fi.proc_key", "fd.version = fi.version", "fd.name = '请假审批'"},
+			// 外层严禁出现 JOIN：flow_instance 与 flow_task 的 id/status/ctime 同名列会污染扫描结果
+			wantAbsent: []string{"JOIN flow_instance AS fi ON fi.id = flow_task.instance_id"},
+		},
+	}
 
-	t.Run("指定审批人查询待办", func(t *testing.T) {
-		sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
-			query := s.buildListPendingTasksQuery(tx, "leader_zhang")
-			var pos []FlowTaskPO
-			return query.Order("ctime DESC").Offset(0).Limit(10).Find(&pos)
-		})
-		assert.Contains(t, sql, "SELECT * FROM `flow_task`")
-		assert.Contains(t, sql, "status = 0")
-		assert.Contains(t, sql, "assignee = 'leader_zhang'")
-	})
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newTestDryRunDB(t)
+			s := NewStorage(db)
 
-	t.Run("空审批人查询全部待办", func(t *testing.T) {
-		sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
-			query := s.buildListPendingTasksQuery(tx, "")
-			var pos []FlowTaskPO
-			return query.Order("ctime DESC").Offset(0).Limit(10).Find(&pos)
+			sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+				query := s.buildListPendingTasksQuery(tx, tc.query)
+				var pos []FlowTaskPO
+				return query.Order("flow_task.ctime DESC").Offset(0).Limit(10).Find(&pos)
+			})
+
+			for _, want := range tc.wantContain {
+				assert.Contains(t, sql, want)
+			}
+			for _, absent := range tc.wantAbsent {
+				assert.NotContains(t, sql, absent)
+			}
 		})
-		assert.Contains(t, sql, "SELECT * FROM `flow_task`")
-		assert.Contains(t, sql, "status = 0")
-		assert.NotContains(t, sql, "assignee")
-	})
+	}
 }
 
 func TestMySQLStorage_UpdateTasksStatusSQL(t *testing.T) {

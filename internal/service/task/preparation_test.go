@@ -2,15 +2,19 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
+	"github.com/Duke1616/eflow/internal/client/eiam"
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	dispatchSvc "github.com/Duke1616/eflow/internal/service/dispatch"
 	templateSvc "github.com/Duke1616/eflow/internal/service/template"
+	ticketSvc "github.com/Duke1616/eflow/internal/service/ticket"
 	"github.com/stretchr/testify/require"
 )
 
@@ -417,4 +421,88 @@ func (s *runnerCatalogStub) FindByID(_ context.Context, id int64) (etaskclient.R
 		return runner, nil
 	}
 	return s.runner, nil
+}
+
+type stubUserClient struct {
+	eiam.IUserClient
+	user *userv1.User
+	err  error
+}
+
+func (s *stubUserClient) FindByUsername(_ context.Context, username string) (*userv1.User, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.user != nil {
+		return s.user, nil
+	}
+	return &userv1.User{Username: username}, nil
+}
+
+type stubTicketService struct {
+	ticketSvc.Service
+	forms []domain.FormValue
+}
+
+func (s *stubTicketService) ListTaskFormsByTicketID(_ context.Context, _ int64) ([]domain.FormValue, error) {
+	return s.forms, nil
+}
+
+func TestAssembleRuntimeArgsUserInfo(t *testing.T) {
+	testCases := []struct {
+		name         string
+		ticket       domain.Ticket
+		user         *userv1.User
+		userErr      error
+		wantUsername string
+		wantEmail    string
+	}{
+		{
+			name: "成功通过用户服务查询并注入完整 user_info JSON",
+			ticket: domain.Ticket{
+				Id:       1001,
+				CreateBy: "mock_user",
+				Data:     domain.TicketData{"cluster_name": "mock-cluster"},
+			},
+			user: &userv1.User{
+				Id:          101,
+				Username:    "mock_user",
+				DisplayName: "测试人员",
+				Email:       "mock_user@example.com",
+			},
+			wantUsername: "mock_user",
+			wantEmail:    "mock_user@example.com",
+		},
+		{
+			name: "远端服务异常时安全兜底生成包含 username 的基础结构",
+			ticket: domain.Ticket{
+				Id:       1002,
+				CreateBy: "zhangsan",
+				Data:     domain.TicketData{"cluster_name": "mock-cluster"},
+			},
+			userErr:      errors.New("network timeout"),
+			wantUsername: "zhangsan",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &taskService{
+				tickets: &stubTicketService{},
+				users:   &stubUserClient{user: tc.user, err: tc.userErr},
+			}
+
+			args, err := svc.assembleRuntimeArgs(context.Background(), tc.ticket)
+			require.NoError(t, err)
+			require.NotEmpty(t, args["user_info"])
+
+			var parsed map[string]any
+			err = json.Unmarshal([]byte(args["user_info"].(string)), &parsed)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantUsername, parsed["username"])
+			if tc.wantEmail != "" {
+				require.Equal(t, tc.wantEmail, parsed["email"])
+			}
+		})
+	}
 }

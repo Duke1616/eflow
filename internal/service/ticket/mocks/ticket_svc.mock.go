@@ -14,7 +14,7 @@ import (
 	reflect "reflect"
 
 	domain "github.com/Duke1616/eflow/internal/domain"
-	flowdsl "github.com/Duke1616/eflow/internal/pkg/flowdsl"
+	ticket "github.com/Duke1616/eflow/internal/service/ticket"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -57,18 +57,18 @@ func (mr *MockServiceMockRecorder) BindProcess(ctx, id, engineType, instanceID a
 }
 
 // CreateBizTicket mocks base method.
-func (m *MockService) CreateBizTicket(ctx context.Context, ticket domain.Ticket) (domain.Ticket, error) {
+func (m *MockService) CreateBizTicket(ctx context.Context, arg1 domain.Ticket) (domain.Ticket, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateBizTicket", ctx, ticket)
+	ret := m.ctrl.Call(m, "CreateBizTicket", ctx, arg1)
 	ret0, _ := ret[0].(domain.Ticket)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CreateBizTicket indicates an expected call of CreateBizTicket.
-func (mr *MockServiceMockRecorder) CreateBizTicket(ctx, ticket any) *gomock.Call {
+func (mr *MockServiceMockRecorder) CreateBizTicket(ctx, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateBizTicket", reflect.TypeOf((*MockService)(nil).CreateBizTicket), ctx, ticket)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateBizTicket", reflect.TypeOf((*MockService)(nil).CreateBizTicket), ctx, arg1)
 }
 
 // CreateTicket mocks base method.
@@ -115,11 +115,26 @@ func (mr *MockServiceMockRecorder) GetByProcessInstance(ctx, instanceID any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByProcessInstance", reflect.TypeOf((*MockService)(nil).GetByProcessInstance), ctx, instanceID)
 }
 
+// GetRejectTargets mocks base method.
+func (m *MockService) GetRejectTargets(ctx context.Context, ticketId int64, taskId string) ([]domain.RejectTarget, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetRejectTargets", ctx, ticketId, taskId)
+	ret0, _ := ret[0].([]domain.RejectTarget)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetRejectTargets indicates an expected call of GetRejectTargets.
+func (mr *MockServiceMockRecorder) GetRejectTargets(ctx, ticketId, taskId any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRejectTargets", reflect.TypeOf((*MockService)(nil).GetRejectTargets), ctx, ticketId, taskId)
+}
+
 // GetTaskFormConfig mocks base method.
-func (m *MockService) GetTaskFormConfig(ctx context.Context, ticketId int64, taskId string, workflowId int64) ([]flowdsl.Field, error) {
+func (m *MockService) GetTaskFormConfig(ctx context.Context, ticketId int64, taskId string, workflowId int64) (ticket.TaskFormConfig, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetTaskFormConfig", ctx, ticketId, taskId, workflowId)
-	ret0, _ := ret[0].([]flowdsl.Field)
+	ret0, _ := ret[0].(ticket.TaskFormConfig)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -174,17 +189,17 @@ func (mr *MockServiceMockRecorder) Pass(ctx, ticketId, taskId, operator, isAdmin
 }
 
 // Reject mocks base method.
-func (m *MockService) Reject(ctx context.Context, ticketId int64, taskId, operator string, isAdmin bool, comment string) error {
+func (m *MockService) Reject(ctx context.Context, ticketId int64, taskId, operator string, isAdmin bool, comment, targetNodeId string, terminate bool) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Reject", ctx, ticketId, taskId, operator, isAdmin, comment)
+	ret := m.ctrl.Call(m, "Reject", ctx, ticketId, taskId, operator, isAdmin, comment, targetNodeId, terminate)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Reject indicates an expected call of Reject.
-func (mr *MockServiceMockRecorder) Reject(ctx, ticketId, taskId, operator, isAdmin, comment any) *gomock.Call {
+func (mr *MockServiceMockRecorder) Reject(ctx, ticketId, taskId, operator, isAdmin, comment, targetNodeId, terminate any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Reject", reflect.TypeOf((*MockService)(nil).Reject), ctx, ticketId, taskId, operator, isAdmin, comment)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Reject", reflect.TypeOf((*MockService)(nil).Reject), ctx, ticketId, taskId, operator, isAdmin, comment, targetNodeId, terminate)
 }
 
 // RestartProcess mocks base method.

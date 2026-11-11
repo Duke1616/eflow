@@ -90,6 +90,14 @@ func (r TaskPassReq) Validate() error {
 	return nil
 }
 
+// RejectTarget 可驳回的目标节点信息
+type RejectTarget struct {
+	NodeID    string `json:"node_id"`    // 节点标识
+	NodeName  string `json:"node_name"`  // 节点名称
+	NodeType  string `json:"node_type"`  // 节点类型 (START, APPROVAL)
+	IsStarter bool   `json:"is_starter"` // 是否退回到起点/提单人
+}
+
 // TaskRejectReq 审批驳回请求结构
 type TaskRejectReq struct {
 	EngineType   EngineType // 所属引擎类型
@@ -97,6 +105,7 @@ type TaskRejectReq struct {
 	Operator     string     // 审批操作人
 	Comment      string     // 驳回原因（必填）
 	TargetNodeId string     // 回退目标节点 ID（可选）
+	Terminate    bool       // 是否直接否决并终结流程（可选）
 }
 
 // Validate 审批驳回入参自卫校验

@@ -228,7 +228,6 @@ func (x *taskNodeExecutor) Execute(ctx context.Context, session *flowSession, no
 		Instance:  inst,
 		Node:      &node,
 		Variables: inst.Variables,
-		Attempt:   1,
 	})
 
 	if workerErr != nil {

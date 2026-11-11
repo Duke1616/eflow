@@ -12,7 +12,6 @@ type TaskContext struct {
 	Instance  *model.Instance
 	Node      *model.NodeSpec
 	Variables model.Variables
-	Attempt   int // 当前执行轮次 (从 1 开始)
 }
 
 // TaskResult 自动化任务执行产物
@@ -47,4 +46,3 @@ func (r *workerRegistry) Get(workerType string) (TaskWorker, bool) {
 	w, ok := r.workers[workerType]
 	return w, ok
 }
-

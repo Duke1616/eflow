@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/Duke1616/eflow/pkg/flowx"
 	flowxModel "github.com/Duke1616/eflow/pkg/flowx/model"
 	"github.com/Duke1616/eflow/pkg/flowx/storage/memory"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -23,7 +25,7 @@ func TestEngineDispatcher_Deploy(t *testing.T) {
 		name       string
 		engineType domain.EngineType
 		rawDef     any
-		mockSetup  func(easyMock *enginemocks.MockIEngine)
+		mockSetup  func(easyMock *enginemocks.MockIDriver)
 		assertFunc func(t *testing.T, info domain.DeployInfo)
 		wantErr    bool
 		errSubStr  string
@@ -52,8 +54,8 @@ func TestEngineDispatcher_Deploy(t *testing.T) {
 			name:       "easyflow引擎成功部署",
 			engineType: domain.EngineTypeEasyFlow,
 			rawDef:     "fake_def",
-			mockSetup: func(easyMock *enginemocks.MockIEngine) {
-				easyMock.EXPECT().Deploy(gomock.Any(), domain.EngineTypeEasyFlow, "fake_def").
+			mockSetup: func(easyMock *enginemocks.MockIDriver) {
+				easyMock.EXPECT().Deploy(gomock.Any(), "fake_def").
 					Return(domain.DeployInfo{ProcessID: 555, Version: 1}, nil)
 			},
 			assertFunc: func(t *testing.T, info domain.DeployInfo) {
@@ -75,7 +77,7 @@ func TestEngineDispatcher_Deploy(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			easyMock := enginemocks.NewMockIEngine(ctrl)
+			easyMock := enginemocks.NewMockIDriver(ctrl)
 			easyMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
 			if tc.mockSetup != nil {
 				tc.mockSetup(easyMock)
@@ -106,7 +108,7 @@ func TestEngineDispatcher_Launch(t *testing.T) {
 		name       string
 		engineType domain.EngineType
 		req        domain.ProcessLaunchReq
-		mockSetup  func(easyMock *enginemocks.MockIEngine)
+		mockSetup  func(easyMock *enginemocks.MockIDriver)
 		assertFunc func(t *testing.T, res domain.ProcessLaunchResult)
 		wantErr    bool
 		errSubStr  string
@@ -137,7 +139,7 @@ func TestEngineDispatcher_Launch(t *testing.T) {
 				Starter:      "jack",
 				Variables:    map[string]any{"amount": 100},
 			},
-			mockSetup: func(easyMock *enginemocks.MockIEngine) {
+			mockSetup: func(easyMock *enginemocks.MockIDriver) {
 				easyMock.EXPECT().Start(gomock.Any(), gomock.Any()).
 					Return(domain.ProcessLaunchResult{
 						EngineType: domain.EngineTypeEasyFlow,
@@ -166,7 +168,7 @@ func TestEngineDispatcher_Launch(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			easyMock := enginemocks.NewMockIEngine(ctrl)
+			easyMock := enginemocks.NewMockIDriver(ctrl)
 			easyMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
 			if tc.mockSetup != nil {
 				tc.mockSetup(easyMock)
@@ -211,10 +213,10 @@ func TestEngineDispatcher_PassAndReject(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	easyMock := enginemocks.NewMockIEngine(ctrl)
+	easyMock := enginemocks.NewMockIDriver(ctrl)
 	easyMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
 
-	flowxMock := enginemocks.NewMockIEngine(ctrl)
+	flowxMock := enginemocks.NewMockIDriver(ctrl)
 	flowxMock.EXPECT().EngineType().Return(domain.EngineTypeFlowx).AnyTimes()
 
 	dispatcher := engine.NewEngineDispatcher(easyMock, flowxMock)
@@ -321,17 +323,17 @@ func TestEngineDispatcher_GetTaskContext_DirectDispatch(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	easyMock := enginemocks.NewMockIEngine(ctrl)
+	easyMock := enginemocks.NewMockIDriver(ctrl)
 	easyMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
 
-	flowxMock := enginemocks.NewMockIEngine(ctrl)
+	flowxMock := enginemocks.NewMockIDriver(ctrl)
 	flowxMock.EXPECT().EngineType().Return(domain.EngineTypeFlowx).AnyTimes()
 
 	dispatcher := engine.NewEngineDispatcher(easyMock, flowxMock)
 
 	// 1. 指定 FlowX 引擎直接分发命中
 	taskID1 := domain.NewID("flowx_task_1001")
-	flowxMock.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeFlowx, taskID1).Return(domain.TaskContext{
+	flowxMock.EXPECT().GetTaskContext(gomock.Any(), taskID1).Return(domain.TaskContext{
 		EngineType: domain.EngineTypeFlowx,
 		TaskID:     taskID1,
 		NodeID:     "node_approve",
@@ -344,7 +346,7 @@ func TestEngineDispatcher_GetTaskContext_DirectDispatch(t *testing.T) {
 
 	// 2. 指定 EasyFlow 引擎直接分发命中
 	taskID2 := domain.NewID("2002")
-	easyMock.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeEasyFlow, taskID2).Return(domain.TaskContext{
+	easyMock.EXPECT().GetTaskContext(gomock.Any(), taskID2).Return(domain.TaskContext{
 		EngineType: domain.EngineTypeEasyFlow,
 		TaskID:     taskID2,
 		NodeID:     "node_easy",
@@ -365,10 +367,10 @@ func TestEngineDispatcher_ListTodoTasks_GlobalSortAndPage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	easyMock := enginemocks.NewMockIEngine(ctrl)
+	easyMock := enginemocks.NewMockIDriver(ctrl)
 	easyMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
 
-	flowxMock := enginemocks.NewMockIEngine(ctrl)
+	flowxMock := enginemocks.NewMockIDriver(ctrl)
 	flowxMock.EXPECT().EngineType().Return(domain.EngineTypeFlowx).AnyTimes()
 
 	dispatcher := engine.NewEngineDispatcher(easyMock, flowxMock)
@@ -390,15 +392,15 @@ func TestEngineDispatcher_ListTodoTasks_GlobalSortAndPage(t *testing.T) {
 		CreateTime: now, // 最新
 	}
 
-	// 模拟两个引擎返回各自待办（无需引擎层做分页偏移，全量拉取）
-	expectedReq := domain.TodoQueryReq{
+	// 各引擎只需返回各自的前 K 条（K = offset + limit），全局前 K 条必然包含于其并集
+	page1Req := domain.TodoQueryReq{
 		Username: "alice",
 		Offset:   0,
-		Limit:    500,
+		Limit:    2, // K = 0 + 2
 	}
 
-	flowxMock.EXPECT().ListTodoTasks(gomock.Any(), expectedReq).Return([]domain.TodoTask{taskA, taskC}, int64(2), nil)
-	easyMock.EXPECT().ListTodoTasks(gomock.Any(), expectedReq).Return([]domain.TodoTask{taskB}, int64(1), nil)
+	flowxMock.EXPECT().ListTodoTasks(gomock.Any(), page1Req).Return([]domain.TodoTask{taskC, taskA}, int64(2), nil)
+	easyMock.EXPECT().ListTodoTasks(gomock.Any(), page1Req).Return([]domain.TodoTask{taskB}, int64(1), nil)
 
 	// 1. 请求第一页，Limit = 2
 	paged1, total, err := dispatcher.ListTodoTasks(context.Background(), domain.TodoQueryReq{
@@ -413,9 +415,14 @@ func TestEngineDispatcher_ListTodoTasks_GlobalSortAndPage(t *testing.T) {
 	assert.Equal(t, domain.NewID("task_flowx_3"), paged1[0].TaskID)
 	assert.Equal(t, domain.NewID("task_easy_2"), paged1[1].TaskID)
 
-	// 2. 模拟请求第二页（offset=2, limit=2）
-	flowxMock.EXPECT().ListTodoTasks(gomock.Any(), expectedReq).Return([]domain.TodoTask{taskA, taskC}, int64(2), nil)
-	easyMock.EXPECT().ListTodoTasks(gomock.Any(), expectedReq).Return([]domain.TodoTask{taskB}, int64(1), nil)
+	// 2. 模拟请求第二页（offset=2, limit=2），此时 K 增大到 4
+	page2Req := domain.TodoQueryReq{
+		Username: "alice",
+		Offset:   0,
+		Limit:    4, // K = 2 + 2
+	}
+	flowxMock.EXPECT().ListTodoTasks(gomock.Any(), page2Req).Return([]domain.TodoTask{taskC, taskA}, int64(2), nil)
+	easyMock.EXPECT().ListTodoTasks(gomock.Any(), page2Req).Return([]domain.TodoTask{taskB}, int64(1), nil)
 
 	paged2, total2, err := dispatcher.ListTodoTasks(context.Background(), domain.TodoQueryReq{
 		Username: "alice",
@@ -429,12 +436,169 @@ func TestEngineDispatcher_ListTodoTasks_GlobalSortAndPage(t *testing.T) {
 	assert.Equal(t, domain.NewID("task_flowx_1"), paged2[0].TaskID)
 }
 
+func TestEngineDispatcher_ListTodoTasks_FetchLimitAndTrueTotal(t *testing.T) {
+	now := time.Now()
+
+	testCases := []struct {
+		name          string
+		req           domain.TodoQueryReq
+		wantFetchLim  int
+		engineTotal   int64
+		engineRows    int
+		wantTotal     int64
+		wantSortedAsc bool
+	}{
+		{
+			name:         "首页只取前limit条_不再固定拉500",
+			req:          domain.TodoQueryReq{Username: "alice", Offset: 0, Limit: 20},
+			wantFetchLim: 20,
+			engineTotal:  3000,
+			engineRows:   20,
+			wantTotal:    6000, // 两个引擎各 3000，total 必须是真实计数之和而非返回行数
+		},
+		{
+			name:         "深翻页按页深取前K条_total仍为真实计数",
+			req:          domain.TodoQueryReq{Username: "alice", Offset: 1000, Limit: 20},
+			wantFetchLim: 1020,
+			engineTotal:  3000,
+			engineRows:   1020,
+			wantTotal:    6000,
+		},
+		{
+			name:         "limit为0语义不限条数_下推负一规避GORM_LIMIT_0陷阱",
+			req:          domain.TodoQueryReq{Username: "alice", Offset: 0, Limit: 0},
+			wantFetchLim: -1,
+			engineTotal:  3000,
+			engineRows:   3000,
+			wantTotal:    6000,
+		},
+		{
+			name:          "升序请求必须透传给引擎_否则归并取到错误的一端",
+			req:           domain.TodoQueryReq{Username: "alice", Offset: 0, Limit: 10, SortByAsc: true},
+			wantFetchLim:  10,
+			engineTotal:   5,
+			engineRows:    5,
+			wantTotal:     10,
+			wantSortedAsc: true,
+		},
+		{
+			name:         "负offset不得污染下推的取数条数",
+			req:          domain.TodoQueryReq{Username: "alice", Offset: -5, Limit: 10},
+			wantFetchLim: 10,
+			engineTotal:  5,
+			engineRows:   5,
+			wantTotal:    10,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			easyMock := enginemocks.NewMockIDriver(ctrl)
+			easyMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
+			flowxMock := enginemocks.NewMockIDriver(ctrl)
+			flowxMock.EXPECT().EngineType().Return(domain.EngineTypeFlowx).AnyTimes()
+
+			dispatcher := engine.NewEngineDispatcher(easyMock, flowxMock)
+
+			wantReq := domain.TodoQueryReq{
+				Username:  tc.req.Username,
+				Offset:    0,
+				Limit:     tc.wantFetchLim,
+				SortByAsc: tc.req.SortByAsc,
+			}
+
+			// 构造引擎侧有序返回：倒序时最新在前，升序时最早在前
+			rows := make([]domain.TodoTask, 0, tc.engineRows)
+			for i := 0; i < tc.engineRows; i++ {
+				offset := time.Duration(i) * time.Minute
+				if !tc.req.SortByAsc {
+					offset = -offset
+				}
+				rows = append(rows, domain.TodoTask{
+					TaskID:     domain.NewID(fmt.Sprintf("task_%d", i)),
+					CreateTime: now.Add(offset),
+				})
+			}
+
+			flowxMock.EXPECT().ListTodoTasks(gomock.Any(), wantReq).Return(rows, tc.engineTotal, nil)
+			easyMock.EXPECT().ListTodoTasks(gomock.Any(), wantReq).Return(rows, tc.engineTotal, nil)
+
+			got, total, err := dispatcher.ListTodoTasks(context.Background(), tc.req)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantTotal, total, "total 必须来自引擎真实计数，绝不能被返回行数顶替")
+
+			if tc.req.Offset < 0 {
+				assert.Empty(t, got)
+				return
+			}
+			if tc.req.Limit > 0 {
+				assert.LessOrEqual(t, len(got), tc.req.Limit)
+			}
+			// 校验归并结果的全局有序性
+			for i := 1; i < len(got); i++ {
+				if tc.wantSortedAsc {
+					assert.False(t, got[i].CreateTime.Before(got[i-1].CreateTime), "升序归并结果乱序")
+				} else {
+					assert.False(t, got[i].CreateTime.After(got[i-1].CreateTime), "倒序归并结果乱序")
+				}
+			}
+		})
+	}
+}
+
+func TestEngineDispatcher_ListTodoTasks_SameTimestampDeterministicOrder(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	easyMock := enginemocks.NewMockIDriver(ctrl)
+	easyMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
+	flowxMock := enginemocks.NewMockIDriver(ctrl)
+	flowxMock.EXPECT().EngineType().Return(domain.EngineTypeFlowx).AnyTimes()
+
+	dispatcher := engine.NewEngineDispatcher(easyMock, flowxMock)
+
+	// 两个引擎返回完全相同时间戳的任务：缺少确定性 tiebreak 时翻页会漂移
+	sameTime := time.Now()
+	flowxRows := []domain.TodoTask{
+		{TaskID: domain.NewID("f_b"), CreateTime: sameTime},
+		{TaskID: domain.NewID("f_a"), CreateTime: sameTime},
+	}
+	easyRows := []domain.TodoTask{
+		{TaskID: domain.NewID("e_b"), CreateTime: sameTime},
+		{TaskID: domain.NewID("e_a"), CreateTime: sameTime},
+	}
+
+	req := domain.TodoQueryReq{Username: "alice", Offset: 0, Limit: 4}
+	var firstPage []domain.ID
+	for round := 0; round < 5; round++ {
+		flowxMock.EXPECT().ListTodoTasks(gomock.Any(), req).Return(flowxRows, int64(2), nil)
+		easyMock.EXPECT().ListTodoTasks(gomock.Any(), req).Return(easyRows, int64(2), nil)
+
+		got, total, err := dispatcher.ListTodoTasks(context.Background(), req)
+		require.NoError(t, err)
+		assert.Equal(t, int64(4), total)
+		require.Len(t, got, 4)
+
+		ids := lo.Map(got, func(task domain.TodoTask, _ int) domain.ID { return task.TaskID })
+		if round == 0 {
+			firstPage = ids
+			// 同时间戳按 TaskID 升序定序
+			assert.Equal(t, []domain.ID{"e_a", "e_b", "f_a", "f_b"}, ids)
+			continue
+		}
+		assert.Equal(t, firstPage, ids, "同时间戳任务在重复请求间排序必须稳定，否则翻页重复或遗漏")
+	}
+}
+
 func TestEngineDispatcher_GetInstanceExecutionView_CrossEngineFallback(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	flowxMock := enginemocks.NewMockIEngine(ctrl)
-	easyMock := enginemocks.NewMockIEngine(ctrl)
+	flowxMock := enginemocks.NewMockIDriver(ctrl)
+	easyMock := enginemocks.NewMockIDriver(ctrl)
 
 	flowxMock.EXPECT().EngineType().Return(domain.EngineTypeFlowx).AnyTimes()
 	easyMock.EXPECT().EngineType().Return(domain.EngineTypeEasyFlow).AnyTimes()
@@ -444,17 +608,17 @@ func TestEngineDispatcher_GetInstanceExecutionView_CrossEngineFallback(t *testin
 	instID := domain.NewID("flowx_history_inst_123")
 
 	// 模拟指定 EasyFlow 查询历史 FlowX 实例时 EasyFlow 报未找到
-	easyMock.EXPECT().GetInstanceExecutionView(gomock.Any(), domain.EngineTypeEasyFlow, instID, uint8(1)).
+	easyMock.EXPECT().GetInstanceExecutionView(gomock.Any(), instID).
 		Return(domain.InstanceExecutionView{}, errors.New("easyflow 获取实例详情失败: record not found"))
 
 	// 期望调度器自动降级尝试 FlowX 并成功返回
-	flowxMock.EXPECT().GetInstanceExecutionView(gomock.Any(), domain.EngineTypeFlowx, instID, uint8(1)).
+	flowxMock.EXPECT().GetInstanceExecutionView(gomock.Any(), instID).
 		Return(domain.InstanceExecutionView{
 			ProcessKey: "wf_key_45",
 			ProcessID:  45,
 		}, nil)
 
-	view, err := dispatcher.GetInstanceExecutionView(context.Background(), domain.EngineTypeEasyFlow, instID, 1)
+	view, err := dispatcher.GetInstanceExecutionView(context.Background(), domain.EngineTypeEasyFlow, instID)
 	require.NoError(t, err)
 	assert.Equal(t, "wf_key_45", view.ProcessKey)
 	assert.Equal(t, 45, view.ProcessID)

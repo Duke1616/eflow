@@ -41,6 +41,21 @@ func (m *MockQueryService) EXPECT() *MockQueryServiceMockRecorder {
 	return m.recorder
 }
 
+// GetLatestReject mocks base method.
+func (m *MockQueryService) GetLatestReject(ctx context.Context, processInstID domain.ID) (*domain.LatestReject, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLatestReject", ctx, processInstID)
+	ret0, _ := ret[0].(*domain.LatestReject)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetLatestReject indicates an expected call of GetLatestReject.
+func (mr *MockQueryServiceMockRecorder) GetLatestReject(ctx, processInstID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLatestReject", reflect.TypeOf((*MockQueryService)(nil).GetLatestReject), ctx, processInstID)
+}
+
 // ListAllTodo mocks base method.
 func (m *MockQueryService) ListAllTodo(ctx context.Context, userID, processName string, sortByAsc bool, offset, limit int64) ([]domain.TicketTaskView, int64, error) {
 	m.ctrl.T.Helper()

@@ -54,8 +54,10 @@ type ITaskStorage interface {
 	// ListPendingTasksByInstances 批量获取多个流程实例列表中当前处于待办状态的审批任务（一条 SQL 批量 IN 查询）
 	ListPendingTasksByInstances(ctx context.Context, instIDs []string) ([]*model.Task, error)
 
-	// ListPendingTasksByAssignee 分页查询指派给当前用户的待办任务列表，按创建时间倒序返回
-	ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error)
+	// ListPendingTasks 按条件分页查询待办任务，返回该条件下的真实总数（不受 offset/limit 影响）。
+	// 结果必须严格按创建时间有序（方向由 query.SortByAsc 决定）：上层跨引擎归并分页依赖此有序性，
+	// 只有各引擎各自的前 K 条有序，才能保证全局前 K 条包含于其并集
+	ListPendingTasks(ctx context.Context, query model.PendingTaskQuery) ([]*model.Task, int64, error)
 
 	// UpdateTask 更新单条审批任务的处理结果（状态、实际处理人、审批意见及完成时间）
 	UpdateTask(ctx context.Context, task *model.Task) error

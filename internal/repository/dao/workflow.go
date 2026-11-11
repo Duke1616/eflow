@@ -22,6 +22,7 @@ type Workflow struct {
 	ProcessId    int                              `gorm:"column:process_id;type:int;comment:'关联工作流引擎部署的流程模型ID'"`
 	EngineType   string                           `gorm:"column:engine_type;type:varchar(32);not null;default:'easy-workflow';comment:'工作流引擎类型(easy-workflow/flowx)'"`
 	FlowData     sqlx.JsonField[domain.CanvasData] `gorm:"column:flow_data;type:json;comment:'图形化流程拓扑节点关系json'"`
+	FlowPolicy   sqlx.JsonField[domain.FlowPolicy] `gorm:"column:flow_policy;type:json;comment:'流程审批与流转治理策略配置'"`
 	IsNotify     bool                             `gorm:"column:is_notify;type:tinyint(1);default:0;comment:'流程审批流转时是否触发发送通知'"`
 	NotifyMethod uint8                     `gorm:"column:notify_method;type:tinyint unsigned;comment:'流程通知首选投递渠道类型'"`
 	Ctime        int64                     `gorm:"column:ctime;type:bigint;comment:'创建时间(毫秒)'"`
@@ -43,6 +44,7 @@ type Snapshot struct {
 	EngineType     string                            `gorm:"column:engine_type;type:varchar(32);not null;default:'easy-workflow';uniqueIndex:uix_wf_engine_version;comment:'工作流引擎类型(easy-workflow/flowx)'"`
 	Name           string                            `gorm:"column:name;type:varchar(128);not null;comment:'快照名字'"`
 	FlowData       sqlx.JsonField[domain.CanvasData] `gorm:"column:flow_data;type:json;comment:'发布快照时对应的画布拓扑结构数据json'"`
+	FlowPolicy     sqlx.JsonField[domain.FlowPolicy] `gorm:"column:flow_policy;type:json;comment:'发布快照时对应的治理策略配置'"`
 	Ctime          int64                             `gorm:"column:ctime;type:bigint;comment:'创建时间(毫秒)'"`
 }
 

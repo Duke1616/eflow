@@ -35,7 +35,7 @@ type IWorkflowCoreService interface {
 	// FindInstanceFlow 获取流程实例运行时所绑定版本的流程定义，提供特定历史快照回溯与降级解析（支持指定历史引擎类型）
 	FindInstanceFlow(ctx context.Context, workflowID int64, processID, version int, engineType ...domain.EngineType) (domain.Workflow, error)
 	// GetHighlightedGraph 根据审批轨迹流转情况计算并点亮画布图
-	GetHighlightedGraph(ctx context.Context, workflowId int64, instanceID domain.ID, status domain.Status) (domain.Workflow, error)
+	GetHighlightedGraph(ctx context.Context, workflowId int64, instanceID domain.ID) (domain.Workflow, error)
 	// GetMaxSnapshotVersion 获取指定工作流当前已发布的最大快照版本号（未发布过时返回 0，支持按引擎类型精确查询）
 	GetMaxSnapshotVersion(ctx context.Context, workflowID int64, engineType ...domain.EngineType) (int, error)
 }
@@ -223,7 +223,7 @@ func (s *workflowService) FindInstanceFlow(ctx context.Context, workflowID int64
 	return latest, nil
 }
 
-func (s *workflowService) GetHighlightedGraph(ctx context.Context, workflowId int64, instanceID domain.ID, status domain.Status) (domain.Workflow, error) {
+func (s *workflowService) GetHighlightedGraph(ctx context.Context, workflowId int64, instanceID domain.ID) (domain.Workflow, error) {
 	wf, err := s.Find(ctx, workflowId)
 	if err != nil {
 		return domain.Workflow{}, err
@@ -232,7 +232,7 @@ func (s *workflowService) GetHighlightedGraph(ctx context.Context, workflowId in
 	targetEngine := wf.ResolveEngineType()
 
 	// 2. 通过统一流程引擎接口获取该实例的执行态点亮视图
-	execView, err := s.engine.GetInstanceExecutionView(ctx, targetEngine, instanceID, status.ToUint8())
+	execView, err := s.engine.GetInstanceExecutionView(ctx, targetEngine, instanceID)
 	if err != nil {
 		return domain.Workflow{}, fmt.Errorf("获取流程实例执行态轨迹失败: %w", err)
 	}

@@ -37,6 +37,7 @@ func TestFlowxNotificationListener_InterestIn(t *testing.T) {
 	assert.Contains(t, events, flowx.EventProcessStarted)
 	assert.Contains(t, events, flowx.EventTaskCreated)
 	assert.Contains(t, events, flowx.EventNodeEntered)
+	assert.Contains(t, events, flowx.EventTaskRejected)
 }
 
 func TestFlowxNotificationListener_OnEvent(t *testing.T) {
@@ -123,6 +124,40 @@ func TestFlowxNotificationListener_OnEvent(t *testing.T) {
 				assert.Equal(t, strategy.User, u.lastInfo.NodeName)
 				assert.Equal(t, "leader_audit", u.lastInfo.CurrentNode.NodeID)
 				assert.Equal(t, []string{"bob"}, u.lastInfo.CurrentNode.UserIDs)
+			},
+		},
+		{
+			name: "处理任务驳回事件触发驳回通知并携带最新驳回人与原因",
+			event: flowx.Event{
+				Type: flowx.EventTaskRejected,
+				Instance: &flowxModel.Instance{
+					ID:          "inst_reject_001",
+					BusinessKey: "1003",
+				},
+				Task: &flowxModel.Task{
+					NodeID:     "node_mgr",
+					NodeName:   "主管审批",
+					Assignee:   "bob_mgr",
+					Comment:    "预算超支，请削减",
+					FinishTime: time.Date(2026, 11, 11, 10, 0, 0, 0, time.UTC),
+				},
+			},
+			setupMock: func(repo *repomocks.MockTicketRepository, wf *wfmocks.MockService) {
+				repo.EXPECT().Detail(gomock.Any(), int64(1003)).
+					Return(domain.Ticket{
+						Id:         1003,
+						WorkflowId: 20,
+						CreateBy:   "alice",
+					}, nil)
+				wf.EXPECT().Find(gomock.Any(), int64(20)).
+					Return(domain.Workflow{Id: 20, Name: "采购流程"}, nil)
+			},
+			assertFn: func(t *testing.T, s, u, c, ch *mockSendStrategy) {
+				assert.Equal(t, 1, s.calls)
+				assert.Equal(t, "node_mgr", s.lastInfo.CurrentNode.NodeID)
+				require.NotNil(t, s.lastInfo.Ticket.LatestReject)
+				assert.Equal(t, "bob_mgr", s.lastInfo.Ticket.LatestReject.RejectedBy)
+				assert.Equal(t, "预算超支，请削减", s.lastInfo.Ticket.LatestReject.Reason)
 			},
 		},
 		{

@@ -64,8 +64,8 @@ func (d *Decorator) ListPendingTasksByInstances(ctx context.Context, instIDs []s
 	return d.target.ListPendingTasksByInstances(ctx, instIDs)
 }
 
-func (d *Decorator) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
-	return d.target.ListPendingTasksByAssignee(ctx, assignee, offset, limit)
+func (d *Decorator) ListPendingTasks(ctx context.Context, query model.PendingTaskQuery) ([]*model.Task, int64, error) {
+	return d.target.ListPendingTasks(ctx, query)
 }
 
 func (d *Decorator) UpdateTask(ctx context.Context, task *model.Task) error {

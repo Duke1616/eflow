@@ -132,7 +132,6 @@ var (
 
 		// 流程状态与核心反射事件处理器/Kafka 消费者/三方回调/审批模板自愈
 		InitLarkClient,
-		eiam.NewUserClient,
 		channelSvc.NewChannelIdentityResolver,
 		channelSvc.NewChannelActionService,
 		InitWechatTicketConsumer,
@@ -158,6 +157,7 @@ var (
 
 		// 引入本地客户端网关
 		eiam.NewEIAMClient,
+		eiam.NewUserClient,
 		ealert.NewEALERTClient,
 		etask.NewETASKClient,
 		etask.NewClient,

@@ -13,58 +13,42 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// engineDispatcher 驱动注册表在构造期一次性装配完成后即不可变，且运行期不提供注册入口，
+// 因此并发读取无需加锁
 type engineDispatcher struct {
-	mu      sync.RWMutex
-	engines map[domain.EngineType]IEngine
+	drivers map[domain.EngineType]IDriver
 	logger  *elog.Component
 }
 
-// NewEngineDispatcher 基于开闭原则（OCP）装配多引擎驱动，对外统一以 IEngine 契约暴露
-func NewEngineDispatcher(engines ...IEngine) IEngine {
+// NewEngineDispatcher 基于开闭原则（OCP）装配多引擎驱动，对外统一以 IEngine 门面暴露
+func NewEngineDispatcher(drivers ...IDriver) IEngine {
 	d := &engineDispatcher{
-		engines: make(map[domain.EngineType]IEngine),
+		drivers: make(map[domain.EngineType]IDriver, len(drivers)),
 		logger:  elog.DefaultLogger,
 	}
-	for _, eng := range engines {
-		if eng != nil {
-			d.register(eng)
+	for _, drv := range drivers {
+		if drv != nil {
+			d.drivers[drv.EngineType()] = drv
 		}
 	}
 	return d
 }
 
-func (d *engineDispatcher) register(eng IEngine) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.engines[eng.EngineType()] = eng
-}
-
-func (d *engineDispatcher) EngineType() domain.EngineType {
-	return ""
-}
-
 // getEngine 根据显式引擎类型获取注册的驱动实例
-func (d *engineDispatcher) getEngine(engineType domain.EngineType) (IEngine, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.findEngineLocked(engineType)
-}
-
-// findEngineLocked 在已持有读锁的前提下查找引擎实例
-func (d *engineDispatcher) findEngineLocked(engineType domain.EngineType) (IEngine, error) {
-	eng, ok := d.engines[engineType]
+func (d *engineDispatcher) getEngine(engineType domain.EngineType) (IDriver, error) {
+	drv, ok := d.drivers[engineType]
 	if !ok {
 		return nil, fmt.Errorf("%w: 未注册对应的流程引擎驱动 [engine_type=%s]", ErrEngineNotFound, engineType)
 	}
-	return eng, nil
+	return drv, nil
 }
 
 func (d *engineDispatcher) Deploy(ctx context.Context, engineType domain.EngineType, rawDef any) (domain.DeployInfo, error) {
-	eng, err := d.getEngine(engineType)
+	drv, err := d.getEngine(engineType)
 	if err != nil {
 		return domain.DeployInfo{}, err
 	}
-	return eng.Deploy(ctx, engineType, rawDef)
+	return drv.Deploy(ctx, rawDef)
 }
 
 func (d *engineDispatcher) Start(ctx context.Context, req domain.ProcessLaunchReq) (domain.ProcessLaunchResult, error) {
@@ -109,7 +93,7 @@ func (d *engineDispatcher) GetTaskContext(ctx context.Context, engineType domain
 		return domain.TaskContext{}, err
 	}
 
-	return eng.GetTaskContext(ctx, engineType, taskID)
+	return eng.GetTaskContext(ctx, taskID)
 }
 
 func (d *engineDispatcher) Pass(ctx context.Context, req domain.TaskPassReq) error {
@@ -170,12 +154,12 @@ func (d *engineDispatcher) GetTimeline(ctx context.Context, engineType domain.En
 		return nil, err
 	}
 
-	timeline, err := eng.GetTimeline(ctx, engineType, instanceID)
+	timeline, err := eng.GetTimeline(ctx, instanceID)
 	if err != nil {
 		// 跨引擎自适应容错：历史工单在跨引擎切换后，尝试使用备用引擎寻址
-		fallbackType := lo.Ternary(engineType.String() == domain.EngineTypeFlowx.String(), domain.EngineTypeEasyFlow, domain.EngineTypeFlowx)
+		fallbackType := lo.Ternary(engineType == domain.EngineTypeFlowx, domain.EngineTypeEasyFlow, domain.EngineTypeFlowx)
 		if fallbackEng, fErr := d.getEngine(fallbackType); fErr == nil {
-			if fallbackTimeline, fbErr := fallbackEng.GetTimeline(ctx, fallbackType, instanceID); fbErr == nil {
+			if fallbackTimeline, fbErr := fallbackEng.GetTimeline(ctx, instanceID); fbErr == nil {
 				return fallbackTimeline, nil
 			}
 		}
@@ -183,7 +167,7 @@ func (d *engineDispatcher) GetTimeline(ctx context.Context, engineType domain.En
 	return timeline, err
 }
 
-func (d *engineDispatcher) GetInstanceExecutionView(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, status uint8) (domain.InstanceExecutionView, error) {
+func (d *engineDispatcher) GetInstanceExecutionView(ctx context.Context, engineType domain.EngineType, instanceID domain.ID) (domain.InstanceExecutionView, error) {
 	if instanceID.IsZero() {
 		return domain.InstanceExecutionView{}, fmt.Errorf("%w: 流程实例 ID 不能为空", ErrInvalidParameter)
 	}
@@ -193,12 +177,12 @@ func (d *engineDispatcher) GetInstanceExecutionView(ctx context.Context, engineT
 		return domain.InstanceExecutionView{}, err
 	}
 
-	view, err := eng.GetInstanceExecutionView(ctx, engineType, instanceID, status)
+	view, err := eng.GetInstanceExecutionView(ctx, instanceID)
 	if err != nil {
 		// 跨引擎自适应容错：当指定引擎未找到实例时（如工作流后来切换了引擎），自动尝试备选引擎
-		fallbackType := lo.Ternary(engineType.String() == domain.EngineTypeFlowx.String(), domain.EngineTypeEasyFlow, domain.EngineTypeFlowx)
+		fallbackType := lo.Ternary(engineType == domain.EngineTypeFlowx, domain.EngineTypeEasyFlow, domain.EngineTypeFlowx)
 		if fallbackEng, fErr := d.getEngine(fallbackType); fErr == nil {
-			if fallbackView, fbErr := fallbackEng.GetInstanceExecutionView(ctx, fallbackType, instanceID, status); fbErr == nil {
+			if fallbackView, fbErr := fallbackEng.GetInstanceExecutionView(ctx, instanceID); fbErr == nil {
 				return fallbackView, nil
 			}
 		}
@@ -211,7 +195,7 @@ func (d *engineDispatcher) GetAutomationTask(ctx context.Context, engineType dom
 	if err != nil {
 		return domain.TaskRecord{}, err
 	}
-	return eng.GetAutomationTask(ctx, engineType, instanceID, nodeID)
+	return eng.GetAutomationTask(ctx, instanceID, nodeID)
 }
 
 // GetTasksByCurrentNode 获取指定流程实例在特定节点下当前挂起/未完成的任务记录集合
@@ -220,46 +204,49 @@ func (d *engineDispatcher) GetTasksByCurrentNode(ctx context.Context, engineType
 	if err != nil {
 		return nil, err
 	}
-	return eng.GetTasksByCurrentNode(ctx, engineType, instanceID, nodeID)
+	return eng.GetTasksByCurrentNode(ctx, instanceID, nodeID)
 }
 
-// maxPerEngineTodoLimit 单引擎待办任务拉取上限保护（防止异常批量数据撑爆内存）
-const maxPerEngineTodoLimit = 500
-
-// ListTodoTasks 并发拉取所有已注册底层引擎的待办任务，并在分发器层完成全局时间排序与精确内存分页
-// 解释设计原因：跨异构引擎（如 FlowX 与 EasyFlow）下推各自的分页 offset 会导致分布式伪分页与时间交错乱序。
-// 由于个人待办数据体量天然较小（单人处于 Pending 状态的任务通常在几十条以内），
-// 采用“带防爆上限的各引擎活跃待办拉取 + 分发器全局时间归并排序 + 内存切片”是业界最优且最稳固的实践。
+// ListTodoTasks 跨引擎归并分页：各引擎按创建时间有序返回各自的前 K 条（K = offset + limit），
+// 分发器归并后切片，total 取各引擎真实计数之和。
+// 设计依据：全局前 K 条必然包含于「各引擎各自前 K 条」的并集——任一任务在其所属引擎内的排名
+// 不会低于它的全局排名，因此无需全量拉取即可保证分页不重不漏，内存占用由请求页深决定而非数据总量。
+// 严禁把 offset 直接下推给各引擎：那会得到分布式伪分页与跨引擎时间交错乱序。
 func (d *engineDispatcher) ListTodoTasks(ctx context.Context, req domain.TodoQueryReq) ([]domain.TodoTask, int64, error) {
-	d.mu.RLock()
-	engines := lo.Values(d.engines)
-	d.mu.RUnlock()
+	engines := lo.Values(d.drivers)
 
-	var (
-		eg       errgroup.Group
-		mu       sync.Mutex
-		allTasks []domain.TodoTask
-	)
+	// limit <= 0 语义为不限条数，此时必须全量拉取才能正确归并。
+	// 下推 -1 而非 0：GORM 的 Limit(0) 会生成 LIMIT 0 从而返回零行
+	fetchLimit := -1
+	if req.Limit > 0 {
+		fetchLimit = max(req.Offset, 0) + req.Limit
+	}
 
-	// 1. 构造面向底层引擎的无偏移行全量拉取请求，附加防爆熔断上限
 	engineReq := domain.TodoQueryReq{
 		Username:    req.Username,
 		ProcessName: req.ProcessName,
 		SortByAsc:   req.SortByAsc,
 		Offset:      0,
-		Limit:       maxPerEngineTodoLimit,
+		Limit:       fetchLimit,
 		IsAdmin:     req.IsAdmin,
 	}
 
+	var (
+		eg       errgroup.Group
+		mu       sync.Mutex
+		allTasks []domain.TodoTask
+		total    int64
+	)
+
 	for _, eng := range engines {
-		e := eng
 		eg.Go(func() error {
-			tasks, _, err := e.ListTodoTasks(ctx, engineReq)
+			tasks, count, err := eng.ListTodoTasks(ctx, engineReq)
 			if err != nil {
 				return err
 			}
 			mu.Lock()
 			allTasks = append(allTasks, tasks...)
+			total += count
 			mu.Unlock()
 			return nil
 		})
@@ -269,17 +256,18 @@ func (d *engineDispatcher) ListTodoTasks(ctx context.Context, req domain.TodoQue
 		return nil, 0, err
 	}
 
-	// 2. 全局严格按任务创建时间进行跨引擎归并排序（保证绝对时间线性）
+	// 全局按创建时间归并；时间相同时再以 TaskID 定序。
+	// 缺少确定性 tiebreak 时，并发 append 的到达顺序会让同时间戳任务在相邻两次翻页请求间排序漂移，造成重复或遗漏
 	sort.SliceStable(allTasks, func(i, j int) bool {
-		if req.SortByAsc {
-			return allTasks[i].CreateTime.Before(allTasks[j].CreateTime)
+		if !allTasks[i].CreateTime.Equal(allTasks[j].CreateTime) {
+			if req.SortByAsc {
+				return allTasks[i].CreateTime.Before(allTasks[j].CreateTime)
+			}
+			return allTasks[i].CreateTime.After(allTasks[j].CreateTime)
 		}
-		return allTasks[i].CreateTime.After(allTasks[j].CreateTime)
+		return allTasks[i].TaskID < allTasks[j].TaskID
 	})
 
-	total := int64(len(allTasks))
-
-	// 3. 内存安全切片，保证前端标准分页不重不漏
 	if req.Offset < 0 || req.Offset >= len(allTasks) {
 		return []domain.TodoTask{}, total, nil
 	}
@@ -315,9 +303,8 @@ func (d *engineDispatcher) ListPendingSteps(ctx context.Context, processes []dom
 		if err != nil {
 			return nil, err
 		}
-		targetProcs := procs
 		eg.Go(func() error {
-			steps, err := targetEngine.ListPendingSteps(ctx, targetProcs)
+			steps, err := targetEngine.ListPendingSteps(ctx, procs)
 			if err != nil {
 				return err
 			}
@@ -343,7 +330,7 @@ func (d *engineDispatcher) GetTaskRecords(ctx context.Context, engineType domain
 	if err != nil {
 		return nil, 0, err
 	}
-	return eng.GetTaskRecords(ctx, engineType, instanceID, offset, limit)
+	return eng.GetTaskRecords(ctx, instanceID, offset, limit)
 }
 
 // GetTaskTimeline 分页获取指定流程实例的聚合时间线事件
@@ -352,5 +339,23 @@ func (d *engineDispatcher) GetTaskTimeline(ctx context.Context, engineType domai
 	if err != nil {
 		return nil, 0, err
 	}
-	return eng.GetTaskTimeline(ctx, engineType, instanceID, offset, limit)
+	return eng.GetTaskTimeline(ctx, instanceID, offset, limit)
+}
+
+// GetRejectTargets 获取指定任务节点在当前流转状态下允许驳回的目标节点候选列表
+func (d *engineDispatcher) GetRejectTargets(ctx context.Context, engineType domain.EngineType, taskID domain.ID) ([]domain.RejectTarget, error) {
+	eng, err := d.getEngine(engineType)
+	if err != nil {
+		return nil, err
+	}
+	return eng.GetRejectTargets(ctx, taskID)
+}
+
+// GetActiveReject 获取流程实例当前正处于待处理/待响应状态的最新驳回上下文（若无驳回或已重新推进闭环，返回 nil）
+func (d *engineDispatcher) GetActiveReject(ctx context.Context, engineType domain.EngineType, instanceID domain.ID) (*domain.RejectSnapshot, error) {
+	eng, err := d.getEngine(engineType)
+	if err != nil {
+		return nil, err
+	}
+	return eng.GetActiveReject(ctx, instanceID)
 }

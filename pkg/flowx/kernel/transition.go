@@ -11,14 +11,14 @@ import (
 // TransitionResult 流程转移推导计算结果
 type TransitionResult struct {
 	Targets        []model.NodeSpec // 本次流转应激活的目标节点
-	SkippedTargets []model.NodeSpec // 条件未命中被自动跳过的目标节点 (包容网关特有)
+	SkippedTargets []model.NodeSpec // 落选分支下需持久化 TaskSkipped 段位的物理活动节点 (排他/包容网关特有)
 }
 
 // StepDecision 步骤转移综合决策（包含汇聚屏障裁决与跨网关穿透）
 type StepDecision struct {
 	ReadyNodes     []model.NodeSpec // 本轮最终就绪、需派发生成待办的目标节点列表
 	SkippedNodes   []model.NodeSpec // 条件未满足、需标记为 TaskSkipped 的节点列表
-	SkippedTaskIDs []string         // 因排他汇聚竞争放行需联动跳过/作废的未决前置任务 ID 列表
+	SkippedTaskIDs []string         // 因排他汇聚竞争放行需更新跳过/作废的未决前置任务 ID 列表
 	IsBlocked      bool             // 是否存在汇聚网关屏障未全部就绪而需保持等待
 }
 
@@ -82,6 +82,12 @@ func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables model.Va
 		queue = append(queue, subRes.Targets...)
 	}
 
+	// 多层级联网关递归穿透可能对同一节点重复收集，且真实就绪节点严禁同时被标记跳过，此处统一收敛去重与互斥防卫
+	decision.SkippedNodes = lo.UniqBy(decision.SkippedNodes, func(n model.NodeSpec) string { return n.ID })
+	decision.SkippedNodes = lo.Filter(decision.SkippedNodes, func(n model.NodeSpec, _ int) bool {
+		_, isReady := readyNodeIDs[n.ID]
+		return !isReady
+	})
 	decision.SkippedTaskIDs = lo.Uniq(decision.SkippedTaskIDs)
 	return decision, nil
 }
@@ -114,7 +120,7 @@ func (p *ExecutionPlan) collectExclusiveJoinSkippedTasks(joinNode model.NodeSpec
 	return skippedIDs
 }
 
-// CalculateTransition 结合网关分类（或/并/包容）计算下一阶段的目标节点与自动跳过节点 (Value Semantics 优先)
+// CalculateTransition 结合网关分类（或/并/包容）计算流转的目标节点与自动跳过节点 (Value Semantics 优先)
 func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables model.Variables) (TransitionResult, error) {
 	edges := p.OutEdges[currentNodeID]
 	if len(edges) == 0 {
@@ -127,36 +133,113 @@ func (p *ExecutionPlan) CalculateTransition(currentNodeID string, variables mode
 	}
 
 	result := TransitionResult{
-		Targets:        make([]model.NodeSpec, 0),
+		Targets:        make([]model.NodeSpec, 0, len(edges)),
 		SkippedTargets: make([]model.NodeSpec, 0),
 	}
 
+	// 并行网关 (AND) 无条件并发放行全部出边，不存在落选分支，无需参与跳过语义计算
+	if currNode.Type == model.NodeGatewayParallel {
+		for _, edge := range edges {
+			targetNode, ok := p.NodesMap[edge.Target]
+			if !ok {
+				return TransitionResult{}, fmt.Errorf("目标节点未定义: %s", edge.Target)
+			}
+			result.Targets = append(result.Targets, targetNode)
+		}
+		return result, nil
+	}
+
+	// 全量求值所有出边而非命中即短路：排他网关的落选集合必须完整，否则无法为下游汇聚屏障补齐段位
+	var matched, unmatched []model.NodeSpec
 	for _, edge := range edges {
 		targetNode, ok := p.NodesMap[edge.Target]
 		if !ok {
 			return TransitionResult{}, fmt.Errorf("目标节点未定义: %s", edge.Target)
 		}
-
-		// 并行网关无条件并发放行；其余网关或普通节点按规则条件求值
-		matched := currNode.Type == model.NodeGatewayParallel || p.evaluateEdge(edge, variables)
-
-		if matched {
-			result.Targets = append(result.Targets, targetNode)
-
-			// 排他网关 (XOR / 或网关)：命中首个满足条件的分支后立即短路退出！
-			if currNode.Type == model.NodeGatewayExclusive {
-				break
-			}
-		} else if currNode.Type == model.NodeGatewayInclusive {
-			// 包容网关 (OR / 条件并行)：未满足条件的分支自动标记为跳过 (Skip)
-			// 注意：仅当目标是非网关节点时才记录为跳过目标，网关属于纯拓扑控制节点，严禁持久化 TaskSkipped 记录
-			if !targetNode.IsGateway() {
-				result.SkippedTargets = append(result.SkippedTargets, targetNode)
-			}
+		if p.evaluateEdge(edge, variables) {
+			matched = append(matched, targetNode)
+		} else {
+			unmatched = append(unmatched, targetNode)
 		}
 	}
 
+	// 排他网关 (XOR)：顺次求值仅首条命中分支真实放行，其余命中分支同等降级为落选
+	if currNode.Type == model.NodeGatewayExclusive && len(matched) > 0 {
+		losers := make([]model.NodeSpec, 0, len(matched)-1+len(unmatched))
+		losers = append(losers, matched[1:]...)
+		losers = append(losers, unmatched...)
+		matched, unmatched = matched[:1], losers
+	}
+
+	result.Targets = matched
+
+	// 网关落选分支必须持久化 TaskSkipped 段位：落选目标可能是嵌套网关，其下游活动节点同样永不派发待办，
+	// 一旦下游存在 AND/OR 汇聚屏障，缺失的段位将使汇聚永久无法满足，流程实例死锁在流转中且不产生任何报错
+	if currNode.IsGateway() {
+		result.SkippedTargets = p.collectUntakenActivities(unmatched, matched)
+	}
+
 	return result, nil
+}
+
+// collectUntakenActivities 沿落选分支正向穿透嵌套网关与串行链路，收集全部需要落 TaskSkipped 段位的物理活动节点
+// taken 为本次真实放行路径，其可达域内的节点必然会被正常派发，遇到即停止下探，严防污染汇聚点之后的公共主干
+func (p *ExecutionPlan) collectUntakenActivities(untaken, taken []model.NodeSpec) []model.NodeSpec {
+	if len(untaken) == 0 {
+		return nil
+	}
+
+	takenReachable := p.reachableFrom(taken)
+	skipped := make([]model.NodeSpec, 0, len(untaken))
+	visited := make(map[string]struct{})
+
+	queue := append([]model.NodeSpec{}, untaken...)
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+
+		if _, seen := visited[node.ID]; seen {
+			continue
+		}
+		visited[node.ID] = struct{}{}
+
+		if _, ok := takenReachable[node.ID]; ok {
+			continue
+		}
+
+		// 网关属于纯拓扑控制节点，自身不落 Task 记录，但必须继续向下穿透以覆盖多层级联落选分支
+		if node.IsActivity() {
+			skipped = append(skipped, node)
+		}
+		for _, edge := range p.OutEdges[node.ID] {
+			if next, ok := p.NodesMap[edge.Target]; ok {
+				queue = append(queue, next)
+			}
+		}
+	}
+	return skipped
+}
+
+// reachableFrom 沿出边正向广度遍历，求解给定根节点集合的完整可达域
+func (p *ExecutionPlan) reachableFrom(roots []model.NodeSpec) map[string]struct{} {
+	reachable := make(map[string]struct{})
+	queue := append([]model.NodeSpec{}, roots...)
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+
+		if _, seen := reachable[node.ID]; seen {
+			continue
+		}
+		reachable[node.ID] = struct{}{}
+
+		for _, edge := range p.OutEdges[node.ID] {
+			if next, ok := p.NodesMap[edge.Target]; ok {
+				queue = append(queue, next)
+			}
+		}
+	}
+	return reachable
 }
 
 // evaluateEdge 优先面向标准 RuleGroup 规则组进行求值；若无 RuleGroup 但配置了文本表达式，则委托表达式引擎求值

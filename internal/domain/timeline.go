@@ -102,3 +102,12 @@ type TaskTimelineSummary struct {
 	Linked         int
 	Pending        int
 }
+
+// RejectSnapshot 流程引擎导出的处于激活待响应状态的驳回上下文快照
+type RejectSnapshot struct {
+	Operator   string // 驳回处理人账号
+	NodeID     string // 驳回环节节点标识
+	NodeName   string // 驳回环节展示名称
+	Comment    string // 驳回意见或修改批注
+	FinishTime string // 驳回办结时间 (标准格式 YYYY-MM-DD HH:mm:ss)
+}

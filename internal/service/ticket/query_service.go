@@ -29,6 +29,8 @@ type QueryService interface {
 	TaskRecord(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error)
 	// TaskTimeline 以节点执行批次为单位聚合可见任务时间线事件，聚合审批汇总与参与人真名
 	TaskTimeline(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskTimelineEvent, int64, error)
+	// GetLatestReject 解析流程实例最近一次被驳回的快照信息
+	GetLatestReject(ctx context.Context, processInstID domain.ID) (*domain.LatestReject, error)
 }
 
 type queryService struct {
@@ -373,6 +375,40 @@ func (q *queryService) toTaskRecords(ctx context.Context, ts []domain.TaskRecord
 			FormValues:   taskDataMap[src.TaskID.Int()],
 		}
 	})
+}
+
+// GetLatestReject 查询当前流程实例中处于活跃未闭环状态的最近一次驳回快照
+// 若未发生驳回、或驳回后已被重新推进办结（已走回来），流程引擎会返回 nil
+func (q *queryService) GetLatestReject(ctx context.Context, processInstID domain.ID) (*domain.LatestReject, error) {
+	if processInstID.IsZero() {
+		return nil, nil
+	}
+
+	engineType := q.resolveEngineType(ctx, processInstID)
+	snapshot, err := q.engine.GetActiveReject(ctx, engineType, processInstID)
+	if err != nil {
+		q.logger.Warn("获取驳回快照失败，降级返回空驳回信息", elog.FieldErr(err), elog.String("process_instance_id", processInstID.String()))
+		return nil, nil
+	}
+	if snapshot == nil {
+		return nil, nil
+	}
+
+	// 仅定向解析驳回人真名，避免全员 RPC 浪费
+	uMap := q.getUserMap(ctx, []string{snapshot.Operator})
+	displayName := uMap[snapshot.Operator]
+	if displayName == "" {
+		displayName = snapshot.Operator
+	}
+
+	return &domain.LatestReject{
+		RejectedBy:     snapshot.Operator,
+		RejectedByName: displayName,
+		NodeID:         snapshot.NodeID,
+		NodeName:       snapshot.NodeName,
+		Reason:         snapshot.Comment,
+		RejectedAt:     snapshot.FinishTime,
+	}, nil
 }
 
 // fetchPagedParallel 通用轻量分页并发拉取辅助函数，将明细切片与记录总数解耦并行查询，消除样板代码

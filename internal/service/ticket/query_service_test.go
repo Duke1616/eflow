@@ -324,7 +324,8 @@ func TestQueryService_ListUserTodo_CrossEngine(t *testing.T) {
 	unifiedEngine := engine.NewEngineDispatcher(easyflowEngine, flowxEngine)
 
 	// Mock EasyFlow 产生一条待办
-	mockEngineRepo.EXPECT().TodoList(gomock.Any(), "alice", "", false, 0, 500).
+	// 分发器按「各引擎各自前 K 条」下推，K = offset + limit = 10，而非全量拉取
+	mockEngineRepo.EXPECT().TodoList(gomock.Any(), "alice", "", false, 0, 10).
 		Return([]domain.Instance{
 			{ProcInstID: 101, CurrentNodeName: "组长初审", ApprovedBy: "alice", TaskID: 501},
 		}, nil)
@@ -443,6 +444,97 @@ func TestQueryService_TaskTimeline_MultiEngineResolution(t *testing.T) {
 			require.Len(t, events, 1)
 			assert.Equal(t, "node_1", events[0].NodeID)
 			assert.Contains(t, events[0].Actors, "爱丽丝")
+		})
+	}
+}
+
+func TestQueryService_GetLatestReject(t *testing.T) {
+	testCases := []struct {
+		name             string
+		instID           domain.ID
+		repoTicket       domain.Ticket
+		mockSnapshot     *domain.RejectSnapshot
+		mockSnapshotErr  error
+		wantLatestReject *domain.LatestReject
+	}{
+		{
+			name:   "驳回后处于待办重审阶段精准提取驳回信息",
+			instID: domain.NewID("proc_1001"),
+			repoTicket: domain.Ticket{
+				Process: domain.Process{EngineType: domain.EngineTypeFlowx},
+			},
+			mockSnapshot: &domain.RejectSnapshot{
+				NodeID:     "node_finance",
+				NodeName:   "财务初审",
+				Operator:   "finance_user",
+				Comment:    "缺少发票抬头，请补全后重填",
+				FinishTime: "2026-11-11 09:30:00",
+			},
+			wantLatestReject: &domain.LatestReject{
+				RejectedBy:     "finance_user",
+				RejectedByName: "财务小张",
+				NodeID:         "node_finance",
+				NodeName:       "财务初审",
+				Reason:         "缺少发票抬头，请补全后重填",
+				RejectedAt:     "2026-11-11 09:30:00",
+			},
+		},
+		{
+			name:   "驳回后提单人已重新提交且流程已重新推进走回来_引擎返回nil",
+			instID: domain.NewID("proc_1003"),
+			repoTicket: domain.Ticket{
+				Process: domain.Process{EngineType: domain.EngineTypeFlowx},
+			},
+			mockSnapshot:     nil,
+			wantLatestReject: nil, // 已走回来，横幅自动消隐
+		},
+		{
+			name:   "无驳回仅审批通过流转",
+			instID: domain.NewID("proc_1002"),
+			repoTicket: domain.Ticket{
+				Process: domain.Process{EngineType: domain.EngineTypeFlowx},
+			},
+			mockSnapshot:     nil,
+			wantLatestReject: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockRepo := repomocks.NewMockTicketRepository(ctrl)
+			mockEngine := enginemocks.NewMockIEngine(ctrl)
+			mockUser := usermocks.NewMockUserServiceClient(ctrl)
+
+			mockRepo.EXPECT().DetailByProcessInstance(gomock.Any(), tc.instID).
+				Return(tc.repoTicket, nil)
+			mockEngine.EXPECT().GetActiveReject(gomock.Any(), tc.repoTicket.Process.EngineType, tc.instID).
+				Return(tc.mockSnapshot, tc.mockSnapshotErr)
+
+			if tc.wantLatestReject != nil {
+				mockUser.EXPECT().QueryByUsernames(gomock.Any(), gomock.Any()).
+					Return(&userv1.QueryUsersResp{
+						Users: []*userv1.User{
+							{Username: "finance_user", DisplayName: "财务小张"},
+						},
+					}, nil)
+			}
+
+			svc := NewQueryService(mockRepo, mockEngine, mockUser, nil)
+			latestReject, err := svc.GetLatestReject(context.Background(), tc.instID)
+			require.NoError(t, err)
+
+			if tc.wantLatestReject == nil {
+				assert.Nil(t, latestReject)
+			} else {
+				require.NotNil(t, latestReject)
+				assert.Equal(t, tc.wantLatestReject.RejectedBy, latestReject.RejectedBy)
+				assert.Equal(t, tc.wantLatestReject.RejectedByName, latestReject.RejectedByName)
+				assert.Equal(t, tc.wantLatestReject.NodeID, latestReject.NodeID)
+				assert.Equal(t, tc.wantLatestReject.Reason, latestReject.Reason)
+			}
 		})
 	}
 }

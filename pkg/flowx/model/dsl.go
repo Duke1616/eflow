@@ -2,7 +2,6 @@ package model
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/samber/lo"
 )
@@ -122,25 +121,16 @@ func (def ProcessDefinition) Validate() error {
 	return nil
 }
 
-// RetryPolicy 自动化任务失败重试退避策略
-type RetryPolicy struct {
-	MaxAttempts     int           `json:"max_attempts"`               // 最大重试次数 (如 3 表示失败后最多重试 3 次)
-	InitialInterval time.Duration `json:"initial_interval,omitempty"` // 初始重试间隔 (如 100ms)
-	BackoffFactor   float64       `json:"backoff_factor,omitempty"`   // 退避指数倍数 (如 2.0，若 <= 1.0 则为固定间隔)
-	MaxInterval     time.Duration `json:"max_interval,omitempty"`     // 封顶重试间隔 (防止指数退避无限膨胀)
-}
-
 // NodeSpec 节点规格定义
 type NodeSpec struct {
-	ID          string         `json:"id"`                     // 节点物理ID
-	Name        string         `json:"name"`                   // 节点展示名称
-	Type        NodeType       `json:"type"`                   // 节点类型
-	WorkerType  string         `json:"worker_type,omitempty"`  // 自动化任务执行器类型 (当 Type 为 TASK 时生效)
-	RetryPolicy *RetryPolicy   `json:"retry_policy,omitempty"` // 自动化任务失败重试退避策略
-	SignRule    SignRule       `json:"sign_rule,omitempty"`    // 审批规则: ONE_VOTE, ALL_PASS
-	Assignees   []string       `json:"assignees,omitempty"`    // 指派审批人账号列表
-	Hooks       []string       `json:"hooks,omitempty"`        // 同步守卫与动态算人 Hook 声明
-	Props       map[string]any `json:"props,omitempty"`        // 扩展配置属性
+	ID         string         `json:"id"`                    // 节点物理ID
+	Name       string         `json:"name"`                  // 节点展示名称
+	Type       NodeType       `json:"type"`                  // 节点类型
+	WorkerType string         `json:"worker_type,omitempty"` // 自动化任务执行器类型 (当 Type 为 TASK 时生效)
+	SignRule   SignRule       `json:"sign_rule,omitempty"`   // 审批规则: ONE_VOTE, ALL_PASS
+	Assignees  []string       `json:"assignees,omitempty"`   // 指派审批人账号列表
+	Hooks      []string       `json:"hooks,omitempty"`       // 同步守卫与动态算人 Hook 声明
+	Props      map[string]any `json:"props,omitempty"`       // 扩展配置属性
 }
 
 // IsActivity 是否属于活动/任务节点 (审批节点、自动化节点、抄送节点等具有业务执行或任务特征的实体)

@@ -27,6 +27,8 @@ type TicketRepository interface {
 	Detail(ctx context.Context, id int64) (domain.Ticket, error)
 	// RegisterProcess 登记并将流程引擎实例类型与唯一标识回写绑定到工单记录中
 	RegisterProcess(ctx context.Context, id int64, engineType domain.EngineType, instanceID domain.ID) error
+	// RevokeProcessBinding 精确撤销启动前预绑定的现代引擎实例 Key，并将工单复位为待启动态
+	RevokeProcessBinding(ctx context.Context, id int64, instanceID domain.ID) error
 	// MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因
 	MarkProcessStartFailed(ctx context.Context, id int64, reason string) error
 	// PrepareProcessRestart 将流程启动失败工单原子切换回启动中状态
@@ -116,6 +118,11 @@ func (repo *ticketRepository) RegisterProcess(ctx context.Context, id int64, eng
 	default:
 		return repo.dao.RegisterProcessInstanceId(ctx, id, instanceID.Int(), domain.PROCESS.ToUint8())
 	}
+}
+
+// RevokeProcessBinding 精确撤销启动前预绑定的现代引擎实例 Key，并将工单复位为待启动态。
+func (repo *ticketRepository) RevokeProcessBinding(ctx context.Context, id int64, instanceID domain.ID) error {
+	return repo.dao.RevokeProcessBindingByKey(ctx, id, instanceID.String())
 }
 
 // MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因。

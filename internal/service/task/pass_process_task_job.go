@@ -9,7 +9,6 @@ import (
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/gotomicro/ego/core/elog"
-	"gorm.io/gorm"
 )
 
 // PassProcessTaskJob 审批通过自动归档/流转推进后台任务
@@ -94,7 +93,7 @@ func (j *PassProcessTaskJob) advanceTask(ctx context.Context, task domain.Task) 
 	mt, err := j.engine.GetAutomationTask(ctx, engineType, task.InstanceID, task.NodeID)
 	if err != nil {
 		// 节点在流程引擎中已不存在未完成记录（可能已被网关自动跳过、兄弟分支竞争通过或提前完结），直接标记推进避免死循环
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, engine.ErrTaskNotFound) {
 			j.logger.Info("流程引擎中该节点任务已完结或被跳过，直接标记自动化任务已推进",
 				elog.Int64("taskId", task.ID),
 				elog.String("procInstId", task.InstanceID.String()),

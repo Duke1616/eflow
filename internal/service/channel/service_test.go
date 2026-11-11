@@ -87,7 +87,7 @@ func TestChannelActionService_DispatchAction(t *testing.T) {
 			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
 				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelWechat, "ZhangSan", domain.EngineType(""), domain.NewID(5243)).
 					Return(&userv1.User{Username: "zhangsan", IsAdmin: false}, nil)
-				mockTicket.EXPECT().Reject(gomock.Any(), gomock.Any(), "5243", "zhangsan", false, "不符合发版要求").Return(nil)
+				mockTicket.EXPECT().Reject(gomock.Any(), gomock.Any(), "5243", "zhangsan", false, "不符合发版要求", "", false).Return(nil)
 			},
 			wantSuccess: true,
 			wantRemark:  "你已驳回该申请, 批注：不符合发版要求",

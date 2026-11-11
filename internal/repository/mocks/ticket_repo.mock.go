@@ -336,6 +336,20 @@ func (mr *MockTicketRepositoryMockRecorder) RegisterProcess(ctx, id, engineType,
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterProcess", reflect.TypeOf((*MockTicketRepository)(nil).RegisterProcess), ctx, id, engineType, instanceID)
 }
 
+// RevokeProcessBinding mocks base method.
+func (m *MockTicketRepository) RevokeProcessBinding(ctx context.Context, id int64, instanceID domain.ID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RevokeProcessBinding", ctx, id, instanceID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RevokeProcessBinding indicates an expected call of RevokeProcessBinding.
+func (mr *MockTicketRepositoryMockRecorder) RevokeProcessBinding(ctx, id, instanceID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeProcessBinding", reflect.TypeOf((*MockTicketRepository)(nil).RevokeProcessBinding), ctx, id, instanceID)
+}
+
 // UpdateStatusByProcessInstance mocks base method.
 func (m *MockTicketRepository) UpdateStatusByProcessInstance(ctx context.Context, instanceID domain.ID, status uint8, wtime int64) error {
 	m.ctrl.T.Helper()

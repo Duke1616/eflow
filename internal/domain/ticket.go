@@ -156,6 +156,18 @@ type Ticket struct {
 	ProcessStartError    string           // 最近一次流程启动失败原因
 	ProcessStartAttempts int              // 流程启动尝试次数
 	NotificationConf     NotificationConf // 为支持告警自动转单等引入的外部通知媒介配置
+	LatestReject         *LatestReject    // 最近一次被驳回的快照信息（用于界面高亮警告）
+	FlowPolicy           FlowPolicy       // 工单所属工作流的流转与审批治理策略
+}
+
+// LatestReject 工单最近一次被驳回的快照信息
+type LatestReject struct {
+	RejectedBy     string `json:"rejected_by"`      // 驳回人账号
+	RejectedByName string `json:"rejected_by_name"` // 驳回人展示姓名
+	NodeID         string `json:"node_id"`          // 驳回节点标识
+	NodeName       string `json:"node_name"`        // 驳回环节名称
+	Reason         string `json:"reason"`           // 驳回意见
+	RejectedAt     string `json:"rejected_at"`      // 驳回时间 (格式化字符串)
 }
 
 // WithdrawalCandidate 是长期停留在撤回中状态、等待后台恢复的工单快照。
@@ -172,6 +184,9 @@ var ErrInvalidParameter = errors.New("参数校验错误")
 
 // ErrTicketNotAccessible 隐藏工单不存在与无权访问之间的差异。
 var ErrTicketNotAccessible = errors.New("工单不存在或无权访问")
+
+// ErrForbidden 操作被策略或权限禁止
+var ErrForbidden = errors.New("操作被禁止")
 
 // Validate 校验工单创建/更新请求的合法性，防止脏数据入库
 func (t *Ticket) Validate() error {

@@ -257,7 +257,7 @@ func (h *Handler) Delete(ctx *ginx.Context) (ginx.Result, error) {
 
 // FindOrderGraph 计算解析并生成已部署流程的流转地图，通过快照历史和任务记录点亮流转路径连线
 func (h *Handler) FindOrderGraph(ctx *ginx.Context, req OrderGraphReq) (ginx.Result, error) {
-	flow, err := h.svc.GetHighlightedGraph(ctx.Context, req.Id, req.ProcessInstanceId, domain.Status(req.Status))
+	flow, err := h.svc.GetHighlightedGraph(ctx.Context, req.Id, req.ProcessInstanceId)
 	if err != nil {
 		if errors.Is(err, repository.ErrWorkflowNotFound) {
 			return ErrWorkflowNotFound, nil
@@ -290,6 +290,18 @@ func (h *Handler) toDomain(req CreateReq) domain.Workflow {
 		FlowData:     req.FlowData,
 	}
 
+	if req.FlowPolicy != nil {
+		res.FlowPolicy = domain.FlowPolicy{
+			AllowTransfer: req.FlowPolicy.AllowTransfer,
+			AllowReject:   req.FlowPolicy.AllowReject,
+			RejectModes: lo.Map(req.FlowPolicy.RejectModes, func(src string, _ int) domain.RejectMode {
+				return domain.RejectMode(src)
+			}),
+		}
+	} else {
+		res.FlowPolicy = res.ResolveFlowPolicy()
+	}
+
 	return res
 }
 
@@ -306,10 +318,23 @@ func (h *Handler) toUpdateDomain(req UpdateReq) domain.Workflow {
 		FlowData:     req.FlowData,
 	}
 
+	if req.FlowPolicy != nil {
+		res.FlowPolicy = domain.FlowPolicy{
+			AllowTransfer: req.FlowPolicy.AllowTransfer,
+			AllowReject:   req.FlowPolicy.AllowReject,
+			RejectModes: lo.Map(req.FlowPolicy.RejectModes, func(src string, _ int) domain.RejectMode {
+				return domain.RejectMode(src)
+			}),
+		}
+	} else {
+		res.FlowPolicy = res.ResolveFlowPolicy()
+	}
+
 	return res
 }
 
 func (h *Handler) toWorkflowVo(req domain.Workflow) Workflow {
+	policy := req.ResolveFlowPolicy()
 	res := Workflow{
 		Id:           req.Id,
 		Name:         req.Name,
@@ -320,7 +345,14 @@ func (h *Handler) toWorkflowVo(req domain.Workflow) Workflow {
 		NotifyMethod: req.NotifyMethod.ToUint8(),
 		TemplateId:   req.TemplateId,
 		EngineType:   req.ResolveEngineType().String(),
-		FlowData:     req.FlowData,
+		FlowPolicy: &FlowPolicyVO{
+			AllowTransfer: policy.AllowTransfer,
+			AllowReject:   policy.AllowReject,
+			RejectModes: lo.Map(policy.RejectModes, func(src domain.RejectMode, _ int) string {
+				return string(src)
+			}),
+		},
+		FlowData: req.FlowData,
 	}
 
 	return res

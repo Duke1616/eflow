@@ -5,7 +5,7 @@
 > 💡 **联动包含机制**：当为角色分配某项操作权限时，系统将**自动附带拥有**其“联动包含”中的权限，无需管理员手动重复勾选（例如：勾选“修改用户”会自动附带拥有“用户详情”权限）。
 
 - **受控业务模块数**: 5
-- **受控权限点总数**: 50
+- **受控权限点总数**: 51
 
 
 ## 模块: 工单模板/执行单元路由 (`dispatch`)
@@ -41,6 +41,7 @@
 | 重新启动流程 | `ticket:manager:process_restart` | 租户级 | 本级 | 正常 | - | `internal/web/ticket/handler.go` 行 65 |
 | 评价工单 | `ticket:manager:rate` | 租户级 | 本级 | 静默 (不暴露) | - | `internal/web/ticket/handler.go` 行 121 |
 | 驳回审批 | `ticket:manager:reject` | 租户级 | 本级 | 正常 | 任务节点表单配置 · `ticket:manager:form_config` | `internal/web/ticket/handler.go` 行 107 |
+| 可驳回目标节点 | `ticket:manager:reject_targets` | 租户级 | 本级 | 正常 | 工单模板详情 · `ticket:template:get`<br>工单详情 · `ticket:manager:get` | `internal/web/ticket/handler.go` 行 131 |
 | 撤销工单 | `ticket:manager:revoke` | 租户级 | 本级 | 正常 | - | `internal/web/ticket/handler.go` 行 117 |
 | 提交工单 | `ticket:manager:submit` | 租户级 | 本级 | 正常 | 工单模板详情 · `ticket:template:get`<br>收藏状态变更 · `ticket:template:toggle_favorite`<br>模板收藏夹 · `ticket:template:view_favorite`<br>工单模板列表 · `ticket:template:view`<br>查询模板分组摘要 · `ticket:template:view_group_summary`<br>`cmdb:tools:upload` | `internal/web/ticket/handler.go` 行 59 |
 | 流转时间线 | `ticket:manager:timeline` | 租户级 | 本级 | 正常 | - | `internal/web/ticket/handler.go` 行 75 |

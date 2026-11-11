@@ -19,6 +19,17 @@ const (
 	TaskCancelled = TaskSystemRejected
 )
 
+// PendingTaskQuery 待办任务检索条件
+// Assignee 为空表示不限处理人；ProcessName 为流程定义名精确匹配（与 easyflow 侧 pd.name = ? 语义对齐）；
+// Limit <= 0 表示不限条数，调用方需自行保证结果集规模可控
+type PendingTaskQuery struct {
+	Assignee    string
+	ProcessName string
+	SortByAsc   bool
+	Offset      int
+	Limit       int
+}
+
 // Task 流转中的任务明细 (每个指派人一条记录，Value Semantics 优先)
 type Task struct {
 	ID         string     `json:"id"`

@@ -122,3 +122,76 @@ func TestCalculateTraversedEdges_SkippedBranch(t *testing.T) {
 	// 3. backend 尚未通过，join 网关未放行，下游 end 不得点亮
 	assert.NotContains(t, edges["join"], "end")
 }
+
+// TestCalculateTraversedEdges_RejectBackToStart 验证工单被驳回至起点修改重提时，下游已作废的历史连线全部熄灭
+func TestCalculateTraversedEdges_RejectBackToStart(t *testing.T) {
+	def := model.ProcessDefinition{
+		Key:     "test_reject_back_to_start",
+		Name:    "驳回回退起点流程",
+		Version: 1,
+		Nodes: []model.NodeSpec{
+			{ID: "start", Type: model.NodeStart, Name: "开始"},
+			{ID: "cc", Type: model.NodeCarbonCopy, Name: "抄送提交人"},
+			{ID: "fork", Type: model.NodeGatewayInclusive, Name: "分流网关"},
+			{ID: "backend", Type: model.NodeApproval, Name: "后端"},
+			{ID: "algo", Type: model.NodeApproval, Name: "算法"},
+		},
+		Edges: []model.EdgeSpec{
+			{Source: "start", Target: "cc"},
+			{Source: "cc", Target: "fork"},
+			{Source: "fork", Target: "backend"},
+			{Source: "fork", Target: "algo"},
+		},
+	}
+	plan := NewExecutionPlan(def)
+
+	// 历史批次 0 曾流转至后端，并在后端驳回至起点（批次 1，start 生成 Pending 待办任务）
+	tasks := []*model.Task{
+		{NodeID: "cc", Status: model.TaskPassed, BatchCode: 0},
+		{NodeID: "backend", Status: model.TaskRejected, BatchCode: 0},
+		{NodeID: "algo", Status: model.TaskCancelled, BatchCode: 0},
+		{NodeID: "start", Status: model.TaskPending, BatchCode: 1}, // 当前处于提单人重报待办中
+	}
+
+	edges := plan.CalculateTraversedEdges(tasks, nil)
+
+	// 开始节点未提交，任何向下流转的边均不得点亮
+	assert.Empty(t, edges["start"], "退回至起点待办时，开始节点出边不得点亮")
+	assert.Empty(t, edges["cc"], "历史抄送人出边不得点亮")
+	assert.Empty(t, edges["fork"], "历史分流网关出边绝对不得点亮至后端或算法")
+}
+
+// TestCalculateTraversedEdges_MultilevelReject 验证跨级驳回场景下，流转精确停留在回退目标节点，后续作废边严格阻断
+func TestCalculateTraversedEdges_MultilevelReject(t *testing.T) {
+	def := model.ProcessDefinition{
+		Key:     "test_multilevel_reject",
+		Name:    "多级审批驳回流程",
+		Version: 1,
+		Nodes: []model.NodeSpec{
+			{ID: "start", Type: model.NodeStart, Name: "开始"},
+			{ID: "audit_a", Type: model.NodeApproval, Name: "节点A"},
+			{ID: "audit_b", Type: model.NodeApproval, Name: "节点B"},
+			{ID: "audit_c", Type: model.NodeApproval, Name: "节点C"},
+		},
+		Edges: []model.EdgeSpec{
+			{Source: "start", Target: "audit_a"},
+			{Source: "audit_a", Target: "audit_b"},
+			{Source: "audit_b", Target: "audit_c"},
+		},
+	}
+	plan := NewExecutionPlan(def)
+
+	// 批次 0 中 A 与 B 通过，在 C 处驳回至 A（批次 1 中 A 生成新的 Pending 任务）
+	tasks := []*model.Task{
+		{NodeID: "audit_a", Status: model.TaskPassed, BatchCode: 0},
+		{NodeID: "audit_b", Status: model.TaskPassed, BatchCode: 0},
+		{NodeID: "audit_c", Status: model.TaskRejected, BatchCode: 0},
+		{NodeID: "audit_a", Status: model.TaskPending, BatchCode: 1}, // A 回退后重新待办
+	}
+
+	edges := plan.CalculateTraversedEdges(tasks, nil)
+
+	assert.Contains(t, edges["start"], "audit_a", "Start 到 A 节点的连线正常流经点亮")
+	assert.NotContains(t, edges["audit_a"], "audit_b", "A 节点等待重审，出边必须严格阻断")
+	assert.NotContains(t, edges["audit_b"], "audit_c", "历史作废的 B 到 C 连线绝对不得点亮")
+}

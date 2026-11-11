@@ -36,7 +36,7 @@ func newExecutionTracer(p *ExecutionPlan) *executionTracer {
 		activated: make(map[string]bool),
 		completed: make(map[string]bool),
 	}
-	// 开始节点恒定已激活且已完成
+	// 开始节点默认已激活；若扫描到开始节点存在待办任务（驳回至起点修改），将重置为未完成
 	if p.StartNode.ID != "" {
 		t.activated[p.StartNode.ID] = true
 		t.completed[p.StartNode.ID] = true
@@ -59,7 +59,19 @@ func (t *executionTracer) markTerminalNodes(inst *model.Instance) {
 // markTaskNodes 遍历物理任务切片，依据每个节点最新执行批次 (Max BatchCode) 的真实定态标记到达与完成
 func (t *executionTracer) markTaskNodes(tasks []*model.Task) {
 	tasksByNode := lo.GroupBy(tasks, func(tk *model.Task) string { return tk.NodeID })
+
+	// 若开始节点存在最新批次的待办任务（被驳回到起点重新填报），则开始节点尚未完成
+	if startTasks, ok := tasksByNode[t.plan.StartNode.ID]; ok {
+		latestStartTasks := model.FilterLatestBatchTasks(startTasks)
+		if lo.SomeBy(latestStartTasks, func(tk *model.Task) bool { return tk.IsPending() }) {
+			t.completed[t.plan.StartNode.ID] = false
+		}
+	}
+
 	for nodeID, nodeTasks := range tasksByNode {
+		if nodeID == t.plan.StartNode.ID {
+			continue
+		}
 		latestTasks := model.FilterLatestBatchTasks(nodeTasks)
 
 		// 若最新批次全为系统跳过任务，标记为已到达且已办结（供跳过分支虚线投影感知）
@@ -141,15 +153,40 @@ func (t *executionTracer) canReach(currID string, isForward bool, matcher func(s
 	return false
 }
 
-// collectTraversedEdges 收集源节点已完成推进且目标节点已激活的有效有向边
+// collectTraversedEdges 从开始节点顺流推进，严格按拓扑连通性收集当前生命周期的已流转有向边
 func (t *executionTracer) collectTraversedEdges() map[string][]string {
 	traversed := make(map[string][]string)
-	for _, e := range t.plan.Def.Edges {
-		if t.completed[e.Source] && t.activated[e.Target] {
-			if !slices.Contains(traversed[e.Source], e.Target) {
-				traversed[e.Source] = append(traversed[e.Source], e.Target)
+	startID := t.plan.StartNode.ID
+	if startID == "" || !t.completed[startID] {
+		// 若开始节点未就绪或当前正处于驳回重报待办状态，后续流程未顺流流转，返回空边集
+		return traversed
+	}
+
+	queue := []string{startID}
+	visited := map[string]bool{startID: true}
+
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+
+		for _, edge := range t.plan.OutEdges[curr] {
+			target := edge.Target
+			// 仅当目标节点确实已被当前流转激活才纳入
+			if !t.activated[target] {
+				continue
+			}
+
+			if !slices.Contains(traversed[curr], target) {
+				traversed[curr] = append(traversed[curr], target)
+			}
+
+			// 目标节点已完成流转且未访问，继续向下推导；若为待办或驳回终止，出边严格阻断
+			if t.completed[target] && !visited[target] {
+				visited[target] = true
+				queue = append(queue, target)
 			}
 		}
 	}
+
 	return traversed
 }

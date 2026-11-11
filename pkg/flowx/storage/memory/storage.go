@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -162,30 +163,59 @@ func (m *Storage) ListPendingTasksByInstances(ctx context.Context, instIDs []str
 	return result, nil
 }
 
-func (m *Storage) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
+func (m *Storage) ListPendingTasks(ctx context.Context, query model.PendingTaskQuery) ([]*model.Task, int64, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	var matched []*model.Task
 	for _, t := range m.tasks {
-		if (assignee == "" || t.Assignee == assignee) && t.Status == model.TaskPending {
-			cp := *t
-			matched = append(matched, &cp)
+		if t.Status != model.TaskPending {
+			continue
 		}
+		if query.Assignee != "" && t.Assignee != query.Assignee {
+			continue
+		}
+		if query.ProcessName != "" && m.processNameOf(t.InstanceID) != query.ProcessName {
+			continue
+		}
+		cp := *t
+		matched = append(matched, &cp)
 	}
 
+	// 契约要求结果按创建时间有序：上层跨引擎归并分页依赖此有序性。
+	// map 遍历顺序随机，缺少排序会让内存实现与 MySQL 实现行为分叉
+	sort.SliceStable(matched, func(i, j int) bool {
+		if query.SortByAsc {
+			return matched[i].CreateTime.Before(matched[j].CreateTime)
+		}
+		return matched[i].CreateTime.After(matched[j].CreateTime)
+	})
+
 	total := int64(len(matched))
-	if offset >= len(matched) {
+	if query.Offset >= len(matched) {
 		return nil, total, nil
 	}
-	end := offset + limit
-	if end > len(matched) || limit <= 0 {
+	end := query.Offset + query.Limit
+	if end > len(matched) || query.Limit <= 0 {
 		end = len(matched)
 	}
 
-	res := make([]*model.Task, end-offset)
-	copy(res, matched[offset:end])
+	res := make([]*model.Task, end-query.Offset)
+	copy(res, matched[query.Offset:end])
 	return res, total, nil
+}
+
+// processNameOf 经实例回溯其当时执行的流程定义名（调用方须已持有读锁）
+func (m *Storage) processNameOf(instanceID string) string {
+	inst, ok := m.instances[instanceID]
+	if !ok {
+		return ""
+	}
+	def, ok := m.definitions[fmt.Sprintf("%s:%d", inst.ProcKey, inst.Version)]
+	if !ok {
+		return ""
+	}
+	return def.Name
 }
 
 func (m *Storage) UpdateTask(ctx context.Context, task *model.Task) error {

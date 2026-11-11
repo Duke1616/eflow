@@ -680,6 +680,20 @@ func (s *service) PrepareCommonFields(info Info, data *NotificationData) []notif
 			Content: fmt.Sprintf(`**%s:**\n%v`, field, value),
 		})
 	}
+
+	// 驳回信息高亮透出：若工单存在最近驳回记录，在通知卡片中置顶展示驳回环节、驳回人与原因
+	if info.Ticket.LatestReject != nil && info.Ticket.LatestReject.Reason != "" {
+		rejecter := info.Ticket.LatestReject.RejectedByName
+		if rejecter == "" {
+			rejecter = info.Ticket.LatestReject.RejectedBy
+		}
+		fields = append(fields, notification.Field{
+			IsShort: false,
+			Tag:     "lark_md",
+			Content: fmt.Sprintf(`**⚠️ 审批驳回意见 (%s - %s):**\n%s`, info.Ticket.LatestReject.NodeName, rejecter, info.Ticket.LatestReject.Reason),
+		})
+	}
+
 	return fields
 }
 

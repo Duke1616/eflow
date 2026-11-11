@@ -1,6 +1,7 @@
 package ticket
 
 import (
+	"github.com/Duke1616/eflow/internal/pkg/flowdsl"
 	"github.com/Duke1616/eflow/pkg/idx"
 )
 
@@ -66,9 +67,23 @@ type PassOrderReq struct {
 }
 
 type RejectOrderReq struct {
+	TicketId     int64  `json:"ticket_id"`
+	TaskId       TaskID `json:"task_id"`
+	Comment      string `json:"comment"`
+	TargetNodeId string `json:"target_node_id,omitempty"`
+	Terminate    bool   `json:"terminate,omitempty"`
+}
+
+type RejectTargetsReq struct {
 	TicketId int64  `json:"ticket_id"`
 	TaskId   TaskID `json:"task_id"`
-	Comment  string `json:"comment"`
+}
+
+type RejectTargetVO struct {
+	NodeID    string `json:"node_id"`
+	NodeName  string `json:"node_name"`
+	NodeType  string `json:"node_type"`
+	IsStarter bool   `json:"is_starter"`
 }
 
 type TransferReq struct {
@@ -93,6 +108,21 @@ type TaskFormConfigReq struct {
 	TicketId   int64  `json:"ticket_id"`
 	WorkflowId int64  `json:"workflow_id"`
 	TaskId     TaskID `json:"task_id"`
+}
+
+type TaskFormConfigResp struct {
+	Fields []flowdsl.Field        `json:"fields"`
+	Values map[string]interface{} `json:"values"`
+}
+
+// LatestRejectVO 工单最近一次被驳回的展示视图
+type LatestRejectVO struct {
+	RejectedBy     string `json:"rejected_by"`      // 驳回人账号
+	RejectedByName string `json:"rejected_by_name"` // 驳回人展示姓名
+	NodeID         string `json:"node_id"`          // 驳回节点标识
+	NodeName       string `json:"node_name"`        // 驳回环节名称
+	Reason         string `json:"reason"`           // 驳回原因/修改意见
+	RejectedAt     string `json:"rejected_at"`      // 驳回时间
 }
 
 type RetrieveTickets struct {
@@ -168,6 +198,15 @@ type Ticket struct {
 	RevokeReason         string                 `json:"revoke_reason,omitempty"`
 	ProcessStartError    string                 `json:"process_start_error,omitempty"`
 	ProcessStartAttempts int                    `json:"process_start_attempts,omitempty"`
+	LatestReject         *LatestRejectVO        `json:"latest_reject,omitempty"`
+	FlowPolicy           *FlowPolicyVO          `json:"flow_policy,omitempty"`
+}
+
+// FlowPolicyVO 流程审批与流转治理策略视图模型
+type FlowPolicyVO struct {
+	AllowTransfer bool     `json:"allow_transfer"`
+	AllowReject   bool     `json:"allow_reject"`
+	RejectModes   []string `json:"reject_modes"`
 }
 
 type Rating struct {

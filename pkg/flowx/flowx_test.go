@@ -573,8 +573,17 @@ func (s *FlowxTestSuite) TestGateways() {
 		require.NoError(s.T(), err)
 
 		tasks, _ := store.ListTasksByInstance(s.ctx, instID)
-		require.Len(s.T(), tasks, 1)
-		assert.Equal(s.T(), "branch_first", tasks[0].NodeID)
+		require.Len(s.T(), tasks, 2)
+
+		// 仅首条命中分支真实派发待办，落选分支必须落 TaskSkipped 段以便下游汇聚屏障可判定
+		first, found := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "branch_first" })
+		s.Require().True(found)
+		assert.Equal(s.T(), model.TaskPending, first.Status)
+		assert.Equal(s.T(), "alice", first.Assignee)
+
+		second, found := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "branch_second" })
+		s.Require().True(found)
+		assert.Equal(s.T(), model.TaskSkipped, second.Status)
 	})
 
 	s.Run("并行网关AND_分支全开且汇聚必须全员到达", func() {
@@ -657,6 +666,55 @@ func (s *FlowxTestSuite) TestGateways() {
 		// sec 审批通过，ops 已 Skip 无需死等，全单办结！
 		_ = engine.Pass(s.ctx, PassReq{TaskID: secTask.ID, Operator: "bob"})
 		inst, _ = store.GetInstance(s.ctx, instID)
+		assert.Equal(s.T(), model.InstanceFinished, inst.Status)
+	})
+
+	s.Run("嵌套网关落选分支穿透Skip_下游AND汇聚不再永久死锁", func() {
+		engine, store := s.newEngine()
+		// 外层包容网关的落选边指向内层网关而非活动节点，内层网关下游的 y/z 必须被穿透标记 Skip，
+		// 否则 AND 汇聚屏障因分支从未产出任务而永久阻断，流程实例死锁在流转中且不抛任何错误
+		def := NewProcess("nested_gateway_proc", "嵌套网关落选穿透测试").
+			Start("start", "开始").
+			InclusiveGateway("gw_outer", "外层分流").
+			Approval("approve_x", "小额审批", model.SignOneVote, "alice").
+			InclusiveGateway("gw_inner", "内层分流").
+			Approval("approve_y", "技术审批", model.SignOneVote, "bob").
+			Approval("approve_z", "法务审批", model.SignOneVote, "carol").
+			ParallelGateway("gw_join", "并行汇聚").
+			End("end", "结束").
+			Edge("start", "gw_outer").
+			ConditionEdge("gw_outer", "approve_x", "amount <= 500").
+			ConditionEdge("gw_outer", "gw_inner", "amount > 500").
+			ConditionEdge("gw_inner", "approve_y", "amount > 1000").
+			ConditionEdge("gw_inner", "approve_z", "amount <= 1000").
+			Edge("approve_x", "gw_join").
+			Edge("approve_y", "gw_join").
+			Edge("approve_z", "gw_join").
+			Edge("gw_join", "end").
+			Build()
+		require.NoError(s.T(), def.Validate())
+
+		instID, err := engine.Start(s.ctx, StartReq{
+			Def:       def,
+			Starter:   "tom",
+			Variables: map[string]any{"amount": 200},
+		})
+		require.NoError(s.T(), err)
+
+		allTasks, _ := store.ListTasksByInstance(s.ctx, instID)
+		require.Len(s.T(), allTasks, 3)
+
+		xTask, _ := lo.Find(allTasks, func(t *model.Task) bool { return t.NodeID == "approve_x" })
+		yTask, _ := lo.Find(allTasks, func(t *model.Task) bool { return t.NodeID == "approve_y" })
+		zTask, _ := lo.Find(allTasks, func(t *model.Task) bool { return t.NodeID == "approve_z" })
+
+		assert.Equal(s.T(), model.TaskPending, xTask.Status)
+		assert.Equal(s.T(), model.TaskSkipped, yTask.Status, "内层网关整条落选分支必须穿透标记跳过")
+		assert.Equal(s.T(), model.TaskSkipped, zTask.Status, "内层网关整条落选分支必须穿透标记跳过")
+
+		// 唯一有效分支通过后 AND 屏障即应放行，全单办结
+		require.NoError(s.T(), engine.Pass(s.ctx, PassReq{TaskID: xTask.ID, Operator: "alice"}))
+		inst, _ := store.GetInstance(s.ctx, instID)
 		assert.Equal(s.T(), model.InstanceFinished, inst.Status)
 	})
 }

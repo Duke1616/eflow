@@ -68,6 +68,8 @@ type TicketDAO interface {
 	RegisterProcessInstanceId(ctx context.Context, id int64, instanceId int, status uint8) error
 	// RegisterProcessInstanceKey 为指定工单登记绑定的现代引擎实例全局唯一 Key 并且同步置为流转状态
 	RegisterProcessInstanceKey(ctx context.Context, id int64, instanceKey string, status uint8) error
+	// RevokeProcessBindingByKey 精确匹配本次预绑定的实例 Key 后解除绑定并将工单复位为待启动态
+	RevokeProcessBindingByKey(ctx context.Context, id int64, instanceKey string) error
 	// MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因
 	MarkProcessStartFailed(ctx context.Context, id int64, reason string) error
 	// PrepareProcessRestart 将流程启动失败工单原子切换回启动中状态
@@ -159,7 +161,7 @@ func (g *gormTicketDAO) DetailByProcessInstance(ctx context.Context, instanceID 
 func (g *gormTicketDAO) UpdateStatusByProcessInstance(ctx context.Context, instanceID string, status uint8, wtime int64) error {
 	now := time.Now().UnixMilli()
 	updates := map[string]interface{}{
-		"status": status,
+		"status": statusGuardExpr(status),
 		"utime":  now,
 	}
 	if wtime > 0 {
@@ -178,6 +180,18 @@ func (g *gormTicketDAO) UpdateStatusByProcessInstance(ctx context.Context, insta
 		return g.updateStatusByInstanceId(ctx, intID, status)
 	}
 	return nil
+}
+
+// statusGuardExpr 构造引擎事件回写工单状态时的终态守卫表达式
+// 撤回是发起人主动表达的更强意图：撤回中与已撤回一律不得被流程办结事件覆盖回 END；
+// 而撤回推进自身 (目标态为 WITHDRAW) 必须放行，才能把 WITHDRAWING 正常收敛为 WITHDRAW
+func statusGuardExpr(target uint8) clause.Expr {
+	if target == domain.WITHDRAW.ToUint8() {
+		return gorm.Expr("CASE WHEN status IN (?, ?) THEN status ELSE ? END",
+			domain.END.ToUint8(), domain.WITHDRAW.ToUint8(), target)
+	}
+	return gorm.Expr("CASE WHEN status IN (?, ?, ?) THEN status ELSE ? END",
+		domain.END.ToUint8(), domain.WITHDRAW.ToUint8(), domain.WITHDRAWING.ToUint8(), target)
 }
 
 func (g *gormTicketDAO) RegisterProcessInstanceId(ctx context.Context, id int64, instanceId int, status uint8) error {
@@ -200,6 +214,22 @@ func (g *gormTicketDAO) RegisterProcessInstanceKey(ctx context.Context, id int64
 		"process_start_error":  "",
 		"utime":                time.Now().UnixMilli(),
 	}).Error
+}
+
+// RevokeProcessBindingByKey 精确匹配本次预绑定的实例 Key 后解除绑定并将工单复位为待启动态。
+// WHERE 必须同时锁定主键与实例 Key：只允许回滚调用方自己刚刚写入的绑定，
+// 严禁放宽条件，否则可能清空另一条正在流转的流程实例绑定造成工单失联。
+// 复位为 START 而非 START_FAILED，是为了把失败态与尝试次数的落账权完整交还给上层统一入口，避免重复自增。
+func (g *gormTicketDAO) RevokeProcessBindingByKey(ctx context.Context, id int64, instanceKey string) error {
+	return g.db.WithContext(ctx).Model(&Ticket{}).
+		Scopes(gormx.IgnoreTenant()).
+		Where("id = ? AND process_instance_key = ?", id, instanceKey).
+		Updates(map[string]interface{}{
+			"process_instance_key": "",
+			"status": gorm.Expr("CASE WHEN status IN (?, ?) THEN status ELSE ? END",
+				domain.END.ToUint8(), domain.WITHDRAW.ToUint8(), domain.START.ToUint8()),
+			"utime": time.Now().UnixMilli(),
+		}).Error
 }
 
 // MarkProcessStartFailed 将尚未绑定流程实例的工单标记为流程启动失败并记录原因。
@@ -286,7 +316,7 @@ func (g *gormTicketDAO) updateStatusByInstanceId(ctx context.Context, instanceId
 	return g.db.WithContext(ctx).Model(&Ticket{}).
 		Scopes(gormx.IgnoreTenant()).
 		Where("process_instance_id = ?", instanceId).Updates(map[string]interface{}{
-		"status": status,
+		"status": statusGuardExpr(status),
 		"utime":  now,
 		"wtime":  now,
 	}).Error

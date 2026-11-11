@@ -32,6 +32,7 @@ var Manager = struct {
 	ProcessRestart string // 重新启动流程 [租户级]
 	Rate           string // 评价工单 [租户级 · 静默]
 	Reject         string // 驳回审批 [租户级]
+	RejectTargets  string // 可驳回目标节点 [租户级]
 	Revoke         string // 撤销工单 [租户级]
 	Submit         string // 提交工单 [租户级]
 	Timeline       string // 流转时间线 [租户级]
@@ -50,6 +51,7 @@ var Manager = struct {
 	ProcessRestart: "ticket:manager:process_restart",
 	Rate:           "ticket:manager:rate",
 	Reject:         "ticket:manager:reject",
+	RejectTargets:  "ticket:manager:reject_targets",
 	Revoke:         "ticket:manager:revoke",
 	Submit:         "ticket:manager:submit",
 	Timeline:       "ticket:manager:timeline",

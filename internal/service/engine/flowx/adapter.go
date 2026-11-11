@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strconv"
-	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
@@ -24,7 +24,7 @@ type flowxEngine struct {
 }
 
 // NewEngine 实例化 flowx 引擎实现
-func NewEngine(engine flowx.Engine, ticketRepo repository.TicketRepository) engine.IEngine {
+func NewEngine(engine flowx.Engine, ticketRepo repository.TicketRepository) engine.IDriver {
 	return &flowxEngine{
 		engine:     engine,
 		ticketRepo: ticketRepo,
@@ -35,7 +35,7 @@ func (a *flowxEngine) EngineType() domain.EngineType {
 	return domain.EngineTypeFlowx
 }
 
-func (a *flowxEngine) Deploy(ctx context.Context, _ domain.EngineType, rawDef any) (domain.DeployInfo, error) {
+func (a *flowxEngine) Deploy(ctx context.Context, rawDef any) (domain.DeployInfo, error) {
 	def, ok := rawDef.(flowxModel.ProcessDefinition)
 	if !ok {
 		return domain.DeployInfo{}, errors.New("flowx 流程定义编译产物类型错误")
@@ -79,6 +79,13 @@ func (a *flowxEngine) Start(ctx context.Context, req domain.ProcessLaunchReq) (d
 		BusinessKey: strconv.FormatInt(req.TicketId, 10),
 	})
 	if err != nil {
+		// 预绑定已物理落盘，必须由制造该绑定的适配层就地精确解绑：
+		// 否则工单永久滞留 PROCESS 且 IsBound 为真，消费者与重启 Job 的重试通道被彻底堵死
+		if req.TicketId > 0 && a.ticketRepo != nil {
+			if revokeErr := a.ticketRepo.RevokeProcessBinding(ctx, req.TicketId, domain.NewID(instID)); revokeErr != nil {
+				return domain.ProcessLaunchResult{}, fmt.Errorf("flowx 启动流程实例失败: %w; 撤销工单预绑定失败: %v", err, revokeErr)
+			}
+		}
 		return domain.ProcessLaunchResult{}, fmt.Errorf("flowx 启动流程实例失败: %w", err)
 	}
 
@@ -111,10 +118,36 @@ func (a *flowxEngine) Reject(ctx context.Context, req domain.TaskRejectReq) erro
 		Operator:     req.Operator,
 		Comment:      req.Comment,
 		TargetNodeID: req.TargetNodeId,
+		Terminate:    req.Terminate,
 	})
 }
 
-func (a *flowxEngine) GetTaskContext(ctx context.Context, _ domain.EngineType, taskID domain.ID) (domain.TaskContext, error) {
+func (a *flowxEngine) GetRejectTargets(ctx context.Context, taskID domain.ID) ([]domain.RejectTarget, error) {
+	if a.engine == nil {
+		return nil, errors.New("flowx 流程引擎未初始化")
+	}
+
+	nodes, err := a.engine.GetRejectTargets(ctx, taskID.String())
+	if err != nil {
+		return nil, fmt.Errorf("flowx 查询可驳回目标节点失败: %w", err)
+	}
+
+	return lo.Map(nodes, func(n flowxModel.NodeSpec, _ int) domain.RejectTarget {
+		isStarter := n.Type == flowxModel.NodeStart
+		displayName := n.Name
+		if isStarter {
+			displayName = "发起人 (重新填报)"
+		}
+		return domain.RejectTarget{
+			NodeID:    n.ID,
+			NodeName:  displayName,
+			NodeType:  string(n.Type),
+			IsStarter: isStarter,
+		}
+	}), nil
+}
+
+func (a *flowxEngine) GetTaskContext(ctx context.Context, taskID domain.ID) (domain.TaskContext, error) {
 	if a.engine == nil {
 		return domain.TaskContext{}, errors.New("flowx 流程引擎未初始化")
 	}
@@ -147,7 +180,7 @@ func (a *flowxEngine) GetTaskContext(ctx context.Context, _ domain.EngineType, t
 	}, nil
 }
 
-func (a *flowxEngine) GetTimeline(ctx context.Context, _ domain.EngineType, instanceID domain.ID) ([]domain.TimelineNode, error) {
+func (a *flowxEngine) GetTimeline(ctx context.Context, instanceID domain.ID) ([]domain.TimelineNode, error) {
 	if a.engine == nil {
 		return nil, errors.New("flowx 流程引擎未初始化")
 	}
@@ -165,14 +198,14 @@ func (a *flowxEngine) GetTimeline(ctx context.Context, _ domain.EngineType, inst
 				NodeName:  evt.NodeName,
 				Batch:     evt.BatchCode,
 				Status:    lo.Ternary(evt.IsFinished, "COMPLETED", "RUNNING"),
-				StartTime: evt.OccurredAt.Format(time.RFC3339),
+				StartTime: evt.OccurredAt.Format("2006-01-02 15:04:05"),
 			}}
 		}
 
 		return lo.Map(evt.Tasks, func(t *flowxModel.Task, _ int) domain.TimelineNode {
 			endTimeStr := ""
 			if !t.FinishTime.IsZero() {
-				endTimeStr = t.FinishTime.Format(time.RFC3339)
+				endTimeStr = t.FinishTime.Format("2006-01-02 15:04:05")
 			}
 			return domain.TimelineNode{
 				NodeID:    evt.NodeID,
@@ -181,7 +214,7 @@ func (a *flowxEngine) GetTimeline(ctx context.Context, _ domain.EngineType, inst
 				Operator:  t.Assignee,
 				Status:    string(t.Status),
 				Comment:   t.Comment,
-				StartTime: t.CreateTime.Format(time.RFC3339),
+				StartTime: t.CreateTime.Format("2006-01-02 15:04:05"),
 				EndTime:   endTimeStr,
 			}
 		})
@@ -190,7 +223,7 @@ func (a *flowxEngine) GetTimeline(ctx context.Context, _ domain.EngineType, inst
 	return nodes, nil
 }
 
-func (a *flowxEngine) GetInstanceExecutionView(ctx context.Context, _ domain.EngineType, instanceID domain.ID, _ uint8) (domain.InstanceExecutionView, error) {
+func (a *flowxEngine) GetInstanceExecutionView(ctx context.Context, instanceID domain.ID) (domain.InstanceExecutionView, error) {
 	if a.engine == nil {
 		return domain.InstanceExecutionView{}, errors.New("flowx 流程引擎未初始化")
 	}
@@ -237,7 +270,7 @@ func (a *flowxEngine) Transfer(ctx context.Context, req domain.TaskTransferReq) 
 	return a.engine.Transfer(ctx, req.TaskId.String(), req.TargetUsers)
 }
 
-func (a *flowxEngine) GetAutomationTask(ctx context.Context, _ domain.EngineType, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
+func (a *flowxEngine) GetAutomationTask(ctx context.Context, instanceID domain.ID, nodeID string) (domain.TaskRecord, error) {
 	if a.engine == nil {
 		return domain.TaskRecord{}, errors.New("flowx 流程引擎未初始化")
 	}
@@ -255,19 +288,19 @@ func (a *flowxEngine) GetAutomationTask(ctx context.Context, _ domain.EngineType
 		return t.NodeID == nodeID && t.IsPending()
 	})
 	if !ok {
-		return domain.TaskRecord{}, fmt.Errorf("未找到对应的自动化节点任务 [node_id=%s]", nodeID)
+		return domain.TaskRecord{}, fmt.Errorf("%w: 未找到对应的自动化节点待办任务 [node_id=%s]", engine.ErrTaskNotFound, nodeID)
 	}
 
 	return domain.TaskRecord{
-		TaskID:     domain.NewID(task.ID),
-		NodeID:     task.NodeID,
-		NodeName:   task.NodeName,
-		BatchCode:  strconv.Itoa(task.BatchCode),
-		Status:     int(task.Status),
+		TaskID:    domain.NewID(task.ID),
+		NodeID:    task.NodeID,
+		NodeName:  task.NodeName,
+		BatchCode: strconv.Itoa(task.BatchCode),
+		Status:    int(task.Status),
 	}, nil
 }
 
-func (a *flowxEngine) GetTasksByCurrentNode(ctx context.Context, _ domain.EngineType, instanceID domain.ID, nodeID string) ([]domain.TaskRecord, error) {
+func (a *flowxEngine) GetTasksByCurrentNode(ctx context.Context, instanceID domain.ID, nodeID string) ([]domain.TaskRecord, error) {
 	if a.engine == nil {
 		return nil, errors.New("flowx 流程引擎未初始化")
 	}
@@ -310,8 +343,13 @@ func (a *flowxEngine) ListTodoTasks(ctx context.Context, req domain.TodoQueryReq
 		return nil, 0, errors.New("flowx 流程引擎未初始化")
 	}
 
-	assignee := req.Username
-	tasks, total, err := a.engine.ListPendingTasks(ctx, assignee, req.Offset, req.Limit)
+	tasks, total, err := a.engine.ListPendingTasks(ctx, flowxModel.PendingTaskQuery{
+		Assignee:    req.Username,
+		ProcessName: req.ProcessName,
+		SortByAsc:   req.SortByAsc,
+		Offset:      req.Offset,
+		Limit:       req.Limit,
+	})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -362,7 +400,7 @@ func (a *flowxEngine) ListPendingSteps(ctx context.Context, processes []domain.P
 	}), nil
 }
 
-func (a *flowxEngine) GetTaskRecords(ctx context.Context, _ domain.EngineType, instanceID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error) {
+func (a *flowxEngine) GetTaskRecords(ctx context.Context, instanceID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error) {
 	if a.engine == nil {
 		return nil, 0, errors.New("flowx 流程引擎未初始化")
 	}
@@ -381,7 +419,7 @@ func (a *flowxEngine) GetTaskRecords(ctx context.Context, _ domain.EngineType, i
 	records := lo.Map(pagedTasks, func(t *flowxModel.Task, _ int) domain.TaskRecord {
 		endTimeStr := ""
 		if !t.FinishTime.IsZero() {
-			endTimeStr = t.FinishTime.Format(time.RFC3339)
+			endTimeStr = t.FinishTime.Format("2006-01-02 15:04:05")
 		}
 		return domain.TaskRecord{
 			TaskID:       domain.NewID(t.ID),
@@ -399,7 +437,7 @@ func (a *flowxEngine) GetTaskRecords(ctx context.Context, _ domain.EngineType, i
 	return records, total, nil
 }
 
-func (a *flowxEngine) GetTaskTimeline(ctx context.Context, _ domain.EngineType, instanceID domain.ID, offset, limit int) ([]domain.TaskTimelineGroup, int64, error) {
+func (a *flowxEngine) GetTaskTimeline(ctx context.Context, instanceID domain.ID, offset, limit int) ([]domain.TaskTimelineGroup, int64, error) {
 	if a.engine == nil {
 		return nil, 0, errors.New("flowx 流程引擎未初始化")
 	}
@@ -453,12 +491,92 @@ func (a *flowxEngine) GetTaskTimeline(ctx context.Context, _ domain.EngineType, 
 			RejectedCount: rejectedCount,
 			PendingCount:  pendingCount,
 			SkippedCount:  skippedCount,
-			OccurredAt:    evt.OccurredAt.Format(time.RFC3339),
+			OccurredAt:    evt.OccurredAt.Format("2006-01-02 15:04:05"),
 			Members:       members,
 		}
 	})
 
 	return groups, total, nil
+}
+
+// GetActiveReject 获取流程实例当前正处于待处理/待响应状态的最新驳回上下文（若无驳回或已重新推进闭环，返回 nil）
+func (a *flowxEngine) GetActiveReject(ctx context.Context, instanceID domain.ID) (*domain.RejectSnapshot, error) {
+	if a.engine == nil {
+		return nil, errors.New("flowx 流程引擎未初始化")
+	}
+
+	events, err := a.engine.GetTimeline(ctx, instanceID.String())
+	if err != nil {
+		return nil, fmt.Errorf("flowx 查询执行记录失败: %w", err)
+	}
+
+	allTasks := lo.FlatMap(events, func(evt flowxModel.TimelineEvent, _ int) []*flowxModel.Task {
+		return evt.Tasks
+	})
+	if len(allTasks) == 0 {
+		return nil, nil
+	}
+
+	// 1. 过滤驳回任务
+	rejectTasks := lo.Filter(allTasks, func(t *flowxModel.Task, _ int) bool {
+		return t.Status == flowxModel.TaskRejected
+	})
+	if len(rejectTasks) == 0 {
+		return nil, nil
+	}
+
+	// 2. 锁定最近一次驳回任务 (批次号倒序，结束时间倒序)
+	sort.SliceStable(rejectTasks, func(i, j int) bool {
+		if rejectTasks[i].BatchCode != rejectTasks[j].BatchCode {
+			return rejectTasks[i].BatchCode > rejectTasks[j].BatchCode
+		}
+		return rejectTasks[i].FinishTime.After(rejectTasks[j].FinishTime)
+	})
+	latest := rejectTasks[0]
+
+	// 3. 闭环判定：检查在该次驳回之后，流程是否已被响应并重新向前推进（如提单人重新提交、上一环节重新同意）
+	hasAdvancedAfterReject := lo.SomeBy(allTasks, func(t *flowxModel.Task) bool {
+		if t.ID == latest.ID {
+			return false
+		}
+		// 任务状态为通过或系统通过
+		if t.Status != flowxModel.TaskPassed && t.Status != flowxModel.TaskSystemPassed {
+			return false
+		}
+		// 批次号大于驳回批次
+		if t.BatchCode > latest.BatchCode {
+			return true
+		}
+		// 或办结时间严格晚于驳回时间
+		if !t.FinishTime.IsZero() && !latest.FinishTime.IsZero() && t.FinishTime.After(latest.FinishTime) {
+			return true
+		}
+		return false
+	})
+	if hasAdvancedAfterReject {
+		return nil, nil // 驳回已被响应闭环，不再置顶展示提示条
+	}
+
+	// 4. 检查当前是否仍有挂起的待办（没有待办说明流程已终结）
+	hasPendingTasks := lo.SomeBy(allTasks, func(t *flowxModel.Task) bool {
+		return t.Status == flowxModel.TaskPending
+	})
+	if !hasPendingTasks {
+		return nil, nil
+	}
+
+	finishTimeStr := ""
+	if !latest.FinishTime.IsZero() {
+		finishTimeStr = latest.FinishTime.Format("2006-01-02 15:04:05")
+	}
+
+	return &domain.RejectSnapshot{
+		Operator:   latest.Assignee,
+		NodeID:     latest.NodeID,
+		NodeName:   latest.NodeName,
+		Comment:    latest.Comment,
+		FinishTime: finishTimeStr,
+	}, nil
 }
 
 func paginateSlice[T any](items []T, offset, limit int) []T {

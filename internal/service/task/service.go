@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Duke1616/eflow/internal/client/eiam"
 	etaskclient "github.com/Duke1616/eflow/internal/client/etask"
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/errs"
@@ -80,16 +81,19 @@ type taskService struct {
 	dispatches dispatchSvc.Service
 	templates  templateSvc.Service
 	etask      etaskclient.Client
+	users      eiam.IUserClient
 	logger     *elog.Component
 }
 
 // NewTaskService 创建自动化任务编排服务。
 func NewTaskService(tasks repository.TaskRepository, attempts repository.TaskAttemptRepository,
 	engine engine.IEngine, workflows workflow.Service, tickets ticket.Service,
-	dispatches dispatchSvc.Service, templates templateSvc.Service, etask etaskclient.Client) Service {
+	dispatches dispatchSvc.Service, templates templateSvc.Service, etask etaskclient.Client,
+	users eiam.IUserClient) Service {
 	return &taskService{
 		tasks: tasks, attempts: attempts, engine: engine, workflows: workflows,
 		tickets: tickets, dispatches: dispatches, templates: templates, etask: etask,
+		users:  users,
 		logger: elog.DefaultLogger.With(elog.FieldComponentName("service.automation")),
 	}
 }
@@ -128,7 +132,7 @@ func (s *taskService) CreateTask(ctx context.Context, ticketID int64,
 	if len(procVersion) > 0 && procVersion[0] > 0 {
 		version = procVersion[0]
 	} else if s.engine != nil {
-		view, viewErr := s.engine.GetInstanceExecutionView(ctx, ticket.Process.ResolveEngineType(), instanceID, ticket.Status.ToUint8())
+		view, viewErr := s.engine.GetInstanceExecutionView(ctx, ticket.Process.ResolveEngineType(), instanceID)
 		if viewErr != nil {
 			return domain.Task{}, fmt.Errorf("通过流程引擎获取实例快照版本失败: %w", viewErr)
 		}

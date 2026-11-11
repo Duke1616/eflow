@@ -199,7 +199,7 @@ func TestCalculateTraversedEdges_GatewayConvergenceBlocking(t *testing.T) {
 				GetProcessDefineByVersion(gomock.Any(), 101, 1).
 				Return(processDef, nil)
 
-			edges, err := calculateTraversedEdges(context.Background(), repo, tc.tasks, 1, 101, 1, 1)
+			edges, err := calculateTraversedEdges(context.Background(), repo, tc.tasks, 101, 1)
 			require.NoError(t, err)
 			tc.assertFunc(t, edges)
 		})

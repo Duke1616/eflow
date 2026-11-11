@@ -208,20 +208,20 @@ func (mr *MockITaskStorageMockRecorder) GetTaskForUpdate(ctx, id any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTaskForUpdate", reflect.TypeOf((*MockITaskStorage)(nil).GetTaskForUpdate), ctx, id)
 }
 
-// ListPendingTasksByAssignee mocks base method.
-func (m *MockITaskStorage) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
+// ListPendingTasks mocks base method.
+func (m *MockITaskStorage) ListPendingTasks(ctx context.Context, query model.PendingTaskQuery) ([]*model.Task, int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListPendingTasksByAssignee", ctx, assignee, offset, limit)
+	ret := m.ctrl.Call(m, "ListPendingTasks", ctx, query)
 	ret0, _ := ret[0].([]*model.Task)
 	ret1, _ := ret[1].(int64)
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }
 
-// ListPendingTasksByAssignee indicates an expected call of ListPendingTasksByAssignee.
-func (mr *MockITaskStorageMockRecorder) ListPendingTasksByAssignee(ctx, assignee, offset, limit any) *gomock.Call {
+// ListPendingTasks indicates an expected call of ListPendingTasks.
+func (mr *MockITaskStorageMockRecorder) ListPendingTasks(ctx, query any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPendingTasksByAssignee", reflect.TypeOf((*MockITaskStorage)(nil).ListPendingTasksByAssignee), ctx, assignee, offset, limit)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPendingTasks", reflect.TypeOf((*MockITaskStorage)(nil).ListPendingTasks), ctx, query)
 }
 
 // ListPendingTasksByInstances mocks base method.
@@ -410,20 +410,20 @@ func (mr *MockIStorageMockRecorder) GetTaskForUpdate(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTaskForUpdate", reflect.TypeOf((*MockIStorage)(nil).GetTaskForUpdate), ctx, id)
 }
 
-// ListPendingTasksByAssignee mocks base method.
-func (m *MockIStorage) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
+// ListPendingTasks mocks base method.
+func (m *MockIStorage) ListPendingTasks(ctx context.Context, query model.PendingTaskQuery) ([]*model.Task, int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListPendingTasksByAssignee", ctx, assignee, offset, limit)
+	ret := m.ctrl.Call(m, "ListPendingTasks", ctx, query)
 	ret0, _ := ret[0].([]*model.Task)
 	ret1, _ := ret[1].(int64)
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }
 
-// ListPendingTasksByAssignee indicates an expected call of ListPendingTasksByAssignee.
-func (mr *MockIStorageMockRecorder) ListPendingTasksByAssignee(ctx, assignee, offset, limit any) *gomock.Call {
+// ListPendingTasks indicates an expected call of ListPendingTasks.
+func (mr *MockIStorageMockRecorder) ListPendingTasks(ctx, query any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPendingTasksByAssignee", reflect.TypeOf((*MockIStorage)(nil).ListPendingTasksByAssignee), ctx, assignee, offset, limit)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPendingTasks", reflect.TypeOf((*MockIStorage)(nil).ListPendingTasks), ctx, query)
 }
 
 // ListPendingTasksByInstances mocks base method.
@@ -654,20 +654,20 @@ func (mr *MockITxStorageMockRecorder) GetTaskForUpdate(ctx, id any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTaskForUpdate", reflect.TypeOf((*MockITxStorage)(nil).GetTaskForUpdate), ctx, id)
 }
 
-// ListPendingTasksByAssignee mocks base method.
-func (m *MockITxStorage) ListPendingTasksByAssignee(ctx context.Context, assignee string, offset, limit int) ([]*model.Task, int64, error) {
+// ListPendingTasks mocks base method.
+func (m *MockITxStorage) ListPendingTasks(ctx context.Context, query model.PendingTaskQuery) ([]*model.Task, int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListPendingTasksByAssignee", ctx, assignee, offset, limit)
+	ret := m.ctrl.Call(m, "ListPendingTasks", ctx, query)
 	ret0, _ := ret[0].([]*model.Task)
 	ret1, _ := ret[1].(int64)
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }
 
-// ListPendingTasksByAssignee indicates an expected call of ListPendingTasksByAssignee.
-func (mr *MockITxStorageMockRecorder) ListPendingTasksByAssignee(ctx, assignee, offset, limit any) *gomock.Call {
+// ListPendingTasks indicates an expected call of ListPendingTasks.
+func (mr *MockITxStorageMockRecorder) ListPendingTasks(ctx, query any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPendingTasksByAssignee", reflect.TypeOf((*MockITxStorage)(nil).ListPendingTasksByAssignee), ctx, assignee, offset, limit)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPendingTasks", reflect.TypeOf((*MockITxStorage)(nil).ListPendingTasks), ctx, query)
 }
 
 // ListPendingTasksByInstances mocks base method.

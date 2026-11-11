@@ -29,7 +29,10 @@ const (
 	epochMillis = int64(1704067200000)
 )
 
-// IDGenerator 工作流实例与任务物理 ID 生成契约接口，支持分布式扩展与定制规则
+// IDGenerator 工作流实例与任务物理 ID 生成契约接口，支持定制规则替换
+// 注意：默认雪花实现未划分机器/副本位，10 位业务键散列对固定 procKey 恒定不贡献熵，
+// 唯一性完全依赖单进程内 12 位毫秒序列，因此仅保证单副本部署下无冲突；
+// 多副本部署必须替换为携带 workerID 的实现，否则 SaveInstance 的 OnConflict 会静默覆盖他人实例
 type IDGenerator interface {
 	// GenInstanceID 生成流程实例唯一 ID
 	GenInstanceID(procKey string) string

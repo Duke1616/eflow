@@ -379,35 +379,51 @@ func TestHandler_Detail(t *testing.T) {
 	testCases := []struct {
 		name       string
 		req        DetailProcessInstIdReq
-		mockSetup  func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService)
+		mockSetup  func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService, mockQuery *ticketmocks.MockQueryService)
 		wantCode   int
 		wantErr    bool
 		wantErrMsg string
+		assertVO   func(t *testing.T, ticket Ticket)
 	}{
 		{
 			name: "参数为空返回400",
 			req:  DetailProcessInstIdReq{},
-			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService) {
+			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService, mockQuery *ticketmocks.MockQueryService) {
 			},
 			wantCode: 400,
 		},
 		{
-			name: "通过process_instance_id雪花纯数字查询成功",
+			name: "通过process_instance_id雪花纯数字查询成功且携带最近驳回与审批评论",
 			req:  DetailProcessInstIdReq{ProcessInstanceId: InstanceID("377374770910412800")},
-			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService) {
+			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService, mockQuery *ticketmocks.MockQueryService) {
 				mockSvc.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID("377374770910412800")).
 					Return(domain.Ticket{Id: 101, CreateBy: "alice"}, nil)
 				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice"}}, nil)
 				mockRating.EXPECT().FindByTicketID(gomock.Any(), int64(101)).
 					Return(domain.TicketRating{}, false, nil)
+				mockQuery.EXPECT().GetLatestReject(gomock.Any(), domain.NewID("377374770910412800")).
+					Return(&domain.LatestReject{
+						RejectedBy:     "bob",
+						RejectedByName: "鲍勃主管",
+						NodeID:         "node-mgr",
+						NodeName:       "主管审批",
+						Reason:         "金额超标请修改",
+						RejectedAt:     "2026-11-11 10:00:00",
+					}, nil)
 			},
 			wantCode: 0,
+			assertVO: func(t *testing.T, ticket Ticket) {
+				require.NotNil(t, ticket.LatestReject)
+				assert.Equal(t, "bob", ticket.LatestReject.RejectedBy)
+				assert.Equal(t, "鲍勃主管", ticket.LatestReject.RejectedByName)
+				assert.Equal(t, "金额超标请修改", ticket.LatestReject.Reason)
+			},
 		},
 		{
 			name: "未检索到工单返回明确错误包装",
 			req:  DetailProcessInstIdReq{ProcessInstanceId: InstanceID("377374770910412800")},
-			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService) {
+			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService, mockQuery *ticketmocks.MockQueryService) {
 				mockSvc.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID("377374770910412800")).
 					Return(domain.Ticket{}, errors.New("record not found"))
 			},
@@ -424,12 +440,14 @@ func TestHandler_Detail(t *testing.T) {
 			mockUser := usermocks.NewMockUserServiceClient(ctrl)
 			mockSvc := ticketmocks.NewMockService(ctrl)
 			mockRating := ratingmocks.NewMockService(ctrl)
-			tc.mockSetup(mockUser, mockSvc, mockRating)
+			mockQuery := ticketmocks.NewMockQueryService(ctrl)
+			tc.mockSetup(mockUser, mockSvc, mockRating, mockQuery)
 
 			h := &Handler{
 				logger:    elog.DefaultLogger,
 				userSvc:   mockUser,
 				svc:       mockSvc,
+				querySvc:  mockQuery,
 				ratingSvc: mockRating,
 			}
 
@@ -443,6 +461,11 @@ func TestHandler_Detail(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantCode, res.Code)
+			if tc.assertVO != nil {
+				data, ok := res.Data.(Ticket)
+				require.True(t, ok)
+				tc.assertVO(t, data)
+			}
 		})
 	}
 }
@@ -502,6 +525,115 @@ func TestHandleTaskOperationError_KratosError(t *testing.T) {
 			}
 			assert.Equal(t, tc.wantCode, res.Code)
 			assert.Equal(t, tc.wantMsg, res.Msg)
+		})
+	}
+}
+
+func TestHandler_Reject(t *testing.T) {
+	testCases := []struct {
+		name      string
+		req       RejectOrderReq
+		mockSetup func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService)
+		wantCode  int
+		wantErr   bool
+	}{
+		{
+			name: "参数校验失败: 缺少TicketId",
+			req:  RejectOrderReq{TicketId: 0, TaskId: TaskID("1001"), Comment: "驳回"},
+			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService) {
+			},
+			wantCode: 400,
+		},
+		{
+			name: "正常驳回: 携带目标节点与终止标识成功透传",
+			req: RejectOrderReq{
+				TicketId:     101,
+				TaskId:       TaskID("2002"),
+				Comment:      "退回提单人重填",
+				TargetNodeId: "Start",
+				Terminate:    false,
+			},
+			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService) {
+				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
+					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "auditor"}}, nil)
+				mockSvc.EXPECT().Reject(gomock.Any(), int64(101), "2002", "auditor", false, "退回提单人重填", "Start", false).
+					Return(nil)
+			},
+			wantCode: 0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockUser := usermocks.NewMockUserServiceClient(ctrl)
+			mockSvc := ticketmocks.NewMockService(ctrl)
+			tc.mockSetup(mockUser, mockSvc)
+
+			h := &Handler{
+				logger:  elog.DefaultLogger,
+				userSvc: mockUser,
+				svc:     mockSvc,
+			}
+
+			ctx := newTestContext(1)
+			res, err := h.Reject(ctx, tc.req)
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.wantCode, res.Code)
+			}
+		})
+	}
+}
+
+func TestHandler_GetRejectTargets(t *testing.T) {
+	testCases := []struct {
+		name      string
+		req       RejectTargetsReq
+		mockSetup func(mockSvc *ticketmocks.MockService)
+		wantCode  int
+		wantLen   int
+	}{
+		{
+			name: "正常拉取可驳回目标节点",
+			req:  RejectTargetsReq{TicketId: 101, TaskId: TaskID("2002")},
+			mockSetup: func(mockSvc *ticketmocks.MockService) {
+				mockSvc.EXPECT().GetRejectTargets(gomock.Any(), int64(101), "2002").
+					Return([]domain.RejectTarget{
+						{NodeID: "Start", NodeName: "发起人 (重新填报)", NodeType: "START", IsStarter: true},
+						{NodeID: "node_1", NodeName: "主管初审", NodeType: "APPROVAL", IsStarter: false},
+					}, nil)
+			},
+			wantCode: 0,
+			wantLen:  2,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockSvc := ticketmocks.NewMockService(ctrl)
+			tc.mockSetup(mockSvc)
+
+			h := &Handler{
+				logger: elog.DefaultLogger,
+				svc:    mockSvc,
+			}
+
+			ctx := newTestContext(1)
+			res, err := h.GetRejectTargets(ctx, tc.req)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantCode, res.Code)
+			targets, ok := res.Data.([]RejectTargetVO)
+			require.True(t, ok)
+			assert.Len(t, targets, tc.wantLen)
+			assert.True(t, targets[0].IsStarter)
 		})
 	}
 }

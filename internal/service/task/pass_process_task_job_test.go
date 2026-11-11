@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/Duke1616/eiam/pkg/ctxutil"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 )
 
 func TestPassProcessTaskJobDoesNotSkipShrinkingPages(t *testing.T) {
@@ -82,7 +82,10 @@ func TestPassProcessTaskJobMarksAutoPassedWhenEngineTaskNotFound(t *testing.T) {
 	tasks := &passTaskServiceStub{remaining: []domain.Task{
 		{ID: 1, TenantID: 11, NodeID: "node-1", InstanceID: domain.NewID(101)},
 	}}
-	engineSvc := &passEngineStub{errors: map[int]error{101: gorm.ErrRecordNotFound}}
+	engineSvc := &passEngineStub{errors: map[int]error{
+		// 采用引擎适配层真实的包装形态，验证 errors.Is 能穿透 %w 上下文识别哨兵
+		101: fmt.Errorf("%w: 未找到对应的自动化节点待办任务 [node_id=node-1]", engine.ErrTaskNotFound),
+	}}
 	job := NewPassProcessTaskJob(tasks, engineSvc, 10, time.Minute)
 
 	err := job.run(context.Background())
