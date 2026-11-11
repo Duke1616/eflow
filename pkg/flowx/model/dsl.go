@@ -110,13 +110,11 @@ func (def ProcessDefinition) Validate() error {
 				return fmt.Errorf("结束节点 [%s] 必须至少包含 1 条入边", n.ID)
 			}
 		default:
-			if n.IsGateway() {
-				if inDegree[n.ID] == 0 {
-					return fmt.Errorf("网关节点 [%s] 悬空异常，必须至少包含 1 条入边", n.ID)
-				}
-				if outDegree[n.ID] == 0 {
-					return fmt.Errorf("网关节点 [%s] 悬空异常，必须至少包含 1 条出边", n.ID)
-				}
+			if inDegree[n.ID] == 0 {
+				return fmt.Errorf("节点 [%s](%s) 悬空异常，必须至少包含 1 条入边", n.ID, n.Name)
+			}
+			if outDegree[n.ID] == 0 {
+				return fmt.Errorf("节点 [%s](%s) 悬空异常，非结束节点必须至少包含 1 条出边", n.ID, n.Name)
 			}
 		}
 	}
@@ -153,11 +151,6 @@ func (n NodeSpec) IsActivity() bool {
 // IsGateway 是否属于分支或汇聚网关节点
 func (n NodeSpec) IsGateway() bool {
 	return n.Type == NodeGatewayExclusive || n.Type == NodeGatewayParallel || n.Type == NodeGatewayInclusive
-}
-
-// IsWaitState 是否属于等待态节点 (到达时会产生未决状态或人工待办，决定本轮流转是否不能立即全单办结)
-func (n NodeSpec) IsWaitState() bool {
-	return n.Type == NodeApproval
 }
 
 // CanRejectTo 是否允许作为驳回目标节点 (仅审批节点与开始节点具备回退资格)

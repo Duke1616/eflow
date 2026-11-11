@@ -143,6 +143,7 @@ type flowEngine struct {
 	storage     storage.IStorage
 	hooks       *hookRegistry
 	eventBus    *EventBus
+	publisher   IEventPublisher
 	workers     *workerRegistry
 	middlewares []middleware.Middleware
 	planCache   *kernel.PlanCache
@@ -169,6 +170,14 @@ func WithIDGenerator(gen idgen.IDGenerator) Option {
 	}
 }
 
+func castEngine(engine Engine) (*flowEngine, error) {
+	fe, ok := engine.(*flowEngine)
+	if !ok {
+		return nil, errors.New("流程引擎实例类型断言异常")
+	}
+	return fe, nil
+}
+
 // NewEngine 构造工作流引擎实例
 func NewEngine(store storage.IStorage, opts ...Option) Engine {
 	engine := &flowEngine{
@@ -180,6 +189,7 @@ func NewEngine(store storage.IStorage, opts ...Option) Engine {
 		planCache:   kernel.NewPlanCache(),
 		idGen:       idgen.NewDefaultIDGenerator(),
 	}
+	engine.publisher = engine.eventBus
 	engine.executors = newDefaultExecutors(engine)
 	for _, opt := range opts {
 		opt(engine)
@@ -234,16 +244,19 @@ func (e *flowEngine) Transfer(ctx context.Context, taskID string, targetUsers []
 	if len(validUsers) == 0 {
 		return errors.New("转签目标用户不能为空")
 	}
+	if len(validUsers) > 1 {
+		return errors.New("转签仅支持指定单个目标处理人")
+	}
 	targetUser := strings.TrimSpace(validUsers[0])
 
 	return e.DoTx(ctx, func(txCtx context.Context, txEngine Engine) error {
-		txEng := txEngine.(*flowEngine)
-		task, inst, err := txEng.loadAndValidateTask(txCtx, taskID)
+		txEng, err := castEngine(txEngine)
 		if err != nil {
 			return err
 		}
-		if !task.IsPending() {
-			return errors.New("仅允许对待办任务进行转签")
+		task, inst, err := txEng.loadAndValidateTask(txCtx, taskID)
+		if err != nil {
+			return err
 		}
 		// 若已指派给相同处理人，幂等返回
 		if task.Assignee == targetUser {
@@ -256,16 +269,16 @@ func (e *flowEngine) Transfer(ctx context.Context, taskID string, targetUsers []
 			return err
 		}
 
-		// 广播转签事件，供通知中心与时间线审计追踪
-		def, _ := txEng.storage.GetDefinition(txCtx, inst.ProcKey, inst.Version)
-		plan := kernel.NewExecutionPlan(def)
-		var nodeSpec *model.NodeSpec
-		if plan != nil {
-			if n, ok := plan.NodesMap[task.NodeID]; ok {
-				nodeSpec = &n
-			}
+		// 复用缓存加载流程执行拓扑，广播转签审计事件
+		plan, err := txEng.loadPlan(txCtx, inst)
+		if err != nil {
+			return err
 		}
-		txEng.eventBus.Publish(txCtx, NewTaskEvent(EventTaskTransferred, inst, nodeSpec, task, oldAssignee, fmt.Sprintf("由 [%s] 转签给 [%s]", oldAssignee, targetUser)))
+		var nodeSpec *model.NodeSpec
+		if n, ok := plan.NodesMap[task.NodeID]; ok {
+			nodeSpec = &n
+		}
+		txEng.publisher.Publish(txCtx, NewTaskEvent(EventTaskTransferred, inst, nodeSpec, task, oldAssignee, fmt.Sprintf("由 [%s] 转签给 [%s]", oldAssignee, targetUser)))
 		return nil
 	})
 }
@@ -288,26 +301,44 @@ func (e *flowEngine) Deploy(ctx context.Context, def model.ProcessDefinition) (m
 	return def, nil
 }
 
-// DoTx 在物理本地事务闭包内执行操作，异常自动回滚
+func (e *flowEngine) cloneWithTx(store storage.IStorage, pub IEventPublisher) *flowEngine {
+	sub := &flowEngine{
+		storage:     store,
+		hooks:       e.hooks,
+		eventBus:    e.eventBus,
+		publisher:   pub,
+		workers:     e.workers,
+		middlewares: e.middlewares,
+		planCache:   e.planCache,
+		idGen:       e.idGen,
+	}
+	sub.executors = newDefaultExecutors(sub)
+	return sub
+}
+
+// DoTx 在物理本地事务闭包内执行操作，异常自动回滚，并在事务成功 Commit 后统一刷出生命周期事件（事务性 Outbox 模式）
 func (e *flowEngine) DoTx(ctx context.Context, fn func(ctx context.Context, txEngine Engine) error) error {
+	bufPub := newBufferedEventPublisher(e.publisher)
+
 	txStore, ok := e.storage.(storage.ITxStorage)
 	if !ok {
-		return fn(ctx, e)
+		txSubEngine := e.cloneWithTx(e.storage, bufPub)
+		if err := fn(ctx, txSubEngine); err != nil {
+			return err
+		}
+		bufPub.Flush()
+		return nil
 	}
 
-	return txStore.DoTx(ctx, func(txStorage storage.IStorage) error {
-		txSubEngine := &flowEngine{
-			storage:     txStorage,
-			hooks:       e.hooks,
-			eventBus:    e.eventBus,
-			workers:     e.workers,
-			middlewares: e.middlewares,
-			planCache:   e.planCache,
-			idGen:       e.idGen,
-			executors:   e.executors,
-		}
+	err := txStore.DoTx(ctx, func(txStorage storage.IStorage) error {
+		txSubEngine := e.cloneWithTx(txStorage, bufPub)
 		return fn(ctx, txSubEngine)
 	})
+	if err != nil {
+		return err
+	}
+	bufPub.Flush()
+	return nil
 }
 
 // Start 启动流程实例，激活初始节点并派发待办任务
@@ -320,7 +351,11 @@ func (e *flowEngine) Start(ctx context.Context, req StartReq) (string, error) {
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
 		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
-			id, err := txEngine.(*flowEngine).doStart(txCtx, req)
+			txEng, err := castEngine(txEngine)
+			if err != nil {
+				return err
+			}
+			id, err := txEng.doStart(txCtx, req)
 			if err != nil {
 				return err
 			}
@@ -373,12 +408,18 @@ func (e *flowEngine) doStart(ctx context.Context, req StartReq) (string, error) 
 	}
 
 	session := newFlowSession(e.storage, inst, plan, nil)
+	_ = session.SaveInstance(ctx) // 标记新创建的流程实例为脏，保证收口时写入
 
 	// 2. 优先广播流程启动事件（确保提单人通知/撤销卡片在流转前第一时间发出，杜绝审批待办抢跑乱序）
-	e.eventBus.Publish(ctx, NewNodeEvent(EventProcessStarted, session.Instance(), &startNode, req.Starter, ""))
+	e.publisher.Publish(ctx, NewNodeEvent(EventProcessStarted, session.Instance(), &startNode, req.Starter, ""))
 
 	// 3. 统一调度下一阶段动作（自动Skip占位、办结或激活待办；若无有效出路则由调度器统一拦截断流）
 	if err := e.applyStepDecision(ctx, session, decision, 1, req.Starter); err != nil {
+		return "", err
+	}
+
+	// 4. 工作单元统一收口：在事务提交前一次性刷入流程实例最终状态
+	if err := session.Flush(ctx); err != nil {
 		return "", err
 	}
 
@@ -397,7 +438,11 @@ func (e *flowEngine) Pass(ctx context.Context, req PassReq) error {
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
 		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
-			return txEngine.(*flowEngine).doPass(txCtx, req)
+			txEng, err := castEngine(txEngine)
+			if err != nil {
+				return err
+			}
+			return txEng.doPass(txCtx, req)
 		})
 	}
 	return middleware.Compose(e.middlewares, core)(ctx, actCtx)
@@ -417,7 +462,12 @@ func (e *flowEngine) doPass(ctx context.Context, req PassReq) error {
 	}
 
 	// 3. 执行状态机推进管线
-	return e.advanceTaskPipeline(ctx, session, task, req.Comment, req.Variables, req.Operator)
+	if err := e.advanceTaskPipeline(ctx, session, task, req.Comment, req.Variables, req.Operator); err != nil {
+		return err
+	}
+
+	// 4. 工作单元统一收口：在事务提交前一次性刷入流程实例最终状态（N -> 1 UPDATE）
+	return session.Flush(ctx)
 }
 
 // CompleteTask 外部异步作业/系统执行器完成任务后的回调入口，唤醒挂起并驱动状态机
@@ -436,7 +486,11 @@ func (e *flowEngine) CompleteTask(ctx context.Context, req CompleteTaskReq) erro
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
 		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
-			return txEngine.(*flowEngine).doCompleteTask(txCtx, req, comment)
+			txEng, err := castEngine(txEngine)
+			if err != nil {
+				return err
+			}
+			return txEng.doCompleteTask(txCtx, req, comment)
 		})
 	}
 	return middleware.Compose(e.middlewares, core)(ctx, actCtx)
@@ -453,7 +507,11 @@ func (e *flowEngine) doCompleteTask(ctx context.Context, req CompleteTaskReq, co
 		return err
 	}
 
-	return e.advanceTaskPipeline(ctx, session, task, comment, req.Variables, "system")
+	if err := e.advanceTaskPipeline(ctx, session, task, comment, req.Variables, "system"); err != nil {
+		return err
+	}
+
+	return session.Flush(ctx)
 }
 
 // advanceTaskPipeline 推进已办结任务的核心状态机管线（模板方法模式）
@@ -475,7 +533,7 @@ func (e *flowEngine) advanceTaskPipeline(ctx context.Context, session *flowSessi
 	if !ok {
 		return fmt.Errorf("%w: 节点定义不存在 [node_id=%s]", ErrNodeDefinitionMissing, task.NodeID)
 	}
-	e.eventBus.Publish(ctx, NewTaskEvent(EventTaskPassed, inst, &node, task, operator, comment))
+	e.publisher.Publish(ctx, NewTaskEvent(EventTaskPassed, inst, &node, task, operator, comment))
 
 	// 2. 当前节点纯内存流转仲裁（含或签联动跳过计算）
 	arbRes := kernel.ArbitrateNode(node, task, session.AllTasks())
@@ -485,12 +543,12 @@ func (e *flowEngine) advanceTaskPipeline(ctx context.Context, session *flowSessi
 		}
 		for _, skippedID := range arbRes.SkippedTaskIDs {
 			if st, ok := session.GetTask(skippedID); ok {
-				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, &node, st, "system", "或签竞争，系统自动跳过"))
+				e.publisher.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, &node, st, "system", "或签竞争，系统自动跳过"))
 			}
 		}
 	}
 	if !arbRes.IsSatisfied {
-		return session.SaveInstance(ctx) // 仲裁未就绪，保持等待
+		return session.SaveInstance(ctx) // 仲裁未就绪，标记状态并保持等待
 	}
 
 	// 3. 内核下沉推导下一步流向（纯内存计算，直接复用会话内的最新任务快照）
@@ -514,7 +572,11 @@ func (e *flowEngine) Reject(ctx context.Context, req RejectReq) error {
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
 		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
-			return txEngine.(*flowEngine).doReject(txCtx, req)
+			txEng, err := castEngine(txEngine)
+			if err != nil {
+				return err
+			}
+			return txEng.doReject(txCtx, req)
 		})
 	}
 	return middleware.Compose(e.middlewares, core)(ctx, actCtx)
@@ -540,7 +602,7 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 	if err := session.UpdateTask(ctx, task); err != nil {
 		return err
 	}
-	e.eventBus.Publish(ctx, NewTaskEvent(EventTaskRejected, session.Instance(), &node, task, req.Operator, req.Comment))
+	e.publisher.Publish(ctx, NewTaskEvent(EventTaskRejected, session.Instance(), &node, task, req.Operator, req.Comment))
 
 	// 2. 原子清理当前批次中其余未处理的兄弟任务
 	if err := e.cancelPendingSiblingTasks(ctx, session, task); err != nil {
@@ -553,8 +615,8 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 		if err := session.SaveInstance(ctx); err != nil {
 			return err
 		}
-		e.eventBus.Publish(ctx, NewProcessEvent(EventProcessRejected, session.Instance(), req.Operator, req.Comment))
-		return nil
+		e.publisher.Publish(ctx, NewProcessEvent(EventProcessRejected, session.Instance(), req.Operator, req.Comment))
+		return session.Flush(ctx)
 	}
 
 	// 4. 确定驳回的目标节点（自选目标节点 vs 默认回溯上游）
@@ -572,7 +634,10 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 		nodes, err := session.Plan().FindUpstreamRejectNodes(task.NodeID, session.AllTasks())
 		if err != nil || len(nodes) == 0 {
 			session.Instance().Reject() // 无可用上游审批节点，流程置为终态 Rejected
-			return session.SaveInstance(ctx)
+			if err := session.SaveInstance(ctx); err != nil {
+				return err
+			}
+			return session.Flush(ctx)
 		}
 		targetNodes = nodes
 	}
@@ -588,14 +653,17 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 		if err := session.SaveTasks(ctx, []*model.Task{startTask}); err != nil {
 			return err
 		}
-		e.eventBus.Publish(ctx, NewTaskEvent(EventTaskCreated, session.Instance(), &targetNode, startTask, req.Operator, comment))
+		e.publisher.Publish(ctx, NewTaskEvent(EventTaskCreated, session.Instance(), &targetNode, startTask, req.Operator, comment))
 	} else {
 		if err := e.activateNodes(ctx, session, targetNodes, newBatchCode, req.Operator); err != nil {
 			return err
 		}
 	}
 
-	return session.SaveInstance(ctx)
+	if err := session.SaveInstance(ctx); err != nil {
+		return err
+	}
+	return session.Flush(ctx)
 }
 
 // Revoke 提单人主动撤回正在流转中的工单
@@ -609,7 +677,11 @@ func (e *flowEngine) Revoke(ctx context.Context, req RevokeReq) error {
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
 		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
-			return txEngine.(*flowEngine).doRevoke(txCtx, req)
+			txEng, err := castEngine(txEngine)
+			if err != nil {
+				return err
+			}
+			return txEng.doRevoke(txCtx, req)
 		})
 	}
 	return middleware.Compose(e.middlewares, core)(ctx, actCtx)
@@ -639,7 +711,7 @@ func (e *flowEngine) doRevoke(ctx context.Context, req RevokeReq) error {
 		}
 		for _, pid := range pendingIDs {
 			if pt, ok := session.GetTask(pid); ok {
-				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskRevoked, session.Instance(), nil, pt, req.Operator, req.Comment))
+				e.publisher.Publish(ctx, NewTaskEvent(EventTaskRevoked, session.Instance(), nil, pt, req.Operator, req.Comment))
 			}
 		}
 	}
@@ -658,13 +730,16 @@ func (e *flowEngine) doRevoke(ctx context.Context, req RevokeReq) error {
 		if err := session.SaveTasks(ctx, []*model.Task{startTask}); err != nil {
 			return err
 		}
-		e.eventBus.Publish(ctx, NewTaskEvent(EventTaskCreated, session.Instance(), &startNode, startTask, req.Operator, comment))
+		e.publisher.Publish(ctx, NewTaskEvent(EventTaskCreated, session.Instance(), &startNode, startTask, req.Operator, comment))
 	} else {
 		session.Instance().Cancel()
-		e.eventBus.Publish(ctx, NewProcessEvent(EventProcessCancelled, session.Instance(), req.Operator, req.Comment))
+		e.publisher.Publish(ctx, NewProcessEvent(EventProcessCancelled, session.Instance(), req.Operator, req.Comment))
 	}
 
-	return session.SaveInstance(ctx)
+	if err := session.SaveInstance(ctx); err != nil {
+		return err
+	}
+	return session.Flush(ctx)
 }
 
 // cancelPendingSiblingTasks 原子清理同批次中其余未处理的兄弟任务（驳回时联动取消）

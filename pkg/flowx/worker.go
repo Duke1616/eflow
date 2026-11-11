@@ -2,6 +2,7 @@ package flowx
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -89,6 +90,6 @@ func wrapWithRetry(worker TaskWorker, policy *model.RetryPolicy) TaskWorker {
 				interval = nextInterval
 			}
 		}
-		return nil, nil
+		return nil, errors.New("自动化任务达到最大重试上限")
 	}
 }

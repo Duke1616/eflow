@@ -7,6 +7,7 @@ import (
 
 	"github.com/Duke1616/eflow/pkg/flowx/middleware"
 	"github.com/Duke1616/eflow/pkg/flowx/model"
+	"github.com/Duke1616/eflow/pkg/flowx/storage"
 	"github.com/Duke1616/eflow/pkg/flowx/storage/memory"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -244,6 +245,7 @@ func (s *FlowxTestSuite) TestRuleEngine() {
 				{Field: "trial", Operator: model.OpEqual, Value: true},
 			},
 		}).
+		Edge("audit_director", "end").
 		Build()
 
 	testCases := []struct {
@@ -314,6 +316,7 @@ func (s *FlowxTestSuite) TestRuleEngine_EdgeOperators() {
 			},
 		}).
 		Edge("gw", "end").
+		Edge("special_audit", "end").
 		Build()
 
 	s.Run("满足Contains_NotEmpty_Empty_NotIn所有高级条件_流向特批", func() {
@@ -373,22 +376,20 @@ func (s *FlowxTestSuite) TestEventsAndHooks() {
 	s.Run("合规申请_触发Hook算人与EventBus广播", func() {
 		engine, store := s.newEngine()
 
-		// 1. 注册同步 Hook (运行在主事务内，用于算人和守卫)
+		// 1. 注册同步 Hook (运行在主事务内，用于算人和守卫，可安全就地补齐业务变量)
 		engine.RegisterHook("resolve_leader", func(_ context.Context, hc *HookContext) error {
 			hc.SetAssignees("dynamic_boss")
 			return nil
 		})
 		engine.RegisterHook("check_budget", func(_ context.Context, hc *HookContext) error {
+			hc.Variables.Set("etask_done", true)
 			return nil
 		})
 
-		// 2. 注册生命周期事件观察者 (解耦外围通知与业务联动)
+		// 2. 注册生命周期事件观察者 (只读事件快照，解耦外围通知与业务联动)
 		var passedEvents []Event
 		engine.Subscribe([]EventType{EventTaskPassed, EventProcessFinished}, func(_ context.Context, ev Event) error {
 			passedEvents = append(passedEvents, ev)
-			if ev.Type == EventTaskPassed {
-				ev.Instance.MergeVariables(map[string]any{"etask_done": true})
-			}
 			return nil
 		})
 
@@ -1334,6 +1335,10 @@ func TestTransferSemantics(t *testing.T) {
 	err = engine.Transfer(ctx, task.ID, []string{"", "  "})
 	assert.ErrorContains(t, err, "转签目标用户不能为空")
 
+	// 1.1 多人转签显式拦截报错
+	err = engine.Transfer(ctx, task.ID, []string{"bob", "charlie"})
+	assert.ErrorContains(t, err, "转签仅支持指定单个目标处理人")
+
 	// 2. 正常转签给 bob
 	err = engine.Transfer(ctx, task.ID, []string{"bob"})
 	require.NoError(t, err)
@@ -1423,6 +1428,239 @@ func TestParallelBranch_AsyncAutomationTaskNotSkipped(t *testing.T) {
 	finalInst, err := store.GetInstance(ctx, instID)
 	require.NoError(t, err)
 	assert.Equal(t, model.InstanceFinished, finalInst.Status, "所有分支完成后流程实例必须圆满办结")
+}
+
+// TestDuplicateFinishEventPrevention 验证并行网关分支下一路直接到 End、另一路抄送穿透到 End 时，办结事件绝不重复触发
+func TestDuplicateFinishEventPrevention(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+
+	var (
+		finishCount     int
+		endEnteredCount int
+	)
+	engine.Subscribe([]EventType{EventProcessFinished, EventNodeEntered}, func(_ context.Context, ev Event) error {
+		if ev.Type == EventProcessFinished {
+			finishCount++
+		}
+		if ev.Type == EventNodeEntered && ev.Node != nil && ev.Node.Type == model.NodeEnd {
+			endEnteredCount++
+		}
+		return nil
+	})
+
+	def := NewProcess("dup_finish_proc", "防重复办结测试").
+		Start("start", "开始").
+		ParallelGateway("fork", "并行网关").
+		CarbonCopy("cc", "抄送知会", "tom").
+		End("end", "结束").
+		Edge("start", "fork").
+		Edge("fork", "cc").
+		Edge("fork", "end").
+		Edge("cc", "end").
+		Build()
+
+	_, err := engine.Deploy(ctx, def)
+	require.NoError(t, err)
+
+	instID, err := engine.Start(ctx, StartReq{
+		Key:     "dup_finish_proc",
+		Starter: "alice",
+	})
+	require.NoError(t, err)
+
+	inst, err := store.GetInstance(ctx, instID)
+	require.NoError(t, err)
+	assert.Equal(t, model.InstanceFinished, inst.Status)
+
+	// 核心断言：流程办结事件必须严格有且仅有 1 次！
+	assert.Equal(t, 1, finishCount, "ProcessFinished 事件严禁重复广播")
+}
+
+// TestDslValidateDanglingNode 验证非结束的普通节点悬空（无出边）在静态部署期被阻断
+func TestDslValidateDanglingNode(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+
+	// 审批节点 audit 悬空，没有出边
+	def := NewProcess("dangling_proc", "悬空节点测试").
+		Start("start", "开始").
+		Approval("audit", "审批", model.SignOneVote, "alice").
+		End("end", "结束").
+		Edge("start", "audit").
+		Build()
+
+	_, err := engine.Deploy(ctx, def)
+	assert.ErrorContains(t, err, "悬空异常，非结束节点必须至少包含 1 条出边")
+}
+
+// TestTransactionalOutbox_RollbackDoesNotPublish 测试事务回滚时不向外广播事件，提交后才刷出
+func TestTransactionalOutbox_RollbackDoesNotPublish(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+
+	var publishedEvents []Event
+	engine.Subscribe(nil, func(_ context.Context, e Event) error {
+		publishedEvents = append(publishedEvents, e)
+		return nil
+	})
+
+	def := NewProcess("tx_outbox_proc", "事务事件外发测试").
+		Start("start", "开始").
+		Approval("audit", "审批", model.SignOneVote, "alice").
+		End("end", "结束").
+		Edge("start", "audit").
+		Edge("audit", "end").
+		Build()
+
+	_, err := engine.Deploy(ctx, def)
+	require.NoError(t, err)
+
+	publishedEvents = nil // 清空部署事件
+
+	// 模拟事务执行并在最后主动抛出错误触发回滚
+	err = engine.DoTx(ctx, func(txCtx context.Context, txEngine Engine) error {
+		_, startErr := txEngine.Start(txCtx, StartReq{
+			Key:     "tx_outbox_proc",
+			Starter: "bob",
+		})
+		require.NoError(t, startErr)
+		return errors.New("模拟事务失败回滚")
+	})
+
+	require.Error(t, err)
+	assert.Empty(t, publishedEvents, "事务回滚时，暂存的事件必须被安全丢弃，绝不能提前外发")
+}
+
+// TestTaskWorker_FailFastOnError 测试自动化任务执行失败时大声失败冒泡错误，防止无声永久卡死
+func TestTaskWorker_FailFastOnError(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+
+	workerCalls := 0
+	engine.RegisterWorker("auto_call", func(_ context.Context, _ *TaskContext) (*TaskResult, error) {
+		workerCalls++
+		return nil, errors.New("外部服务暂时不可用")
+	})
+
+	def := NewProcess("auto_fail_proc", "自动化快速失败测试").
+		Start("start", "开始").
+		Task("auto_task", "自动任务", "auto_call").
+		End("end", "结束").
+		Edge("start", "auto_task").
+		Edge("auto_task", "end").
+		Build()
+
+	_, err := engine.Deploy(ctx, def)
+	require.NoError(t, err)
+
+	_, err = engine.Start(ctx, StartReq{
+		Key:     "auto_fail_proc",
+		Starter: "tom",
+	})
+	require.Error(t, err, "worker 失败必须立刻向外冒泡错误回滚事务，绝不能静默吞错卡死")
+	assert.Contains(t, err.Error(), "外部服务暂时不可用")
+	assert.Equal(t, 1, workerCalls)
+}
+
+// TestOutbox_EventSnapshotPreservedInOrder 测试事务事件 Outbox 在入队时深拷贝快照，防止后续推进修改污染先发事件历史
+func TestOutbox_EventSnapshotPreservedInOrder(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+
+	var recordedEvents []Event
+	engine.Subscribe(nil, func(_ context.Context, e Event) error {
+		recordedEvents = append(recordedEvents, e)
+		return nil
+	})
+
+	def := NewProcess("snapshot_proc", "快照时序测试").
+		Start("start", "开始").
+		CarbonCopy("cc", "抄送知会", "u1").
+		End("end", "结束").
+		Edge("start", "cc").
+		Edge("cc", "end").
+		Build()
+
+	_, err := engine.Deploy(ctx, def)
+	require.NoError(t, err)
+
+	recordedEvents = nil
+
+	_, err = engine.Start(ctx, StartReq{
+		Key:     "snapshot_proc",
+		Starter: "tom",
+	})
+	require.NoError(t, err)
+
+	// 验证事件数量与类型因果序
+	require.NotEmpty(t, recordedEvents)
+	startEvt, found := lo.Find(recordedEvents, func(e Event) bool { return e.Type == EventProcessStarted })
+	require.True(t, found)
+	assert.Equal(t, model.InstanceRunning, startEvt.Instance.Status, "PROCESS_STARTED 发生时实例状态必须为 Running，严禁被办结终态污染")
+	assert.Equal(t, "start", startEvt.Instance.CurrentNode, "PROCESS_STARTED 发生时节点必须指向 start")
+
+	finishEvt, found := lo.Find(recordedEvents, func(e Event) bool { return e.Type == EventProcessFinished })
+	require.True(t, found)
+	assert.Equal(t, model.InstanceFinished, finishEvt.Instance.Status, "PROCESS_FINISHED 发生时实例状态为 Finished")
+	assert.Equal(t, "end", finishEvt.Instance.CurrentNode)
+}
+
+type spySaveStorage struct {
+	storage.IStorage
+	saveInstanceCount int
+}
+
+func (s *spySaveStorage) SaveInstance(ctx context.Context, inst *model.Instance) error {
+	s.saveInstanceCount++
+	return s.IStorage.SaveInstance(ctx, inst)
+}
+
+// TestRecursiveSaveInstance_ConsolidatedToOneWrite 测试连续穿透节点场景下，递归多次 SaveInstance 被 Unit of Work 延迟收口合并为 1 次持久化
+func TestRecursiveSaveInstance_ConsolidatedToOneWrite(t *testing.T) {
+	ctx := context.Background()
+	rawStore := memory.NewStorage()
+	spyStore := &spySaveStorage{IStorage: rawStore}
+	engine := NewEngine(spyStore)
+
+	// 构造连续 3 个抄送穿透节点连向结束节点
+	def := NewProcess("cascade_cc_proc", "级联抄送穿透测试").
+		Start("start", "开始").
+		CarbonCopy("cc1", "抄送一", "u1").
+		CarbonCopy("cc2", "抄送二", "u2").
+		CarbonCopy("cc3", "抄送三", "u3").
+		End("end", "结束").
+		Edge("start", "cc1").
+		Edge("cc1", "cc2").
+		Edge("cc2", "cc3").
+		Edge("cc3", "end").
+		Build()
+
+	_, err := engine.Deploy(ctx, def)
+	require.NoError(t, err)
+
+	spyStore.saveInstanceCount = 0
+
+	// 启动流转：瞬时连续穿透 cc1 -> cc2 -> cc3 -> end，单单办结
+	instID, err := engine.Start(ctx, StartReq{
+		Key:     "cascade_cc_proc",
+		Starter: "tom",
+	})
+	require.NoError(t, err)
+
+	// 验证核心收益：在整个事务推进全生命周期中，底层只调用了 1 次 SaveInstance（原本为 4 次写放大）
+	assert.Equal(t, 1, spyStore.saveInstanceCount, "级联连续穿透场景下，物理 DB SaveInstance 必须严格收敛为 1 次")
+
+	// 验证最终状态正确性已准确落库
+	inst, err := rawStore.GetInstance(ctx, instID)
+	require.NoError(t, err)
+	assert.True(t, inst.IsFinished(), "实例必须成功办结")
+	assert.Equal(t, "end", inst.CurrentNode, "当前节点必须指向最终结束节点")
 }
 
 // BenchmarkFlowxFullProcess 基准测试：单次完整综合流程（启动 -> 或签通过 -> 条件分流 -> 会签双人通过 -> 自动办结）

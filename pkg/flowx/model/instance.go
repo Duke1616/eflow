@@ -28,21 +28,30 @@ type Instance struct {
 	FinishTime  time.Time      `json:"finish_time,omitempty"`
 }
 
-// Finish 将流程实例正常办结并记录完成时间与最终节点
+// Finish 将流程实例正常办结并记录完成时间与最终节点 (具备终态幂等自卫，杜绝重复办结覆盖完成时间)
 func (i *Instance) Finish(endNodeID string) {
+	if i.Status != InstanceRunning {
+		return
+	}
 	i.Status = InstanceFinished
 	i.CurrentNode = endNodeID
 	i.FinishTime = time.Now()
 }
 
-// Reject 将流程实例置为驳回终止态并记录结束时间
+// Reject 将流程实例置为驳回终止态并记录结束时间 (具备终态幂等自卫)
 func (i *Instance) Reject() {
+	if i.Status != InstanceRunning {
+		return
+	}
 	i.Status = InstanceRejected
 	i.FinishTime = time.Now()
 }
 
-// Cancel 将流程实例置为撤回/作废态并记录结束时间
+// Cancel 将流程实例置为撤回/作废态并记录结束时间 (具备终态幂等自卫)
 func (i *Instance) Cancel() {
+	if i.Status != InstanceRunning {
+		return
+	}
 	i.Status = InstanceCancelled
 	i.FinishTime = time.Now()
 }

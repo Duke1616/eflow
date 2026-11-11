@@ -285,7 +285,7 @@ func (b *EventBus) AddListener(listener IEventListener) {
 	b.listeners = append(b.listeners, listener)
 }
 
-// Publish 广播生命周期事件给所有匹配的监听器（带 panic 恢复兜底与异常日志记录）
+// Publish 广播生命周期事件给所有匹配的监听器（带只读深拷贝快照与 panic 恢复兜底）
 func (b *EventBus) Publish(ctx context.Context, event Event) {
 	b.mu.RLock()
 	matched := make([]IEventListener, 0, len(b.listeners))
@@ -297,17 +297,63 @@ func (b *EventBus) Publish(ctx context.Context, event Event) {
 	}
 	b.mu.RUnlock()
 
+	// 强制制作全量只读深拷贝快照，彻底杜绝异步监听器消费与主流程后续推进产生数据竞争 (Data Race)
+	evtSnapshot := event.Clone()
+
 	for _, listener := range matched {
 		func(l IEventListener) {
 			defer func() {
 				if r := recover(); r != nil {
 					// 捕获异常输出日志，防止用户自定义监听器中的 panic 导致引擎主流程崩溃
-					log.Printf("[flowx.EventBus] 事件监听器执行 panic: %v, eventType=%s", r, event.Type)
+					log.Printf("[flowx.EventBus] 事件监听器执行 panic: %v, eventType=%s", r, evtSnapshot.Type)
 				}
 			}()
-			if err := l.OnEvent(ctx, event); err != nil {
-				log.Printf("[flowx.EventBus] 事件监听器处理失败: %v, eventType=%s", err, event.Type)
+			if err := l.OnEvent(ctx, evtSnapshot); err != nil {
+				log.Printf("[flowx.EventBus] 事件监听器处理失败: %v, eventType=%s", err, evtSnapshot.Type)
 			}
 		}(listener)
+	}
+}
+
+// IEventPublisher 抽象事件发布契约
+type IEventPublisher interface {
+	Publish(ctx context.Context, event Event)
+}
+
+type pendingEvent struct {
+	ctx   context.Context
+	event Event
+}
+
+// bufferedEventPublisher 事务级事件暂存器（Outbox 模式），防止在未提交的物理事务中提前外发事件
+type bufferedEventPublisher struct {
+	target IEventPublisher
+	mu     sync.Mutex
+	events []pendingEvent
+}
+
+func newBufferedEventPublisher(target IEventPublisher) *bufferedEventPublisher {
+	return &bufferedEventPublisher{
+		target: target,
+		events: make([]pendingEvent, 0),
+	}
+}
+
+func (b *bufferedEventPublisher) Publish(ctx context.Context, event Event) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	// 入队即深拷贝快照：彻底切断活指针引用，保证每个事件严格保留产生时刻的因果状态（杜绝终态污染先发事件）
+	b.events = append(b.events, pendingEvent{ctx: ctx, event: event.Clone()})
+}
+
+// Flush 物理事务成功提交后，将暂存事件统一有序刷出广播
+func (b *bufferedEventPublisher) Flush() {
+	b.mu.Lock()
+	pending := b.events
+	b.events = nil
+	b.mu.Unlock()
+
+	for _, pe := range pending {
+		b.target.Publish(pe.ctx, pe.event)
 	}
 }

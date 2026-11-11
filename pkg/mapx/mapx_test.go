@@ -152,4 +152,22 @@ func TestNumericAndBooleanConversionBoundaries(t *testing.T) {
 	}
 }
 
+func TestMap_DeepClone_AdvancedTypes(t *testing.T) {
+	orig := Map{
+		"string_map": map[string]string{"k1": "v1"},
+		"float_slice": []float64{1.1, 2.2},
+	}
+
+	cloned := orig.DeepClone()
+
+	// 修改深拷贝结构中的元素，验证对原始对象无副作用
+	if sm, ok := cloned["string_map"].(map[string]any); ok {
+		sm["k1"] = "mutated"
+	} else if sm, ok := cloned["string_map"].(map[string]string); ok {
+		sm["k1"] = "mutated"
+	}
+
+	assert.Equal(t, "v1", orig["string_map"].(map[string]string)["k1"])
+}
+
 type testString string

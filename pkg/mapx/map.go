@@ -59,16 +59,64 @@ func (m *Map) Merge(patch Map) {
 	}
 }
 
-// Clone 返回浅拷贝。
+// Clone 返回深拷贝，切断嵌套 map 与切片的引用共享。
 func (m *Map) Clone() Map {
+	return m.DeepClone()
+}
+
+// DeepClone 返回全量递归深拷贝，彻底切断所有嵌套 map 与切片的底层引用共享
+func (m *Map) DeepClone() Map {
 	if m == nil {
 		return nil
 	}
 	clone := make(Map, len(*m))
 	for key, value := range *m {
-		clone[key] = value
+		clone[key] = deepCloneValue(value)
 	}
 	return clone
+}
+
+func deepCloneValue(val any) any {
+	if val == nil {
+		return nil
+	}
+	switch v := val.(type) {
+	case Map:
+		return v.DeepClone()
+	case map[string]any:
+		res := make(map[string]any, len(v))
+		for k, item := range v {
+			res[k] = deepCloneValue(item)
+		}
+		return res
+	case []any:
+		res := make([]any, len(v))
+		for i, item := range v {
+			res[i] = deepCloneValue(item)
+		}
+		return res
+	case []string:
+		res := make([]string, len(v))
+		copy(res, v)
+		return res
+	case []int:
+		res := make([]int, len(v))
+		copy(res, v)
+		return res
+	case []int64:
+		res := make([]int64, len(v))
+		copy(res, v)
+		return res
+	default:
+		// 兜底策略：对未显式覆盖的复杂复合类型（如 map[string]string、[]float64 等），利用 JSON 序列化实现完全深度隔离
+		if bytes, err := json.Marshal(val); err == nil {
+			var cloned any
+			if err = json.Unmarshal(bytes, &cloned); err == nil {
+				return cloned
+			}
+		}
+		return val
+	}
 }
 
 // GetString 获取字符串字段，并支持常见标量转换。

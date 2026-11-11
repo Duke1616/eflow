@@ -46,7 +46,7 @@ func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession
 			}
 
 			for _, t := range skippedTasks {
-				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, nil, t, "system", t.Comment))
+				e.publisher.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, nil, t, "system", t.Comment))
 			}
 		}
 	}
@@ -59,7 +59,7 @@ func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession
 		for _, taskID := range dec.SkippedTaskIDs {
 			if t, ok := session.GetTask(taskID); ok {
 				node := session.Plan().NodesMap[t.NodeID]
-				e.eventBus.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, &node, t, "system", "排他分支竞争胜出，系统自动跳过"))
+				e.publisher.Publish(ctx, NewTaskEvent(EventTaskSkipped, inst, &node, t, "system", "排他分支竞争胜出，系统自动跳过"))
 			}
 		}
 	}
@@ -74,7 +74,11 @@ func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession
 		return ErrNoAvailablePath
 	}
 
-	// 4. 统一激活就绪节点（按节点类型多态分发：办结、自动执行或派发待办任务）
+	// 4. 统一激活就绪节点（若实例在前置穿透递归中已达终态，直接保存退出，杜绝重复激活）
+	if !inst.IsRunning() {
+		return session.SaveInstance(ctx)
+	}
+
 	if err := e.activateNodes(ctx, session, dec.ReadyNodes, batchCode, operator); err != nil {
 		return err
 	}
@@ -95,10 +99,15 @@ func (e *flowEngine) activateNodes(ctx context.Context, session *flowSession, no
 	})
 
 	for _, node := range nonEndNodes {
+		// 若前置节点瞬时穿透已致全单办结，中断后续非终态节点的无效激活
+		if !inst.IsRunning() {
+			break
+		}
+
 		inst.CurrentNode = node.ID
 
 		// 广播节点激活进入事件 (便于抄送知会、群通知及流程点亮追踪)
-		e.eventBus.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &node, operator, ""))
+		e.publisher.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &node, operator, ""))
 
 		executor, ok := e.executors[node.Type]
 		if !ok {
@@ -112,16 +121,23 @@ func (e *flowEngine) activateNodes(ctx context.Context, session *flowSession, no
 
 	// 2. 调度到达结束节点：仅当全局会话中不存在任何未完结的在途待办/挂起任务时，流程实例才全单圆满办结
 	if len(endNodes) > 0 {
-		endNode := endNodes[0]
-		inst.CurrentNode = endNode.ID
-		e.eventBus.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &endNode, operator, ""))
+		// 终态幂等防卫：若在前面的穿透节点深层递归中已办结流程，绝不重复触发流程办结与节点进入事件
+		if !inst.IsRunning() {
+			return nil
+		}
+
+		for _, endNode := range endNodes {
+			inst.CurrentNode = endNode.ID
+			e.publisher.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &endNode, operator, ""))
+		}
 
 		hasInFlightTasks := lo.SomeBy(session.AllTasks(), func(t *model.Task) bool {
 			return t.IsPending()
 		})
 		if !hasInFlightTasks {
-			inst.Finish(endNode.ID)
-			e.eventBus.Publish(ctx, NewNodeEvent(EventProcessFinished, inst, &endNode, operator, ""))
+			lastEnd := endNodes[len(endNodes)-1]
+			inst.Finish(lastEnd.ID)
+			e.publisher.Publish(ctx, NewNodeEvent(EventProcessFinished, inst, &lastEnd, operator, ""))
 		}
 	}
 
@@ -190,7 +206,7 @@ func (x *approvalNodeExecutor) Execute(ctx context.Context, session *flowSession
 
 	// 广播新任务生成事件
 	for _, t := range nodeTasks {
-		x.engine.eventBus.Publish(ctx, NewTaskEvent(EventTaskCreated, inst, &node, t, operator, ""))
+		x.engine.publisher.Publish(ctx, NewTaskEvent(EventTaskCreated, inst, &node, t, operator, ""))
 	}
 
 	return nil
@@ -208,11 +224,13 @@ func (x *taskNodeExecutor) Execute(ctx context.Context, session *flowSession, no
 	}
 
 	inst := session.Instance()
-	res, workerErr := wrapWithRetry(worker, node.RetryPolicy)(ctx, &TaskContext{
+	res, workerErr := worker(ctx, &TaskContext{
 		Instance:  inst,
 		Node:      &node,
 		Variables: inst.Variables,
+		Attempt:   1,
 	})
+
 	if workerErr != nil {
 		return fmt.Errorf("自动化任务 [%s] 执行失败: %w", node.ID, workerErr)
 	}
@@ -232,7 +250,7 @@ func (x *taskNodeExecutor) Execute(ctx context.Context, session *flowSession, no
 		return err
 	}
 
-	x.engine.eventBus.Publish(ctx, NewTaskEvent(EventTaskPassed, inst, &node, sysTask, "system", "系统自动执行成功"))
+	x.engine.publisher.Publish(ctx, NewTaskEvent(EventTaskPassed, inst, &node, sysTask, "system", "系统自动执行成功"))
 
 	// 合并自动化任务产出的增量表单变量
 	if len(res.Variables) > 0 {
@@ -272,7 +290,7 @@ func (x *carbonCopyNodeExecutor) Execute(ctx context.Context, session *flowSessi
 		}
 
 		for _, t := range ccTasks {
-			x.engine.eventBus.Publish(ctx, NewTaskEvent(EventTaskPassed, inst, &node, t, operator, "系统抄送知会"))
+			x.engine.publisher.Publish(ctx, NewTaskEvent(EventTaskPassed, inst, &node, t, operator, "系统抄送知会"))
 		}
 	}
 
@@ -309,8 +327,8 @@ func (x *chatGroupNodeExecutor) Execute(ctx context.Context, session *flowSessio
 	}
 
 	// 2. 广播群聊通知节点激活与任务通过事件
-	x.engine.eventBus.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &node, operator, "群聊通知自动穿透"))
-	x.engine.eventBus.Publish(ctx, NewTaskEvent(EventTaskPassed, inst, &node, chatTask, operator, "群聊通知自动完成"))
+	x.engine.publisher.Publish(ctx, NewNodeEvent(EventNodeEntered, inst, &node, operator, "群聊通知自动穿透"))
+	x.engine.publisher.Publish(ctx, NewTaskEvent(EventTaskPassed, inst, &node, chatTask, operator, "群聊通知自动完成"))
 
 	// 3. 瞬时自动穿透推进：驱动群聊通知节点下一步流转决策
 	nextDec, err := session.Plan().ResolveNextStep(node.ID, inst.Variables, session.AllTasks(), batchCode)

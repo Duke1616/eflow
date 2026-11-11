@@ -177,6 +177,16 @@ func (l *FlowxNotificationListener) handleEvent(safeCtx context.Context, evt flo
 		ticket.Process.EngineType = domain.EngineTypeFlowx
 	}
 
+	// 融合 flowx 流程实例最新的动态变量表，保障即时通知卡片渲染不缺失刚填写的业务字段
+	if evt.Instance != nil && len(evt.Instance.Variables) > 0 {
+		if ticket.Data == nil {
+			ticket.Data = make(domain.TicketData)
+		}
+		for k, v := range evt.Instance.Variables {
+			ticket.Data[k] = v
+		}
+	}
+
 	// 2. 注入工单真实租户上下文，保障多租户权限与通知配置安全隔离
 	safeCtx = ctxutil.WithTenantID(safeCtx, ticket.TenantID)
 

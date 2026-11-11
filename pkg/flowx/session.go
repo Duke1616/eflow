@@ -17,6 +17,7 @@ type flowSession struct {
 	inst    *model.Instance
 	plan    *kernel.ExecutionPlan
 	tasks   []*model.Task
+	dirty   bool // 流程实例运行态是否发生过修改，用于 Unit of Work 延迟收口合并写
 }
 
 func newFlowSession(store storage.IStorage, inst *model.Instance, plan *kernel.ExecutionPlan, tasks []*model.Task) *flowSession {
@@ -25,6 +26,7 @@ func newFlowSession(store storage.IStorage, inst *model.Instance, plan *kernel.E
 		inst:    inst,
 		plan:    plan,
 		tasks:   tasks,
+		dirty:   false,
 	}
 }
 
@@ -111,7 +113,17 @@ func (s *flowSession) UpdateTasksStatus(ctx context.Context, taskIDs []string, s
 	return nil
 }
 
-// SaveInstance 同步持久化流程实例状态
+// SaveInstance 标记当前流程实例运行态已脏（延迟物理更新，彻底杜绝递归穿透造成的多次 DB UPDATE 与 Binlog 放大）
 func (s *flowSession) SaveInstance(ctx context.Context) error {
+	s.dirty = true
+	return nil
+}
+
+// Flush 将会话中发生状态变更的流程实例原子提交至底层持久化存储（Unit of Work 统一收口）
+func (s *flowSession) Flush(ctx context.Context) error {
+	if !s.dirty {
+		return nil
+	}
+	s.dirty = false
 	return s.storage.SaveInstance(ctx, s.inst)
 }
