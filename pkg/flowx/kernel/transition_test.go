@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Duke1616/eflow/pkg/flowx/model"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -185,4 +186,86 @@ func TestExecutionPlan_FindAllUpstreamRejectTargets_XORBranch(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, upstreamNodes, 1)
 	assert.Equal(t, "backend", upstreamNodes[0].ID)
+}
+
+func TestExecutionPlan_RejectTargets_AncestorPruning(t *testing.T) {
+	// 拓扑: start -> a1 -> a2 -> current，另有 a1 -> current 捷径边
+	// a1、a2 同为 current 的直接前驱且都已通过，但 a1 是 a2 的祖先：
+	// 顺序驳回只能回退给最紧邻的 a2，自由驳回则必须保留完整历史链路
+	def := model.ProcessDefinition{
+		Key:     "test_reject_ancestor_pruning",
+		Name:    "驳回祖先剔除测试",
+		Version: 1,
+		Nodes: []model.NodeSpec{
+			{ID: "start", Type: model.NodeStart, Name: "发起人"},
+			{ID: "a1", Type: model.NodeApproval, Name: "初审"},
+			{ID: "a2", Type: model.NodeApproval, Name: "复审"},
+			{ID: "current", Type: model.NodeApproval, Name: "终审"},
+		},
+		Edges: []model.EdgeSpec{
+			{Source: "start", Target: "a1"},
+			{Source: "a1", Target: "a2"},
+			{Source: "a2", Target: "current"},
+			{Source: "a1", Target: "current"},
+		},
+	}
+
+	plan := NewExecutionPlan(def)
+	allTasks := []*model.Task{
+		{ID: "t1", NodeID: "a1", Status: model.TaskPassed, BatchCode: 1},
+		{ID: "t2", NodeID: "a2", Status: model.TaskPassed, BatchCode: 1},
+		{ID: "t3", NodeID: "current", Status: model.TaskPending, BatchCode: 1},
+	}
+
+	immediate, err := plan.FindUpstreamRejectNodes("current", allTasks)
+	require.NoError(t, err)
+	require.Len(t, immediate, 1, "更远的祖先 a1 必须被剔除，否则一次驳回会同时拉出两级待办")
+	assert.Equal(t, "a2", immediate[0].ID)
+
+	all, err := plan.FindAllUpstreamRejectTargets("current", allTasks)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"start", "a1", "a2"}, lo.Map(all, func(n model.NodeSpec, _ int) string { return n.ID }),
+		"自由驳回须按因果拓扑顺序给出起点与全部历史审批环节")
+}
+
+func TestExecutionPlan_CalculateTransition_NestedGatewaySkipped(t *testing.T) {
+	// 拓扑: start -> xor -> [inner(嵌套XOR) -> (a1, a2), b1] -> join -> tail -> end
+	// branch == 2 命中 b1，落选的 inner 整棵子树都要落 TaskSkipped 段位，
+	// 但 join 及其之后的公共主干属于已放行路径可达域，绝不能被污染成跳过
+	def := model.ProcessDefinition{
+		Key:     "test_nested_gateway_skipped",
+		Name:    "嵌套网关落选分支收集测试",
+		Version: 1,
+		Nodes: []model.NodeSpec{
+			{ID: "start", Type: model.NodeStart, Name: "开始"},
+			{ID: "xor", Type: model.NodeGatewayExclusive, Name: "外层排他分流"},
+			{ID: "inner", Type: model.NodeGatewayExclusive, Name: "内层排他分流"},
+			{ID: "a1", Type: model.NodeApproval, Name: "落选审批A1"},
+			{ID: "a2", Type: model.NodeApproval, Name: "落选审批A2"},
+			{ID: "b1", Type: model.NodeApproval, Name: "命中审批B1"},
+			{ID: "join", Type: model.NodeGatewayParallel, Name: "并行汇聚"},
+			{ID: "tail", Type: model.NodeApproval, Name: "公共主干审批"},
+			{ID: "end", Type: model.NodeEnd, Name: "结束"},
+		},
+		Edges: []model.EdgeSpec{
+			{Source: "start", Target: "xor"},
+			{Source: "xor", Target: "inner", Condition: "branch == 1"},
+			{Source: "xor", Target: "b1", Condition: "branch == 2"},
+			{Source: "inner", Target: "a1"},
+			{Source: "inner", Target: "a2"},
+			{Source: "a1", Target: "join"},
+			{Source: "a2", Target: "join"},
+			{Source: "b1", Target: "join"},
+			{Source: "join", Target: "tail"},
+			{Source: "tail", Target: "end"},
+		},
+	}
+
+	plan := NewExecutionPlan(def)
+	res, err := plan.CalculateTransition("xor", model.Variables{"branch": 2})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"b1"}, lo.Map(res.Targets, func(n model.NodeSpec, _ int) string { return n.ID }))
+	assert.Equal(t, []string{"a1", "a2"}, lo.Map(res.SkippedTargets, func(n model.NodeSpec, _ int) string { return n.ID }),
+		"嵌套网关自身不落段位，其下游全部活动节点必须补齐，且已放行路径的公共主干不得被误标跳过")
 }
