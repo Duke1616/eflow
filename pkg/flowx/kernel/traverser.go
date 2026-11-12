@@ -14,7 +14,7 @@ func (p *ExecutionPlan) CalculateTraversedEdges(tasks []*model.Task, inst *model
 		return make(map[string][]string)
 	}
 
-	tracer := newExecutionTracer(p)
+	tracer := newExecutionTracer(p, tasks)
 	tracer.markTerminalNodes(inst)
 	tracer.markTaskNodes(tasks)
 	tracer.resolveThroughGateways()
@@ -26,13 +26,15 @@ func (p *ExecutionPlan) CalculateTraversedEdges(tasks []*model.Task, inst *model
 // executionTracer 负责拓扑执行状态推导与有向边投影分析
 type executionTracer struct {
 	plan      *ExecutionPlan
+	tasks     []*model.Task   // 全量历史任务快照，供汇聚屏障按各节点最新批次重新裁决
 	activated map[string]bool // 已到达/已激活的节点 ID 集合
 	completed map[string]bool // 已完成流转推进的节点 ID 集合
 }
 
-func newExecutionTracer(p *ExecutionPlan) *executionTracer {
+func newExecutionTracer(p *ExecutionPlan, tasks []*model.Task) *executionTracer {
 	t := &executionTracer{
 		plan:      p,
+		tasks:     tasks,
 		activated: make(map[string]bool),
 		completed: make(map[string]bool),
 	}
@@ -89,7 +91,9 @@ func (t *executionTracer) markTaskNodes(tasks []*model.Task) {
 	}
 }
 
-// resolveThroughGateways 识别已完整穿透流转的网关 (上游存在已完成分支 且 下游已激活推进)
+// resolveThroughGateways 识别已完整穿透流转的网关 (上游存在已完成分支 且 下游已激活推进 且 汇聚屏障真实开闸)
+// 前后两个存在性判定跑在历史全量并集上，驳回回退后会被"从未执行的跳过分支"或"停留在旧批次的兄弟通过"喂通，
+// 使已退出的下游路径继续点亮，故必须叠加按各节点最新批次裁决的真实屏障
 func (t *executionTracer) resolveThroughGateways() {
 	for _, n := range t.plan.Def.Nodes {
 		if !n.IsGateway() {
@@ -97,7 +101,7 @@ func (t *executionTracer) resolveThroughGateways() {
 		}
 		upCompleted := t.canReach(n.ID, false, func(id string) bool { return t.completed[id] })
 		downActivated := t.canReach(n.ID, true, func(id string) bool { return t.activated[id] })
-		if upCompleted && downActivated {
+		if upCompleted && downActivated && t.plan.IsJoinSatisfied(n, t.tasks) {
 			t.completed[n.ID] = true
 			t.activated[n.ID] = true
 		}

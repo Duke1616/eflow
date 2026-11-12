@@ -68,6 +68,29 @@ func (s *FlowxBenchmarkTestSuite) TestFlow_OrCompetition() {
 				{From: OrJoinGateway, To: OrEndNode},
 			},
 		},
+		{
+			Name:     "情况4: 并发待办中审批人 A 驳回不终止 -> 兄弟 B 待办联动取消 -> 回退提单人重新编辑",
+			Template: tpl,
+			Before: func(s *FlowxBenchmarkTestSuite, instID string) {
+				s.AssertActiveTasksCount(instID, 2)
+			},
+			Run: func(s *FlowxBenchmarkTestSuite, instID string) {
+				// 竞争分支尚未有人通过，驳回候选只能追溯到提单起点
+				s.AssertRejectTargets(instID, "审批人 A", []string{OrStartNode})
+
+				s.RejectNode(instID, "审批人 A", UserBob, "方案不成立，退回提单人")
+				s.AssertActiveTasksCount(instID, 1) // B 的同批次待办被联动取消，只剩提单人重报
+			},
+			WantStatus: model.InstanceRunning,
+			WantBlockedEdges: []Edge{
+				{From: OrStartNode, To: OrForkGateway}, // 提单人未重新提交，起点出边归零
+				{From: OrForkGateway, To: OrApproverANode},
+				{From: OrForkGateway, To: OrApproverBNode},
+				{From: OrApproverANode, To: OrJoinGateway},
+				{From: OrApproverBNode, To: OrJoinGateway},
+				{From: OrJoinGateway, To: OrEndNode},
+			},
+		},
 	}
 
 	s.ExecuteTableDriven(testCases)

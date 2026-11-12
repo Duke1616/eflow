@@ -197,19 +197,23 @@ func (s *FlowxBenchmarkTestSuite) ExecuteTableDriven(testCases []TestCase) {
 			// 4. 统一断言终态 (After)
 			s.AssertInstanceStatus(instID, tc.WantStatus)
 
-			// 5. 统一断言高亮通过连线 (实线)
+			// 5. 终态画布只取一次快照：三类连线断言共享同一份投影，
+			// 既避免每条边重复查库与全画布深拷贝，也保证同一批断言看到的是同一时刻的状态
+			canvas := s.getDecoratedCanvas(tc.Template, instID)
+
+			// 6. 统一断言高亮通过连线 (实线)
 			for _, edge := range tc.WantPassedEdges {
-				s.AssertEdgePassed(tc.Template, instID, edge.From, edge.To)
+				s.AssertEdgePassed(canvas, edge.From, edge.To)
 			}
 
-			// 6. 统一断言跳过连线 (虚线)
+			// 7. 统一断言跳过连线 (虚线)
 			for _, edge := range tc.WantSkippedEdges {
-				s.AssertEdgeSkipped(tc.Template, instID, edge.From, edge.To)
+				s.AssertEdgeSkipped(canvas, edge.From, edge.To)
 			}
 
-			// 7. 统一断言未流转/阻断连线 (灰线)
+			// 8. 统一断言未流转/阻断连线 (灰线)
 			for _, edge := range tc.WantBlockedEdges {
-				s.AssertEdgeNotTraversed(tc.Template, instID, edge.From, edge.To)
+				s.AssertEdgeNotTraversed(canvas, edge.From, edge.To)
 			}
 		})
 	}
@@ -225,7 +229,6 @@ func (s *FlowxBenchmarkTestSuite) startInstance(templateKey string, starter stri
 
 	instID, err := s.engine.Start(s.ctx, flowx.StartReq{
 		Def:       fixture.Def,
-		Key:       fixture.Def.Key,
 		Starter:   starter,
 		Variables: vars,
 	})
@@ -233,12 +236,11 @@ func (s *FlowxBenchmarkTestSuite) startInstance(templateKey string, starter stri
 	return instID
 }
 
-// PassNode 按展示名称和处理人通过审批节点
-func (s *FlowxBenchmarkTestSuite) PassNode(instID string, nodeName string, operator string) {
+// findPendingTask 按展示名称与处理人定位当前待办任务；未指定处理人时退化为按节点名匹配
+func (s *FlowxBenchmarkTestSuite) findPendingTask(instID, nodeName, operator string) *model.Task {
 	tasks, err := s.engine.ListPendingTasksByInstances(s.ctx, []string{instID})
 	s.Require().NoError(err)
 
-	// 优先匹配节点名且指派人等于 operator 的任务；若未指定则匹配该节点名
 	targetTask, found := lo.Find(tasks, func(tk *model.Task) bool {
 		return tk.NodeName == nodeName && (tk.Assignee == operator || operator == "")
 	})
@@ -246,8 +248,13 @@ func (s *FlowxBenchmarkTestSuite) PassNode(instID string, nodeName string, opera
 		targetTask, found = lo.Find(tasks, func(tk *model.Task) bool { return tk.NodeName == nodeName })
 	}
 	s.Require().True(found, "未找到待审批节点: %s (操作人: %s, 当前活跃: %v)", nodeName, operator, lo.Map(tasks, func(t *model.Task, _ int) string { return t.NodeName }))
+	return targetTask
+}
 
-	err = s.engine.Pass(s.ctx, flowx.PassReq{
+// PassNode 按展示名称和处理人通过审批节点
+func (s *FlowxBenchmarkTestSuite) PassNode(instID string, nodeName string, operator string) {
+	targetTask := s.findPendingTask(instID, nodeName, operator)
+	err := s.engine.Pass(s.ctx, flowx.PassReq{
 		TaskID:   targetTask.ID,
 		Operator: operator,
 	})
@@ -256,24 +263,37 @@ func (s *FlowxBenchmarkTestSuite) PassNode(instID string, nodeName string, opera
 
 // RejectNodeTerminate 按展示名称直接驳回终止流程
 func (s *FlowxBenchmarkTestSuite) RejectNodeTerminate(instID string, nodeName string, operator string, comment string) {
-	tasks, err := s.engine.ListPendingTasksByInstances(s.ctx, []string{instID})
-	s.Require().NoError(err)
-
-	targetTask, found := lo.Find(tasks, func(tk *model.Task) bool {
-		return tk.NodeName == nodeName && (tk.Assignee == operator || operator == "")
-	})
-	if !found {
-		targetTask, found = lo.Find(tasks, func(tk *model.Task) bool { return tk.NodeName == nodeName })
-	}
-	s.Require().True(found, "未找到待审批节点: %s (操作人: %s, 当前活跃: %v)", nodeName, operator, lo.Map(tasks, func(t *model.Task, _ int) string { return t.NodeName }))
-
-	err = s.engine.Reject(s.ctx, flowx.RejectReq{
+	targetTask := s.findPendingTask(instID, nodeName, operator)
+	err := s.engine.Reject(s.ctx, flowx.RejectReq{
 		TaskID:    targetTask.ID,
 		Operator:  operator,
 		Comment:   comment,
 		Terminate: true,
 	})
 	s.Require().NoError(err, "节点驳回终止失败: %s (操作人: %s)", nodeName, operator)
+}
+
+// RejectNode 按展示名称驳回并默认回溯至最近一层上游审批节点（不终止流程，批次自增后重新待办）
+func (s *FlowxBenchmarkTestSuite) RejectNode(instID string, nodeName string, operator string, comment string) {
+	targetTask := s.findPendingTask(instID, nodeName, operator)
+	err := s.engine.Reject(s.ctx, flowx.RejectReq{
+		TaskID:   targetTask.ID,
+		Operator: operator,
+		Comment:  comment,
+	})
+	s.Require().NoError(err, "节点驳回回退失败: %s (操作人: %s)", nodeName, operator)
+}
+
+// RejectNodeTo 按展示名称驳回至指定目标节点（自由驳回）
+func (s *FlowxBenchmarkTestSuite) RejectNodeTo(instID string, nodeName string, operator string, comment string, targetNodeID string) {
+	targetTask := s.findPendingTask(instID, nodeName, operator)
+	err := s.engine.Reject(s.ctx, flowx.RejectReq{
+		TaskID:       targetTask.ID,
+		Operator:     operator,
+		Comment:      comment,
+		TargetNodeID: targetNodeID,
+	})
+	s.Require().NoError(err, "节点定向驳回失败: %s (操作人: %s, 目标: %s)", nodeName, operator, targetNodeID)
 }
 
 // Revoke 发起人撤回流程实例
@@ -284,6 +304,17 @@ func (s *FlowxBenchmarkTestSuite) Revoke(instID string, operator string, reason 
 		Comment:    reason,
 	})
 	s.Require().NoError(err, "提单人主动撤单失败")
+}
+
+// RevokeToStarter 发起人撤回并退回至提单人重新编辑（流程保持流转中，不作废）
+func (s *FlowxBenchmarkTestSuite) RevokeToStarter(instID string, operator string, reason string) {
+	err := s.engine.Revoke(s.ctx, flowx.RevokeReq{
+		InstanceID:    instID,
+		Operator:      operator,
+		Comment:       reason,
+		BackToStarter: true,
+	})
+	s.Require().NoError(err, "提单人撤回退回重新编辑失败")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -302,34 +333,38 @@ func (s *FlowxBenchmarkTestSuite) AssertActiveTasksCount(instID string, expected
 	s.Len(tasks, expected, "待办任务数与预期不符")
 }
 
-func (s *FlowxBenchmarkTestSuite) AssertEdgePassed(templateKey, instID, source, target string) {
-	canvas := s.getDecoratedCanvas(templateKey, instID)
-	edge := s.findCanvasEdge(canvas, source, target)
-	s.Require().NotNil(edge, "画布中未找到连线: %s -> %s", source, target)
-
-	props, _ := edge["properties"].(map[string]any)
-	s.True(props != nil && props["is_pass"] == true, "连线 %s -> %s 应被高亮通过 (is_pass 需为 true)", source, target)
+// AssertRejectTargets 断言指定待办节点的自由驳回候选，顺序须为因果拓扑序（起点在前，靠近当前节点在后）
+func (s *FlowxBenchmarkTestSuite) AssertRejectTargets(instID, nodeName string, wantNodeIDs []string) {
+	targetTask := s.findPendingTask(instID, nodeName, "")
+	targets, err := s.engine.GetRejectTargets(s.ctx, targetTask.ID)
+	s.Require().NoError(err, "查询驳回候选失败: %s", nodeName)
+	s.Equal(wantNodeIDs, lo.Map(targets, func(n model.NodeSpec, _ int) string { return n.ID }),
+		"节点 %s 的驳回候选与预期不符", nodeName)
 }
 
-func (s *FlowxBenchmarkTestSuite) AssertEdgeSkipped(templateKey, instID, source, target string) {
-	canvas := s.getDecoratedCanvas(templateKey, instID)
+// edgeProps 取画布中指定连线的高亮属性。连线缺失直接失败，避免断言退化为空操作；
+// 未流转连线可能压根没有 properties，返回 nil 供调用方按"缺省即未点亮"读取（nil map 取值安全）
+func (s *FlowxBenchmarkTestSuite) edgeProps(canvas map[string]any, source, target string) map[string]any {
 	edge := s.findCanvasEdge(canvas, source, target)
 	s.Require().NotNil(edge, "画布中未找到连线: %s -> %s", source, target)
-
 	props, _ := edge["properties"].(map[string]any)
-	s.True(props != nil && props["is_skipped"] == true, "连线 %s -> %s 应被投影为跳过虚线 (is_skipped 需为 true)", source, target)
+	return props
 }
 
-func (s *FlowxBenchmarkTestSuite) AssertEdgeNotTraversed(templateKey, instID, source, target string) {
-	canvas := s.getDecoratedCanvas(templateKey, instID)
-	edge := s.findCanvasEdge(canvas, source, target)
-	s.Require().NotNil(edge, "画布中未找到连线: %s -> %s", source, target)
+func (s *FlowxBenchmarkTestSuite) AssertEdgePassed(canvas map[string]any, source, target string) {
+	props := s.edgeProps(canvas, source, target)
+	s.True(props["is_pass"] == true, "连线 %s -> %s 应被高亮通过 (is_pass 需为 true)", source, target)
+}
 
-	props, _ := edge["properties"].(map[string]any)
-	if props != nil {
-		s.False(props["is_pass"] == true, "连线 %s -> %s 未流转，is_pass 不能为 true", source, target)
-		s.False(props["is_skipped"] == true, "连线 %s -> %s 未流转，is_skipped 不能为 true", source, target)
-	}
+func (s *FlowxBenchmarkTestSuite) AssertEdgeSkipped(canvas map[string]any, source, target string) {
+	props := s.edgeProps(canvas, source, target)
+	s.True(props["is_skipped"] == true, "连线 %s -> %s 应被投影为跳过虚线 (is_skipped 需为 true)", source, target)
+}
+
+func (s *FlowxBenchmarkTestSuite) AssertEdgeNotTraversed(canvas map[string]any, source, target string) {
+	props := s.edgeProps(canvas, source, target)
+	s.False(props["is_pass"] == true, "连线 %s -> %s 未流转，is_pass 不能为 true", source, target)
+	s.False(props["is_skipped"] == true, "连线 %s -> %s 未流转，is_skipped 不能为 true", source, target)
 }
 
 func (s *FlowxBenchmarkTestSuite) getDecoratedCanvas(templateKey, instID string) map[string]any {

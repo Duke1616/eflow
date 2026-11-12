@@ -60,6 +60,47 @@ func (s *FlowxBenchmarkTestSuite) TestFlow_LinearApproval() {
 				{From: LinearChatNode, To: LinearEndNode},
 			},
 		},
+		{
+			Name:     "情况4: 主管驳回且上游仅有起点 -> 回退提单人重新编辑 -> 重新提交后再次到达主管",
+			Template: tpl,
+			Run: func(s *FlowxBenchmarkTestSuite, instID string) {
+				// 上游无历史审批节点，驳回候选只剩提单起点
+				s.AssertRejectTargets(instID, "部门主管审批", []string{LinearStartNode})
+
+				s.RejectNode(instID, "部门主管审批", UserBob, "材料缺失，退回补充")
+				s.AssertActiveTasksCount(instID, 1) // 待办回到提单人
+
+				// 提单人未重新提交前，全图连线归零
+				s.AssertEdgeNotTraversed(s.getDecoratedCanvas(tpl, instID), LinearStartNode, LinearLeaderNode)
+
+				s.PassNode(instID, "开始", UserAlice)
+				s.AssertActiveTasksCount(instID, 1) // 重新提交后再次停留在主管待办
+			},
+			WantStatus: model.InstanceRunning,
+			WantPassedEdges: []Edge{
+				{From: LinearStartNode, To: LinearLeaderNode},
+			},
+			WantBlockedEdges: []Edge{
+				{From: LinearLeaderNode, To: LinearAutoNode},
+				{From: LinearAutoNode, To: LinearChatNode},
+				{From: LinearChatNode, To: LinearEndNode},
+			},
+		},
+		{
+			Name:     "情况5: 发起人撤回并退回重新编辑 -> 实例保持流转中而非作废 -> 连线归零等待重报",
+			Template: tpl,
+			Run: func(s *FlowxBenchmarkTestSuite, instID string) {
+				s.RevokeToStarter(instID, UserAlice, "填错了金额，撤回改一下")
+				s.AssertActiveTasksCount(instID, 1) // 待办退回提单人，流程未终结
+			},
+			WantStatus: model.InstanceRunning,
+			WantBlockedEdges: []Edge{
+				{From: LinearStartNode, To: LinearLeaderNode},
+				{From: LinearLeaderNode, To: LinearAutoNode},
+				{From: LinearAutoNode, To: LinearChatNode},
+				{From: LinearChatNode, To: LinearEndNode},
+			},
+		},
 	}
 
 	s.ExecuteTableDriven(testCases)

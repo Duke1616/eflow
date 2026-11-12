@@ -101,6 +101,100 @@ func (s *FlowxBenchmarkTestSuite) TestFlow_MultiTechDeploy() {
 				{From: CompChatNode, To: CompEndNode},
 			},
 		},
+		{
+			Name:     "情况4: 领导驳回回退至后端重审 -> 已退出的管理层与部署整段熄灭 -> 未命中技术线虚线保留",
+			Template: tpl,
+			Variables: map[string]any{
+				FieldScope: ScopeBackend,
+			},
+			Run: func(s *FlowxBenchmarkTestSuite, instID string) {
+				s.PassNode(instID, "后端审批", UserBob)
+				s.AssertActiveTasksCount(instID, 2)
+
+				// 驳回候选只含起点与真实审批通过的后端；被跳过的算法/前端严禁入选
+				s.AssertRejectTargets(instID, "领导审批", []string{CompStartNode, CompBackendNode})
+
+				// 领导默认回溯驳回：回到最近一层真实通过的后端，产品确认同批次联动取消
+				s.RejectNode(instID, "领导审批", UserEve, "发布窗口不合适，打回后端重审")
+				s.AssertActiveTasksCount(instID, 1)
+			},
+			WantStatus: model.InstanceRunning,
+			WantPassedEdges: []Edge{
+				{From: CompStartNode, To: CompCCNode},
+				{From: CompCCNode, To: CompTechForkGW},
+				{From: CompTechForkGW, To: CompBackendNode}, // 回退目标重新待办，入边保持点亮
+			},
+			WantSkippedEdges: []Edge{
+				{From: CompTechForkGW, To: CompAlgoNode},
+				{From: CompTechForkGW, To: CompFrontendNode},
+				{From: CompAlgoNode, To: CompTechJoinGW},
+				{From: CompFrontendNode, To: CompTechJoinGW},
+			},
+			WantBlockedEdges: []Edge{
+				// 后端等待重审，入边阻断；汇聚屏障不再满足，其出边与整个下游必须熄灭。
+				// 曾出现缺陷：跳过分支被当作已完成通路喂通汇聚，形成"出边亮、入边黑"的不可能拓扑
+				{From: CompBackendNode, To: CompTechJoinGW},
+				{From: CompTechJoinGW, To: CompManageForkGW},
+				{From: CompManageForkGW, To: CompLeaderNode},
+				{From: CompManageForkGW, To: CompProductNode},
+				{From: CompLeaderNode, To: CompManageJoinGW},
+				{From: CompProductNode, To: CompManageJoinGW},
+				{From: CompManageJoinGW, To: CompDeployNode},
+				{From: CompDeployNode, To: CompChatNode},
+				{From: CompChatNode, To: CompEndNode},
+			},
+		},
+		{
+			Name:     "情况5: 领导定向驳回至提单人 -> 开始节点重新待办 -> 全图连线归零等待重报",
+			Template: tpl,
+			Variables: map[string]any{
+				FieldScope: ScopeBackend,
+			},
+			Run: func(s *FlowxBenchmarkTestSuite, instID string) {
+				s.PassNode(instID, "后端审批", UserBob)
+				s.RejectNodeTo(instID, "领导审批", UserEve, "需求描述不清，退回提单人重写", CompStartNode)
+				s.AssertActiveTasksCount(instID, 1)
+			},
+			WantStatus: model.InstanceRunning,
+			WantBlockedEdges: []Edge{
+				{From: CompStartNode, To: CompCCNode}, // 提单人尚未重新提交，起点出边不得点亮
+				{From: CompCCNode, To: CompTechForkGW},
+				{From: CompTechForkGW, To: CompBackendNode},
+				{From: CompTechJoinGW, To: CompManageForkGW},
+				{From: CompManageJoinGW, To: CompDeployNode},
+				{From: CompChatNode, To: CompEndNode},
+			},
+		},
+		{
+			Name:     "情况6: 领导驳回回退 -> 后端重审再次通过 -> 汇聚重新开闸并回流至管理层会签",
+			Template: tpl,
+			Variables: map[string]any{
+				FieldScope: ScopeBackend,
+			},
+			Run: func(s *FlowxBenchmarkTestSuite, instID string) {
+				s.PassNode(instID, "后端审批", UserBob)
+				s.RejectNode(instID, "领导审批", UserEve, "打回后端重审")
+
+				// 回退瞬间下游必须先熄灭，避免修复反向过头把正常流转也一并阻断
+				retreated := s.getDecoratedCanvas(tpl, instID)
+				s.AssertEdgeNotTraversed(retreated, CompTechJoinGW, CompManageForkGW)
+				s.AssertEdgeNotTraversed(retreated, CompManageForkGW, CompLeaderNode)
+
+				// 后端重审通过，汇聚屏障重新满足，流程再次推进到管理层会签
+				s.PassNode(instID, "后端审批", UserBob)
+				s.AssertActiveTasksCount(instID, 2)
+			},
+			WantStatus: model.InstanceRunning,
+			WantPassedEdges: []Edge{
+				{From: CompBackendNode, To: CompTechJoinGW},
+				{From: CompTechJoinGW, To: CompManageForkGW},
+				{From: CompManageForkGW, To: CompLeaderNode},
+				{From: CompManageForkGW, To: CompProductNode},
+			},
+			WantBlockedEdges: []Edge{
+				{From: CompManageJoinGW, To: CompDeployNode}, // 会签尚未全通，部署仍须阻断
+			},
+		},
 	}
 
 	s.ExecuteTableDriven(testCases)
