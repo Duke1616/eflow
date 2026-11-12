@@ -570,61 +570,58 @@ func (s *ticketService) GetTaskFormConfig(ctx context.Context, ticketId int64, t
 		fields = userCfg.Fields
 	}
 
-	// 1. 检索当前工单历史所有步骤已存盘的表单快照（已按创建时间倒序排重锁定最新值）
-	taskForms, err := s.repo.FindTaskFormsByTicketID(ctx, opCtx.ticket.Id)
+	// 检索工单历史步骤已存盘的快照，智能解析当前节点的表单回填数据
+	snapshots, err := s.repo.FindTaskFormsByTicketID(ctx, opCtx.ticket.Id)
 	if err != nil {
 		s.l.Warn("查询历史表单快照失败，降级使用工单主表数据", elog.FieldErr(err), elog.Int64("ticket_id", opCtx.ticket.Id))
 	}
 
-	snapshotByKey := make(map[string]interface{}, len(taskForms))
-	snapshotByName := make(map[string]interface{}, len(taskForms))
-	for _, tf := range taskForms {
-		if tf.Value != nil {
-			if tf.Key != "" {
-				snapshotByKey[tf.Key] = tf.Value
-			}
-			if tf.Name != "" {
-				snapshotByName[tf.Name] = tf.Value
-			}
-		}
-	}
-
-	// 2. 初始化回填字典，首先继承工单主表已有的全局业务数据
-	values := make(map[string]interface{}, len(opCtx.ticket.Data)+len(fields)*2)
-	for k, v := range opCtx.ticket.Data {
-		values[k] = v
-	}
-
-	// 3. 针对当前待办节点所需填写的每一个表单字段，精准推导历史提交值并回填回显 (Prefill)
-	for _, field := range fields {
-		var prefillVal interface{}
-
-		// 优先级 1: 历史步骤快照中按控件 Key 匹配
-		if val, ok := snapshotByKey[field.Key]; ok && val != nil && val != "" {
-			prefillVal = val
-		} else if val, ok := snapshotByName[field.Name]; ok && val != nil && val != "" {
-			// 优先级 2: 历史步骤快照中按字段 Name 匹配
-			prefillVal = val
-		} else if val, ok := opCtx.ticket.Data[field.Key]; ok && val != nil && val != "" {
-			// 优先级 3: 工单主表按控件 Key 匹配
-			prefillVal = val
-		} else if val, ok := opCtx.ticket.Data[field.Name]; ok && val != nil && val != "" {
-			// 优先级 4: 工单主表按字段 Name 匹配
-			prefillVal = val
-		}
-
-		if prefillVal != nil {
-			values[field.Key] = prefillVal
-			if field.Name != "" {
-				values[field.Name] = prefillVal
-			}
-		}
-	}
-
 	return TaskFormConfig{
 		Fields: fields,
-		Values: values,
+		Values: resolveFormPrefillValues(fields, snapshots, opCtx.ticket.Data),
 	}, nil
+}
+
+// resolveFormPrefillValues 解析当前审批节点表单的预填默认值
+// 采用级联多级兜底策略（快照Key > 快照Name > 主表Key > 主表Name），确保驳回重入或分步填报时平滑回填
+func resolveFormPrefillValues(fields []flowdsl.Field, snapshots []domain.FormValue, ticketData domain.TicketData) map[string]interface{} {
+	// 基于 samber/lo 快速构建历史快照索引
+	snapByKey := lo.Associate(snapshots, func(f domain.FormValue) (string, interface{}) {
+		return f.Key, f.Value
+	})
+	snapByName := lo.Associate(snapshots, func(f domain.FormValue) (string, interface{}) {
+		return f.Name, f.Value
+	})
+
+	// 初始化以工单全局业务数据为底座的结果字典
+	values := lo.Assign(ticketData)
+
+	// 针对节点定义的每个字段，按优先级级联寻找首个非空历史值
+	for _, f := range fields {
+		val := findFirstNonEmpty(
+			snapByKey[f.Key],
+			snapByName[f.Name],
+			ticketData[f.Key],
+			ticketData[f.Name],
+		)
+		if val != nil {
+			values[f.Key] = val
+			if f.Name != "" {
+				values[f.Name] = val
+			}
+		}
+	}
+	return values
+}
+
+// findFirstNonEmpty 顺序探测并返回第一个非空有效值
+func findFirstNonEmpty(candidates ...interface{}) interface{} {
+	for _, c := range candidates {
+		if c != nil && c != "" {
+			return c
+		}
+	}
+	return nil
 }
 
 // validateField 校验表单字段的规则约束
