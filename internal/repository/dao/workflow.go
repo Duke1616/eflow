@@ -143,6 +143,7 @@ func (g *gormWorkflowDAO) UpdateWorkflow(ctx context.Context, w Workflow) (int64
 		"is_notify":     w.IsNotify,
 		"notify_method": w.NotifyMethod,
 		"flow_data":     w.FlowData,
+		"flow_policy":   w.FlowPolicy,
 		"utime":         time.Now().UnixMilli(),
 	}
 	if w.EngineType != "" {
