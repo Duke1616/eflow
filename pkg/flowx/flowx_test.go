@@ -10,10 +10,12 @@ import (
 	"github.com/Duke1616/eflow/pkg/flowx/rule"
 	"github.com/Duke1616/eflow/pkg/flowx/storage"
 	"github.com/Duke1616/eflow/pkg/flowx/storage/memory"
+	storagemocks "github.com/Duke1616/eflow/pkg/flowx/storage/mocks"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
 )
 
 // buildStandardLeaveProcess 构造包含或签、会签、条件分支的综合请假审批流程
@@ -795,7 +797,8 @@ func (s *FlowxTestSuite) TestNodeTask_ChainedWorkers() {
 		require.NoError(s.T(), err)
 		assert.Equal(s.T(), "final_audit", inst.CurrentNode)
 		assert.Equal(s.T(), "JWT_AAA", inst.Variables["token"])
-		assert.Equal(s.T(), 8888, inst.Variables["asset_id"])
+		// 只断言值不断言 Go 类型：数字经 MySQL 的 JSON 落库会归一为 float64，内存实现则保留原类型
+		assert.EqualValues(s.T(), 8888, inst.Variables["asset_id"])
 
 		tasks, _ := store.ListTasksByInstance(s.ctx, instID)
 		require.Len(s.T(), tasks, 3) // task_a (passed) + task_b (passed) + final_audit (pending)
@@ -1637,6 +1640,43 @@ func TestTransactionalOutbox_RollbackDoesNotPublish(t *testing.T) {
 	assert.Empty(t, publishedEvents, "事务回滚时，暂存的事件必须被安全丢弃，绝不能提前外发")
 }
 
+// TestStart_RollsBackDispatchedTasksOnHookAbort 启动中途被钩子阻断时，阻断前已写穿的待办必须整体回滚。
+// 刻意用并行网关：a 分支先派发并立即落库，b 分支再阻断——单节点串行流程里钩子先于落库执行，
+// 那种构造根本没写出任何东西，回滚断言会是空转
+func TestStart_RollsBackDispatchedTasksOnHookAbort(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStorage()
+	engine := NewEngine(store)
+	engine.RegisterHook("abort_always", func(c context.Context, hc *HookContext) error {
+		hc.Abort(errors.New("业务前置校验不通过"))
+		return nil
+	})
+
+	def := NewProcess("rollback_proc", "回滚流程").
+		Start("start", "开始").
+		ParallelGateway("split", "并行分流").
+		Approval("a", "先派发的审批", model.SignOneVote, "alice").
+		Approval("b", "被阻断的审批", model.SignOneVote, "bob").
+		End("end", "结束").
+		Edge("start", "split").
+		Edge("split", "a").
+		Edge("split", "b").
+		Edge("a", "end").
+		Edge("b", "end").
+		Hook("b", "abort_always").
+		Build()
+
+	_, err := engine.Start(ctx, StartReq{Def: def, Starter: "tom", InstanceID: "inst_rollback"})
+	require.Error(t, err)
+
+	tasks, err := store.ListTasksByInstance(ctx, "inst_rollback")
+	require.NoError(t, err)
+	assert.Empty(t, tasks, "阻断前已派发的待办必须随事务回滚，不得留下孤儿任务")
+
+	_, err = store.GetInstance(ctx, "inst_rollback")
+	assert.ErrorIs(t, err, storage.ErrInstanceNotFound, "阻断后不得残留孤儿实例")
+}
+
 // TestTaskWorker_FailFastOnError 测试自动化任务执行失败时大声失败冒泡错误，防止无声永久卡死
 func TestTaskWorker_FailFastOnError(t *testing.T) {
 	ctx := context.Background()
@@ -1763,6 +1803,101 @@ func TestRecursiveSaveInstance_ConsolidatedToOneWrite(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, inst.IsFinished(), "实例必须成功办结")
 	assert.Equal(t, "end", inst.CurrentNode, "当前节点必须指向最终结束节点")
+}
+
+func rejectTargetsDefinition() model.ProcessDefinition {
+	return NewProcess("reject_targets_proc", "驳回候选流程").
+		Start("start", "开始").
+		Approval("leader", "初审", model.SignOneVote, "leader").
+		Approval("cfo", "复审", model.SignOneVote, "cfo").
+		End("end", "办结").
+		Edge("start", "leader").
+		Edge("leader", "cfo").
+		Edge("cfo", "end").
+		Build()
+}
+
+// TestGetRejectTargets_ReadOnlyNoRowLock 驳回候选是纯只读查询，只允许走非锁定读。
+// 这里刻意不声明 GetTaskForUpdate / GetInstanceForUpdate 期望：一旦回退到行级排他锁，
+// gomock 会因未声明的调用直接失败，前端展开下拉被并发审批写事务阻塞的问题就有了回归防线
+func TestGetRejectTargets_ReadOnlyNoRowLock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx := context.Background()
+	store := storagemocks.NewMockIStorage(ctrl)
+	engine := NewEngine(store)
+
+	def := rejectTargetsDefinition()
+	inst := &model.Instance{
+		ID: "inst_1", ProcKey: def.Key, Version: def.Version,
+		Status: model.InstanceRunning, CurrentNode: "cfo",
+	}
+	pending := &model.Task{ID: "task_1", InstanceID: "inst_1", NodeID: "cfo", Status: model.TaskPending}
+	passed := &model.Task{ID: "task_0", InstanceID: "inst_1", NodeID: "leader", Status: model.TaskPassed}
+
+	store.EXPECT().GetTask(gomock.Any(), "task_1").Return(pending, nil)
+	store.EXPECT().GetInstance(gomock.Any(), "inst_1").Return(inst, nil)
+	store.EXPECT().GetDefinition(gomock.Any(), def.Key, def.Version).Return(def, nil)
+	store.EXPECT().ListTasksByInstance(gomock.Any(), "inst_1").Return([]*model.Task{passed, pending}, nil)
+
+	targets, err := engine.GetRejectTargets(ctx, "task_1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"start", "leader"}, lo.Map(targets, func(n model.NodeSpec, _ int) string { return n.ID }))
+}
+
+// TestGetRejectTargets_StillValidatesRuntimeState 去掉锁不等于去掉校验：
+// 终态任务与非运行中实例仍须被拒，且拒绝后不得再发起多余的存储读取
+func TestGetRejectTargets_StillValidatesRuntimeState(t *testing.T) {
+	ctx := context.Background()
+	def := rejectTargetsDefinition()
+
+	testCases := []struct {
+		name    string
+		setup   func(*storagemocks.MockIStorage)
+		wantErr error
+	}{
+		{
+			name: "任务已审批通过",
+			setup: func(s *storagemocks.MockIStorage) {
+				s.EXPECT().GetTask(gomock.Any(), "task_1").Return(
+					&model.Task{ID: "task_1", InstanceID: "inst_1", NodeID: "cfo", Status: model.TaskPassed}, nil)
+			},
+			wantErr: ErrTaskNotPending,
+		},
+		{
+			name: "任务已被跳过",
+			setup: func(s *storagemocks.MockIStorage) {
+				s.EXPECT().GetTask(gomock.Any(), "task_1").Return(
+					&model.Task{ID: "task_1", InstanceID: "inst_1", NodeID: "cfo", Status: model.TaskSkipped}, nil)
+			},
+			wantErr: ErrTaskNotPending,
+		},
+		{
+			name: "实例已办结",
+			setup: func(s *storagemocks.MockIStorage) {
+				s.EXPECT().GetTask(gomock.Any(), "task_1").Return(
+					&model.Task{ID: "task_1", InstanceID: "inst_1", NodeID: "cfo", Status: model.TaskPending}, nil)
+				s.EXPECT().GetInstance(gomock.Any(), "inst_1").Return(&model.Instance{
+					ID: "inst_1", ProcKey: def.Key, Version: def.Version, Status: model.InstanceFinished,
+				}, nil)
+			},
+			wantErr: ErrInstanceNotRunning,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			store := storagemocks.NewMockIStorage(ctrl)
+			tc.setup(store)
+
+			_, err := NewEngine(store).GetRejectTargets(ctx, "task_1")
+			assert.ErrorIs(t, err, tc.wantErr)
+		})
+	}
 }
 
 // BenchmarkFlowxFullProcess 基准测试：单次完整综合流程（启动 -> 或签通过 -> 条件分流 -> 会签双人通过 -> 自动办结）

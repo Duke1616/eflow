@@ -29,7 +29,7 @@ type FlowInstancePO struct {
 	BusinessKey string        `gorm:"column:business_key;type:varchar(64);not null;default:'';index:idx_bkey;comment:'业务关联主键（如工单 ID）'"`
 	Version     int           `gorm:"column:version;not null;comment:'执行版本号'"`
 	Starter     string        `gorm:"column:starter;type:varchar(64);not null;index:idx_starter;comment:'流程发起人用户名'"`
-	Status      uint8         `gorm:"column:status;not null;index:idx_status;comment:'实例状态(0:Running, 1:Completed, 2:Rejected, 3:Revoked)'"`
+	Status      uint8         `gorm:"column:status;not null;index:idx_status;comment:'实例状态(1:Running, 2:Finished, 3:Rejected, 4:Cancelled)'"`
 	CurrentNode string        `gorm:"column:current_node;type:varchar(64);not null;comment:'当前流转节点ID'"`
 	Variables   string        `gorm:"column:variables;type:json;not null;comment:'流程全局运行变量集(JSON)'"`
 	Ctime       int64         `gorm:"column:ctime;not null;comment:'发起创建时间(毫秒)'"`
@@ -49,7 +49,7 @@ type FlowTaskPO struct {
 	BatchCode  int           `gorm:"column:batch_code;not null;index:idx_inst_batch,priority:2;comment:'节点执行批次序号(用于驳回重审区分)'"`
 	Assignee   string        `gorm:"column:assignee;type:varchar(64);not null;index:idx_assignee_status,priority:1;comment:'任务指派审批人用户名'"`
 	SignRule   string        `gorm:"column:sign_rule;type:varchar(32);not null;comment:'会签/或签审批规则(or/and)'"`
-	Status     uint8         `gorm:"column:status;not null;index:idx_assignee_status,priority:2;comment:'任务状态(0:Pending, 1:Passed, 2:Rejected, 3:Skipped)'"`
+	Status     uint8         `gorm:"column:status;not null;index:idx_assignee_status,priority:2;comment:'任务状态(0:Pending, 1:Passed, 2:Rejected, 3:SystemPassed, 4:SystemRejected/Cancelled, 5:Skipped)'"`
 	Comment    string        `gorm:"column:comment;type:text;comment:'审批意见/流转批注'"`
 	Ctime      int64         `gorm:"column:ctime;not null;comment:'任务生成时间(毫秒)'"`
 	Ftime      sql.NullInt64 `gorm:"column:ftime;comment:'任务完成时间(毫秒)'"`

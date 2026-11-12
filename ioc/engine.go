@@ -6,6 +6,7 @@ import (
 	easyflowDrv "github.com/Duke1616/eflow/internal/service/engine/easyflow"
 	flowxDrv "github.com/Duke1616/eflow/internal/service/engine/flowx"
 	"github.com/Duke1616/eflow/pkg/flowx"
+	"github.com/Duke1616/eflow/pkg/flowx/middleware"
 	flowxMysql "github.com/Duke1616/eflow/pkg/flowx/storage/mysql"
 	"gorm.io/gorm"
 )
@@ -14,6 +15,8 @@ import (
 func InitFlowxEngine(db *gorm.DB, ticketRepo repository.TicketRepository) flowx.Engine {
 	store := flowxMysql.NewStorage(db)
 	eng := flowx.NewEngine(store)
+	// Logger 置外层：Recovery 把 panic 转成 error 后，仍会留下一条带耗时的流转审计记录
+	eng.Use(middleware.Logger(), middleware.Recovery())
 	eng.AddListener(flowxDrv.NewEventListener(ticketRepo))
 	return eng
 }

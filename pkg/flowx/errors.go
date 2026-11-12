@@ -34,4 +34,6 @@ var (
 	ErrInvalidTargetNode = errors.New("指定的驳回目标节点不合法")
 	// ErrUnsupportedNodeType 不支持的节点类型
 	ErrUnsupportedNodeType = errors.New("不支持的节点类型")
+	// ErrPenetrationTooDeep 自动节点瞬时穿透递归超深，通常意味着流程定义中存在纯自动节点环
+	ErrPenetrationTooDeep = errors.New("自动节点瞬时穿透层级超限")
 )

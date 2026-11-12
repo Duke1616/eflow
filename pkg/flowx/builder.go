@@ -136,21 +136,6 @@ func (b *ProcessBuilder) Hook(nodeID string, hookNames ...string) *ProcessBuilde
 	return b
 }
 
-// NodeProps 为指定节点注入自定义扩展配置属性
-func (b *ProcessBuilder) NodeProps(nodeID string, props map[string]any) *ProcessBuilder {
-	if idx, ok := b.nodeIndex[nodeID]; ok {
-		if b.def.Nodes[idx].Props == nil {
-			b.def.Nodes[idx].Props = make(map[string]any, len(props))
-		}
-		for k, v := range props {
-			b.def.Nodes[idx].Props[k] = v
-		}
-	} else if b.err == nil {
-		b.err = fmt.Errorf("节点 [%s] 未定义，无法注入扩展属性", nodeID)
-	}
-	return b
-}
-
 // Edge 添加无条件连线
 func (b *ProcessBuilder) Edge(source, target string) *ProcessBuilder {
 	b.def.Edges = append(b.def.Edges, model.EdgeSpec{

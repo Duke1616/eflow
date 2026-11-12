@@ -1,3 +1,7 @@
+// 用 go run 而非 PATH 里的 mockgen：reflect 模式才能按接口名过滤（-source 模式会忽略过滤参数，
+// 把三个无独立消费者的细粒度接口也生成一遍），而 reflect 模式要求 mockgen 的构建工具链不低于本模块的 Go 版本
+//go:generate go run go.uber.org/mock/mockgen -package=storagemocks -destination=./mocks/storage.mock.go github.com/Duke1616/eflow/pkg/flowx/storage IStorage,ITxStorage
+
 package storage
 
 import (
@@ -11,6 +15,8 @@ var (
 	ErrInstanceNotFound   = errors.New("流程实例不存在")
 	ErrTaskNotFound       = errors.New("流程任务不存在")
 	ErrDefinitionNotFound = errors.New("流程定义未找到")
+	// ErrTaskAlreadyHandled 乐观状态防卫命中：任务已脱离待办态，更新被拒（并发重复处理）
+	ErrTaskAlreadyHandled = errors.New("任务已被处理或不处于待办状态")
 )
 
 // IDefinitionStorage 流程定义快照存储接口，负责静态流程图版本的幂等发布与读取

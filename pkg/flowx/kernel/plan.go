@@ -24,11 +24,6 @@ type ExecutionPlan struct {
 	InEdges   map[string][]Edge // Target -> Edges
 }
 
-// ValidateDefinition 静态校验流程定义的完整性与拓扑连通性（向后兼容委托给实体的 Validate 方法）
-func ValidateDefinition(def model.ProcessDefinition) error {
-	return def.Validate()
-}
-
 // NewExecutionPlan 编译流程定义为内存执行拓扑
 func NewExecutionPlan(def model.ProcessDefinition) *ExecutionPlan {
 	plan := &ExecutionPlan{

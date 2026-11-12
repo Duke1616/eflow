@@ -13,11 +13,12 @@ import (
 // flowSession 流程单次状态机推进生命周期内的工作单元 (Unit of Work)
 // 职责收敛：统一协调底层持久化存储与内存实体快照，避免单次流转内脏读与重复查库，不侵入具体节点业务
 type flowSession struct {
-	storage storage.IStorage
-	inst    *model.Instance
-	plan    *kernel.ExecutionPlan
-	tasks   []*model.Task
-	dirty   bool // 流程实例运行态是否发生过修改，用于 Unit of Work 延迟收口合并写
+	storage     storage.IStorage
+	inst        *model.Instance
+	plan        *kernel.ExecutionPlan
+	tasks       []*model.Task
+	dirty       bool // 流程实例运行态是否发生过修改，用于 Unit of Work 延迟收口合并写
+	penetration int  // 本次流转的瞬时穿透递归深度，用于拦截自动节点成环导致的无限递归
 }
 
 func newFlowSession(store storage.IStorage, inst *model.Instance, plan *kernel.ExecutionPlan, tasks []*model.Task) *flowSession {

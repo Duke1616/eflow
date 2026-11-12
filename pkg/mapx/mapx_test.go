@@ -171,3 +171,32 @@ func TestMap_DeepClone_AdvancedTypes(t *testing.T) {
 }
 
 type testString string
+
+// TestMap_DeepClone_ScalarTypeFidelity 深拷贝不得改变标量的 Go 类型：
+// 早先所有未列举类型都走 JSON 兜底，int/int64 被统一变成 float64，超 2^53 直接丢精度
+func TestMap_DeepClone_ScalarTypeFidelity(t *testing.T) {
+	testCases := []struct {
+		name string
+		val  any
+	}{
+		{"int", int(8888)},
+		{"int64 超 2^53 不丢精度", int64(9007199254740993)},
+		{"int32 负数", int32(-7)},
+		{"uint64 最大值", uint64(18446744073709551615)},
+		{"float32", float32(1.5)},
+		{"float64", float64(2.5)},
+		{"bool", true},
+		{"string", "s"},
+		{"嵌套 map 内的 int", map[string]any{"n": int(42)}},
+		{"切片内的 int64", []any{int64(9007199254740993)}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			orig := Map{"k": tc.val}
+			cloned := orig.DeepClone()
+			// assert.Equal 同时校验类型与值，类型退化即失败
+			assert.Equal(t, tc.val, cloned["k"])
+		})
+	}
+}

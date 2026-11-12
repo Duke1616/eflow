@@ -2,10 +2,12 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/Duke1616/eflow/pkg/flowx/model"
+	"github.com/Duke1616/eflow/pkg/flowx/storage"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -232,4 +234,183 @@ func TestStorage_ListPendingTasks_OrderStableAcrossCalls(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, want, lo.Map(got, func(item *model.Task, _ int) string { return item.ID }))
 	}
+}
+
+// TestStorage_InstanceVariablesIsolatedFromCaller 内存实现必须与 MySQL 的 JSON 往返同口径：
+// 实例变量不得与调用方共享底层 map，否则「未保存即生效」，事务回滚形同虚设
+func TestStorage_InstanceVariablesIsolatedFromCaller(t *testing.T) {
+	ctx := context.Background()
+
+	testCases := []struct {
+		name string
+		load func(*Storage, string) (*model.Instance, error)
+	}{
+		{"GetInstance", func(s *Storage, id string) (*model.Instance, error) { return s.GetInstance(ctx, id) }},
+		{"GetInstanceForUpdate", func(s *Storage, id string) (*model.Instance, error) { return s.GetInstanceForUpdate(ctx, id) }},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewStorage()
+			inst := &model.Instance{ID: "inst_1", Status: model.InstanceRunning, Variables: model.Variables{"amount": "100"}}
+			require.NoError(t, s.SaveInstance(ctx, inst))
+
+			inst.Variables["amount"] = "999"
+			stored, err := tc.load(s, "inst_1")
+			require.NoError(t, err)
+			assert.Equal(t, "100", stored.Variables["amount"], "保存后改调用方不得污染已落库快照")
+
+			stored.Variables["amount"] = "777"
+			again, err := tc.load(s, "inst_1")
+			require.NoError(t, err)
+			assert.Equal(t, "100", again.Variables["amount"], "读出后改返回实体不得污染已落库快照")
+		})
+	}
+}
+
+// TestStorage_UpdateTask_OnlyPendingAllowed 与 MySQL 侧乐观状态防卫同口径：
+// 已脱离待办态的任务不得被再次更新，否则并发重复审批在内存实现下会静默成功，单测再也测不出这类回归
+func TestStorage_UpdateTask_OnlyPendingAllowed(t *testing.T) {
+	ctx := context.Background()
+	node := model.NodeSpec{ID: "n", Name: "审批节点", Type: model.NodeApproval}
+
+	testCases := []struct {
+		name    string
+		status  model.TaskStatus
+		wantErr error
+	}{
+		{"待办态允许更新", model.TaskPending, nil},
+		{"已通过拒绝更新", model.TaskPassed, storage.ErrTaskAlreadyHandled},
+		{"已驳回拒绝更新", model.TaskRejected, storage.ErrTaskAlreadyHandled},
+		{"系统通过拒绝更新", model.TaskSystemPassed, storage.ErrTaskAlreadyHandled},
+		{"已跳过拒绝更新", model.TaskSkipped, storage.ErrTaskAlreadyHandled},
+		{"已取消拒绝更新", model.TaskCancelled, storage.ErrTaskAlreadyHandled},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewStorage()
+			require.NoError(t, s.SaveTasks(ctx, []*model.Task{model.NewTask("t1", "inst_1", node, 1, "alice", tc.status)}))
+
+			err := s.UpdateTask(ctx, model.NewTask("t1", "inst_1", node, 1, "alice", model.TaskPassed))
+			got, getErr := s.GetTask(ctx, "t1")
+			require.NoError(t, getErr)
+
+			if tc.wantErr != nil {
+				assert.ErrorIs(t, err, tc.wantErr)
+				assert.Equal(t, tc.status, got.Status, "被拒的更新不得改动已落库状态")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, model.TaskPassed, got.Status)
+		})
+	}
+}
+
+// seedTxRollbackFixture 预置一个运行中实例与一条待办任务，作为事务回滚的对照基线
+func seedTxRollbackFixture(t *testing.T, s *Storage) {
+	ctx := context.Background()
+	node := model.NodeSpec{ID: "n", Name: "审批节点", Type: model.NodeApproval}
+	require.NoError(t, s.SaveInstance(ctx, &model.Instance{
+		ID: "inst_1", Status: model.InstanceRunning, Variables: model.Variables{"amount": "100"},
+	}))
+	require.NoError(t, s.SaveTasks(ctx, []*model.Task{model.NewTask("t1", "inst_1", node, 1, "alice", model.TaskPending)}))
+}
+
+// TestStorage_DoTx_RollbackOnError 事务内的实例改写、任务状态变更、新增任务与新增定义必须整体回滚，
+// 与 MySQL 驱动语义一致；否则引擎 DoTx 静默降级为非事务，回滚断言全是空转
+func TestStorage_DoTx_RollbackOnError(t *testing.T) {
+	ctx := context.Background()
+	s := NewStorage()
+	seedTxRollbackFixture(t, s)
+	node := model.NodeSpec{ID: "n", Name: "审批节点", Type: model.NodeApproval}
+
+	sentinel := errors.New("业务失败")
+	err := s.DoTx(ctx, func(tx storage.IStorage) error {
+		require.NoError(t, tx.SaveInstance(ctx, &model.Instance{
+			ID: "inst_1", Status: model.InstanceFinished, Variables: model.Variables{"amount": "999"},
+		}))
+		require.NoError(t, tx.UpdateTasksStatus(ctx, []string{"t1"}, model.TaskPassed))
+		require.NoError(t, tx.SaveTasks(ctx, []*model.Task{model.NewTask("t2", "inst_1", node, 1, "bob", model.TaskPending)}))
+		require.NoError(t, tx.SaveDefinition(ctx, model.ProcessDefinition{Key: "k", Version: 1}))
+		return sentinel
+	})
+	assert.ErrorIs(t, err, sentinel)
+
+	inst, err := s.GetInstance(ctx, "inst_1")
+	require.NoError(t, err)
+	assert.Equal(t, model.InstanceRunning, inst.Status)
+	assert.Equal(t, "100", inst.Variables["amount"])
+
+	task, err := s.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	assert.Equal(t, model.TaskPending, task.Status)
+
+	tasks, err := s.ListTasksByInstance(ctx, "inst_1")
+	require.NoError(t, err)
+	assert.Len(t, tasks, 1, "事务内新增的任务必须一并回滚")
+
+	_, err = s.GetDefinition(ctx, "k", 1)
+	assert.ErrorIs(t, err, storage.ErrDefinitionNotFound)
+}
+
+// TestStorage_DoTx_CommitOnSuccess 成功事务的写入必须全部留存，不能被快照机制误吞
+func TestStorage_DoTx_CommitOnSuccess(t *testing.T) {
+	ctx := context.Background()
+	s := NewStorage()
+	seedTxRollbackFixture(t, s)
+
+	require.NoError(t, s.DoTx(ctx, func(tx storage.IStorage) error {
+		require.NoError(t, tx.UpdateTasksStatus(ctx, []string{"t1"}, model.TaskPassed))
+		return tx.SaveInstance(ctx, &model.Instance{
+			ID: "inst_1", Status: model.InstanceFinished, Variables: model.Variables{"amount": "999"},
+		})
+	}))
+
+	inst, err := s.GetInstance(ctx, "inst_1")
+	require.NoError(t, err)
+	assert.Equal(t, model.InstanceFinished, inst.Status)
+	assert.Equal(t, "999", inst.Variables["amount"])
+
+	task, err := s.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	assert.Equal(t, model.TaskPassed, task.Status)
+}
+
+// TestStorage_DoTx_RollbackOnPanic panic 同样必须回滚，且 panic 继续向上冒泡不被吞掉
+func TestStorage_DoTx_RollbackOnPanic(t *testing.T) {
+	ctx := context.Background()
+	s := NewStorage()
+	seedTxRollbackFixture(t, s)
+
+	assert.Panics(t, func() {
+		_ = s.DoTx(ctx, func(tx storage.IStorage) error {
+			require.NoError(t, tx.UpdateTasksStatus(ctx, []string{"t1"}, model.TaskPassed))
+			panic("boom")
+		})
+	})
+
+	task, err := s.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	assert.Equal(t, model.TaskPending, task.Status)
+}
+
+// TestStorage_DoTx_RollbackKeepsTaskIndexAlias 回滚必须复现 SaveTasks 建立的双表指针别名。
+// 刻意不用「写后读一致」来断言：UpdateTask 与 UpdateTasksStatus 都会按 ID 重新同步 instTasks，
+// 分叉会被下一次写入自愈，那种断言测不出快照是否 faithful——这里直接比对堆形状
+func TestStorage_DoTx_RollbackKeepsTaskIndexAlias(t *testing.T) {
+	ctx := context.Background()
+	s := NewStorage()
+	seedTxRollbackFixture(t, s)
+
+	require.Same(t, s.tasks["t1"], s.instTasks["inst_1"][0], "事务前双表本就共享同一指针")
+
+	err := s.DoTx(ctx, func(tx storage.IStorage) error {
+		require.NoError(t, tx.UpdateTasksStatus(ctx, []string{"t1"}, model.TaskPassed))
+		return errors.New("回滚")
+	})
+	require.Error(t, err)
+
+	require.Same(t, s.tasks["t1"], s.instTasks["inst_1"][0], "回滚后双表必须仍指向同一副本")
+	assert.Equal(t, model.TaskPending, s.tasks["t1"].Status)
 }

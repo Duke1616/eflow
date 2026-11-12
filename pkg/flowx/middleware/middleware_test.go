@@ -145,3 +145,43 @@ func TestCustomLogger(t *testing.T) {
 	assert.Equal(t, ActionPass, loggedAction)
 	assert.GreaterOrEqual(t, loggedCost, 10*time.Millisecond)
 }
+
+// TestAuditOrder_LoggerOutsideRecovery 固化 ioc.InitFlowxEngine 的装配顺序：Logger 在外、Recovery 在内。
+// core panic 时 Recovery 把它转成 error，外层 Logger 仍记得下这次流转；反过来装配则 Logger 被 panic 直接跳过，
+// 审计记录丢失。用同一 panic 做顺序差分，证明这个先后不是随手写的
+func TestAuditOrder_LoggerOutsideRecovery(t *testing.T) {
+	testCases := []struct {
+		name        string
+		loggerOuter bool
+		wantAudited bool
+	}{
+		{name: "Logger外层_Recovery内层_panic仍留审计", loggerOuter: true, wantAudited: true},
+		{name: "Recovery外层_Logger内层_panic跳过审计", loggerOuter: false, wantAudited: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			audited := false
+			var auditErr error
+			logMw := CustomLogger(func(_ context.Context, _ *ActionContext, _ time.Duration, err error) {
+				audited = true
+				auditErr = err
+			})
+			recMw := Recovery()
+
+			mws := []Middleware{recMw, logMw}
+			if tc.loggerOuter {
+				mws = []Middleware{logMw, recMw}
+			}
+
+			core := func(context.Context, *ActionContext) error { panic("worker 炸了") }
+			err := Compose(mws, core)(context.Background(), &ActionContext{ActionType: ActionPass})
+
+			assert.Error(t, err, "两种顺序都必须把 panic 收成 error，不得炸穿主协程")
+			assert.Equal(t, tc.wantAudited, audited)
+			if tc.wantAudited {
+				assert.ErrorContains(t, auditErr, "flowx execution panic")
+			}
+		})
+	}
+}

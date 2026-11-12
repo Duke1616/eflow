@@ -107,6 +107,13 @@ func deepCloneValue(val any) any {
 		res := make([]int64, len(v))
 		copy(res, v)
 		return res
+	case bool, string,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, uintptr,
+		float32, float64, complex64, complex128:
+		// 不可变标量：接口值自身即完整副本，无需也无法再深拷贝。
+		// 绝不能落到下面的 JSON 兜底——那会把 int/int64 统一变成 float64（超 2^53 直接丢精度）、float32 变成 float64
+		return val
 	default:
 		// 兜底策略：对未显式覆盖的复杂复合类型（如 map[string]string、[]float64 等），利用 JSON 序列化实现完全深度隔离
 		if bytes, err := json.Marshal(val); err == nil {

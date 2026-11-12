@@ -11,25 +11,20 @@ type ArbitrationResult struct {
 	SkippedTaskIDs []string // 或签竞争通过时，需被联动跳过的其他待办任务 ID 列表
 }
 
-// ISignArbitrator 审批流转仲裁策略接口（操作与判定针对领域实体指针）
-type ISignArbitrator interface {
-	// IsSatisfied 判定本批次审批任务是否满足流转推进条件
-	IsSatisfied(batchTasks []*model.Task) bool
-	// CalculateSkipped 当任务通过时，计算需联动跳过的其他待办任务（如或签）
-	CalculateSkipped(currentTask *model.Task, batchTasks []*model.Task) []string
+// isBatchSatisfied 按会签规则裁决本批次任务是否满足推进条件：
+// 或签一人同意即可，其余规则（含未识别规则的兜底）一律按会签要求全员同意
+func isBatchSatisfied(rule model.SignRule, batchTasks []*model.Task) bool {
+	passed := func(t *model.Task) bool { return t.Status == model.TaskPassed }
+	if rule == model.SignOneVote {
+		return lo.SomeBy(batchTasks, passed)
+	}
+	return lo.EveryBy(batchTasks, passed)
 }
 
-// oneVoteArbitrator 或签仲裁器 (一人同意即可通过，联动跳过其他待办)
-type oneVoteArbitrator struct{}
-
-func (a *oneVoteArbitrator) IsSatisfied(batchTasks []*model.Task) bool {
-	return lo.SomeBy(batchTasks, func(t *model.Task) bool {
-		return t.Status == model.TaskPassed
-	})
-}
-
-func (a *oneVoteArbitrator) CalculateSkipped(currentTask *model.Task, batchTasks []*model.Task) []string {
-	if !currentTask.IsPassed() {
+// skippedSiblings 或签竞争通过时联动跳过其余待办，会签无联动。
+// 准入判定用 IsPassed()（含系统通过），与 isBatchSatisfied 的 == TaskPassed 口径不同，此处原样保留既有行为
+func skippedSiblings(rule model.SignRule, currentTask *model.Task, batchTasks []*model.Task) []string {
+	if rule != model.SignOneVote || !currentTask.IsPassed() {
 		return nil
 	}
 	return lo.FilterMap(batchTasks, func(t *model.Task, _ int) (string, bool) {
@@ -37,39 +32,12 @@ func (a *oneVoteArbitrator) CalculateSkipped(currentTask *model.Task, batchTasks
 	})
 }
 
-// allPassArbitrator 会签仲裁器 (全员同意才可通过，无联动跳过)
-type allPassArbitrator struct{}
-
-func (a *allPassArbitrator) IsSatisfied(batchTasks []*model.Task) bool {
-	return lo.EveryBy(batchTasks, func(t *model.Task) bool {
-		return t.Status == model.TaskPassed
-	})
-}
-
-func (a *allPassArbitrator) CalculateSkipped(currentTask *model.Task, batchTasks []*model.Task) []string {
-	return nil
-}
-
-// defaultArbitrators 预置仲裁策略注册表
-var defaultArbitrators = map[model.SignRule]ISignArbitrator{
-	model.SignOneVote: &oneVoteArbitrator{},
-	model.SignAllPass: &allPassArbitrator{},
-}
-
-// getArbitrator 获取指定审批规则对应的仲裁器 (默认降级为会签)
-func getArbitrator(rule model.SignRule) ISignArbitrator {
-	if arb, ok := defaultArbitrators[rule]; ok {
-		return arb
-	}
-	return defaultArbitrators[model.SignAllPass]
-}
-
 // IsNodeSatisfiedToAdvance 裁决当前节点是否已满足流转推进条件
 func IsNodeSatisfiedToAdvance(node model.NodeSpec, currentBatchTasks []*model.Task) bool {
 	if len(currentBatchTasks) == 0 {
 		return false
 	}
-	return getArbitrator(node.SignRule).IsSatisfied(currentBatchTasks)
+	return isBatchSatisfied(node.SignRule, currentBatchTasks)
 }
 
 // ArbitrateNode 纯内存裁决当前节点是否满足推进条件，并计算需联动跳过的任务列表
@@ -82,9 +50,8 @@ func ArbitrateNode(node model.NodeSpec, currentTask *model.Task, allTasks []*mod
 		return ArbitrationResult{IsSatisfied: false}
 	}
 
-	arb := getArbitrator(node.SignRule)
 	return ArbitrationResult{
-		IsSatisfied:    arb.IsSatisfied(batchTasks),
-		SkippedTaskIDs: arb.CalculateSkipped(currentTask, batchTasks),
+		IsSatisfied:    isBatchSatisfied(node.SignRule, batchTasks),
+		SkippedTaskIDs: skippedSiblings(node.SignRule, currentTask, batchTasks),
 	}
 }

@@ -235,9 +235,11 @@ func (s *Storage) ListPendingTasks(ctx context.Context, query model.PendingTaskQ
 		return nil, 0, nil
 	}
 
-	order := "flow_task.ctime DESC"
+	// id 次级排序恒为升序，必须与跨引擎归并层的平局口径逐字一致：归并只取各引擎前 K 条，
+	// 两侧定序不同会让 K 边界上的同毫秒任务被截断挤掉，归并层的 tiebreak 救不回来，翻页重复且遗漏
+	order := "flow_task.ctime DESC, flow_task.id ASC"
 	if query.SortByAsc {
-		order = "flow_task.ctime ASC"
+		order = "flow_task.ctime ASC, flow_task.id ASC"
 	}
 	q = q.Order(order).Offset(query.Offset)
 	// GORM 的 Limit(0) 会生成 LIMIT 0 从而返回零行，因此仅在正数时施加条数限制
@@ -279,7 +281,7 @@ func (s *Storage) UpdateTask(ctx context.Context, task *model.Task) error {
 		}
 		// 任务已处于非待办终态（并发竞争已被其他并发操作办结）
 		if current.Status != uint8(model.TaskPending) {
-			return errors.New("任务已被处理或不处于待办状态")
+			return storage.ErrTaskAlreadyHandled
 		}
 		// 状态仍为 Pending 且值完全无变化（如转签给相同处理人），视作幂等成功
 		return nil

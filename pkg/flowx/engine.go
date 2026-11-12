@@ -172,14 +172,6 @@ func WithIDGenerator(gen idgen.IDGenerator) Option {
 	}
 }
 
-func castEngine(engine Engine) (*flowEngine, error) {
-	fe, ok := engine.(*flowEngine)
-	if !ok {
-		return nil, errors.New("流程引擎实例类型断言异常")
-	}
-	return fe, nil
-}
-
 // NewEngine 构造工作流引擎实例
 func NewEngine(store storage.IStorage, opts ...Option) Engine {
 	engine := &flowEngine{
@@ -229,8 +221,7 @@ func (e *flowEngine) Use(mws ...middleware.Middleware) Engine {
 	return e
 }
 
-// GetTask Deploy 部署流程定义快照（发布期自动执行静态拓扑与语法校验，并预热进入只读执行缓存）
-// 若 def.Version <= 0，则由引擎自动查询已发布的最大版本号并原子递增 (+1)，返回生效后的定义实体
+// GetTask 按任务 ID 读取任务实体（只读，不加锁，不参与流转状态校验）
 func (e *flowEngine) GetTask(ctx context.Context, taskID string) (*model.Task, error) {
 	return e.storage.GetTask(ctx, taskID)
 }
@@ -251,11 +242,7 @@ func (e *flowEngine) Transfer(ctx context.Context, taskID string, targetUsers []
 	}
 	targetUser := strings.TrimSpace(validUsers[0])
 
-	return e.DoTx(ctx, func(txCtx context.Context, txEngine Engine) error {
-		txEng, err := castEngine(txEngine)
-		if err != nil {
-			return err
-		}
+	return e.doTx(ctx, func(txCtx context.Context, txEng *flowEngine) error {
 		task, inst, err := txEng.loadAndValidateTask(txCtx, taskID)
 		if err != nil {
 			return err
@@ -285,6 +272,8 @@ func (e *flowEngine) Transfer(ctx context.Context, taskID string, targetUsers []
 	})
 }
 
+// Deploy 部署流程定义快照（发布期自动执行静态拓扑与语法校验，并预热进入只读执行缓存）
+// 若 def.Version <= 0，则由引擎自动查询已发布的最大版本号并原子递增 (+1)，返回生效后的定义实体
 func (e *flowEngine) Deploy(ctx context.Context, def model.ProcessDefinition) (model.ProcessDefinition, error) {
 	if err := def.Validate(); err != nil {
 		return model.ProcessDefinition{}, fmt.Errorf("%w: %s", ErrInvalidDefinition, err.Error())
@@ -320,6 +309,13 @@ func (e *flowEngine) cloneWithTx(store storage.IStorage, pub IEventPublisher) *f
 
 // DoTx 在物理本地事务闭包内执行操作，异常自动回滚，并在事务成功 Commit 后统一刷出生命周期事件（事务性 Outbox 模式）
 func (e *flowEngine) DoTx(ctx context.Context, fn func(ctx context.Context, txEngine Engine) error) error {
+	return e.doTx(ctx, func(c context.Context, sub *flowEngine) error {
+		return fn(c, sub)
+	})
+}
+
+// doTx 引擎内部的事务闭包：直接交回具体引擎类型，省掉每个调用点把接口断言回 *flowEngine 的仪式
+func (e *flowEngine) doTx(ctx context.Context, fn func(ctx context.Context, txEng *flowEngine) error) error {
 	bufPub := newBufferedEventPublisher(e.publisher)
 
 	txStore, ok := e.storage.(storage.ITxStorage)
@@ -333,8 +329,7 @@ func (e *flowEngine) DoTx(ctx context.Context, fn func(ctx context.Context, txEn
 	}
 
 	err := txStore.DoTx(ctx, func(txStorage storage.IStorage) error {
-		txSubEngine := e.cloneWithTx(txStorage, bufPub)
-		return fn(ctx, txSubEngine)
+		return fn(ctx, e.cloneWithTx(txStorage, bufPub))
 	})
 	if err != nil {
 		return err
@@ -352,11 +347,7 @@ func (e *flowEngine) Start(ctx context.Context, req StartReq) (string, error) {
 		Extra:      make(map[string]any),
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
-		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
-			txEng, err := castEngine(txEngine)
-			if err != nil {
-				return err
-			}
+		return e.doTx(c, func(txCtx context.Context, txEng *flowEngine) error {
 			id, err := txEng.doStart(txCtx, req)
 			if err != nil {
 				return err
@@ -376,12 +367,11 @@ func (e *flowEngine) GenInstanceID(procKey string) string {
 }
 
 func (e *flowEngine) doStart(ctx context.Context, req StartReq) (string, error) {
-	def, err := e.loadOrDeployDefinition(ctx, req)
+	plan, err := e.loadOrDeployDefinition(ctx, req)
 	if err != nil {
 		return "", err
 	}
 
-	plan := kernel.NewExecutionPlan(def)
 	startNode, err := plan.FindStartNode()
 	if err != nil {
 		return "", err
@@ -389,12 +379,12 @@ func (e *flowEngine) doStart(ctx context.Context, req StartReq) (string, error) 
 
 	instID := req.InstanceID
 	if instID == "" {
-		instID = e.idGen.GenInstanceID(def.Key)
+		instID = e.idGen.GenInstanceID(plan.Def.Key)
 	}
 	inst := &model.Instance{
 		ID:          instID,
-		ProcKey:     def.Key,
-		Version:     def.Version,
+		ProcKey:     plan.Def.Key,
+		Version:     plan.Def.Version,
 		Starter:     req.Starter,
 		BusinessKey: req.BusinessKey,
 		Status:      model.InstanceRunning,
@@ -404,7 +394,7 @@ func (e *flowEngine) doStart(ctx context.Context, req StartReq) (string, error) 
 	}
 
 	// 1. 下沉到内核求解初始推进决策
-	decision, err := plan.ResolveNextStep(startNode.ID, req.Variables, nil, 1)
+	decision, err := plan.ResolveNextStep(startNode.ID, req.Variables, nil)
 	if err != nil {
 		return "", fmt.Errorf("推导开始节点后续流转失败: %w", err)
 	}
@@ -439,11 +429,7 @@ func (e *flowEngine) Pass(ctx context.Context, req PassReq) error {
 		Extra:      make(map[string]any),
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
-		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
-			txEng, err := castEngine(txEngine)
-			if err != nil {
-				return err
-			}
+		return e.doTx(c, func(txCtx context.Context, txEng *flowEngine) error {
 			return txEng.doPass(txCtx, req)
 		})
 	}
@@ -487,11 +473,7 @@ func (e *flowEngine) CompleteTask(ctx context.Context, req CompleteTaskReq) erro
 		Extra:      make(map[string]any),
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
-		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
-			txEng, err := castEngine(txEngine)
-			if err != nil {
-				return err
-			}
+		return e.doTx(c, func(txCtx context.Context, txEng *flowEngine) error {
 			return txEng.doCompleteTask(txCtx, req, comment)
 		})
 	}
@@ -554,7 +536,7 @@ func (e *flowEngine) advanceTaskPipeline(ctx context.Context, session *flowSessi
 	}
 
 	// 3. 内核下沉推导下一步流向（纯内存计算，直接复用会话内的最新任务快照）
-	decision, err := session.Plan().ResolveNextStep(task.NodeID, inst.Variables, session.AllTasks(), task.BatchCode)
+	decision, err := session.Plan().ResolveNextStep(task.NodeID, inst.Variables, session.AllTasks())
 	if err != nil {
 		return fmt.Errorf("推导下一步流转决策失败 [node_id=%s]: %w", node.ID, err)
 	}
@@ -573,11 +555,7 @@ func (e *flowEngine) Reject(ctx context.Context, req RejectReq) error {
 		Extra:      make(map[string]any),
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
-		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
-			txEng, err := castEngine(txEngine)
-			if err != nil {
-				return err
-			}
+		return e.doTx(c, func(txCtx context.Context, txEng *flowEngine) error {
 			return txEng.doReject(txCtx, req)
 		})
 	}
@@ -693,11 +671,7 @@ func (e *flowEngine) Revoke(ctx context.Context, req RevokeReq) error {
 		Extra:      make(map[string]any),
 	}
 	core := func(c context.Context, ac *middleware.ActionContext) error {
-		return e.DoTx(c, func(txCtx context.Context, txEngine Engine) error {
-			txEng, err := castEngine(txEngine)
-			if err != nil {
-				return err
-			}
+		return e.doTx(c, func(txCtx context.Context, txEng *flowEngine) error {
 			return txEng.doRevoke(txCtx, req)
 		})
 	}
@@ -899,9 +873,21 @@ func resolveNodeAggregateStatus(tasks []*model.Task) int {
 
 // GetRejectTargets 查询指定任务允许驳回的目标节点集合（包含起点与历史已流转审批节点）
 func (e *flowEngine) GetRejectTargets(ctx context.Context, taskID string) ([]model.NodeSpec, error) {
-	task, inst, err := e.loadAndValidateTask(ctx, taskID)
+	// 纯只读查询，刻意不走 loadAndValidateTask 的行级排他锁：
+	// 前端展开驳回候选时不该被并发审批的写事务阻塞，运行态校验本身不依赖锁
+	task, err := e.storage.GetTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("加载任务失败: %w", err)
+	}
+	if !task.IsPending() {
+		return nil, ErrTaskNotPending
+	}
+	inst, err := e.storage.GetInstance(ctx, task.InstanceID)
+	if err != nil {
+		return nil, fmt.Errorf("加载流程实例失败: %w", err)
+	}
+	if !inst.IsRunning() {
+		return nil, ErrInstanceNotRunning
 	}
 
 	session, err := e.newSessionForInstance(ctx, inst)

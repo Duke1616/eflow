@@ -22,7 +22,7 @@ type StepDecision struct {
 }
 
 // ResolveNextStep 综合求解下一步流转决策：网关分流 + 自动Skip识别 + 汇聚屏障过滤 + 跨汇聚网关下游递归穿透 (支持多层级联网关)
-func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables model.Variables, allTasks []*model.Task, batchCode int) (StepDecision, error) {
+func (p *ExecutionPlan) ResolveNextStep(currentNodeID string, variables model.Variables, allTasks []*model.Task) (StepDecision, error) {
 	transRes, err := p.CalculateTransition(currentNodeID, variables)
 	if err != nil {
 		return StepDecision{}, err

@@ -26,9 +26,21 @@ func newDefaultExecutors(e *flowEngine) map[model.NodeType]nodeExecutor {
 	}
 }
 
+// maxPenetrationDepth 单次流转允许的瞬时穿透递归层数上限。
+// 真实流程的自动节点链远不到此量级，取 200 既留足余量，又能把成环时的栈深与事务内脏写控制在百量级
+const maxPenetrationDepth = 200
+
 // applyStepDecision 统一调度应用内核推导决策（保存Skip任务、汇聚等待、办结或派发新待办）
 func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession, dec kernel.StepDecision, batchCode int, operator string) error {
 	inst := session.Instance()
+
+	// 瞬时穿透深度护栏：抄送/群通知/同步自动化节点会递归回调本函数，而静态校验刻意容忍环
+	// (防环由 kernel 遍历原语自身保证)，递归穿透却没有天然停止点。Go 栈溢出属 runtime fatal，
+	// recovery 中间件的 recover 兜不住，会直接打崩整个进程，故必须在此收敛为可回滚的业务错误
+	session.penetration++
+	if session.penetration > maxPenetrationDepth {
+		return fmt.Errorf("%w: 超过 %d 层，请检查流程定义中是否存在纯自动节点环", ErrPenetrationTooDeep, maxPenetrationDepth)
+	}
 
 	// 1. 持久化未命中分支的 TaskSkipped 占位记录，供时间线渲染与汇聚感知
 	if len(dec.SkippedNodes) > 0 {
@@ -256,7 +268,7 @@ func (x *taskNodeExecutor) Execute(ctx context.Context, session *flowSession, no
 	}
 
 	// 自动驱动下一步流转决策
-	nextDec, err := session.Plan().ResolveNextStep(node.ID, inst.Variables, session.AllTasks(), batchCode)
+	nextDec, err := session.Plan().ResolveNextStep(node.ID, inst.Variables, session.AllTasks())
 	if err != nil {
 		return err
 	}
@@ -277,7 +289,18 @@ func (x *carbonCopyNodeExecutor) Execute(ctx context.Context, session *flowSessi
 
 	inst := session.Instance()
 
-	if len(assignees) > 0 {
+	if len(assignees) == 0 {
+		// 解析不到处理人也必须落一条定态记录：下游 AND/OR 汇聚靠「分支是否产生任务」判定到达，
+		// 缺记录会让 HasTask 恒为 false，屏障永久阻断——实例卡在流转中、无在途待办、且无任何报错。
+		// 状态须与有处理人时的抄送完成态一致 (TaskPassed)：汇聚仲裁按 TaskPassed 计票，
+		// 记为 Skipped 会让「至少一条真实通过」防卫在全分支皆空抄送时再次死锁
+		t := model.NewTask(x.engine.idGen.GenTaskID(node.ID, "system", batchCode, 1), inst.ID, node, batchCode, "system", model.TaskPending)
+		t.Pass("抄送节点未解析到处理人，系统自动放行")
+		if err := session.SaveTasks(ctx, []*model.Task{t}); err != nil {
+			return err
+		}
+		x.engine.publisher.Publish(ctx, NewTaskEvent(EventTaskPassed, inst, &node, t, operator, t.Comment))
+	} else {
 		ccTasks := lo.Map(assignees, func(assignee string, idx int) *model.Task {
 			t := model.NewTask(x.engine.idGen.GenTaskID(node.ID, assignee, batchCode, idx+1), inst.ID, node, batchCode, assignee, model.TaskPending)
 			t.Pass("系统抄送知会")
@@ -293,7 +316,7 @@ func (x *carbonCopyNodeExecutor) Execute(ctx context.Context, session *flowSessi
 	}
 
 	// 瞬时自动穿透推进：驱动抄送节点下一步流转决策
-	nextDec, err := session.Plan().ResolveNextStep(node.ID, inst.Variables, session.AllTasks(), batchCode)
+	nextDec, err := session.Plan().ResolveNextStep(node.ID, inst.Variables, session.AllTasks())
 	if err != nil {
 		return err
 	}
@@ -329,7 +352,7 @@ func (x *chatGroupNodeExecutor) Execute(ctx context.Context, session *flowSessio
 	x.engine.publisher.Publish(ctx, NewTaskEvent(EventTaskPassed, inst, &node, chatTask, operator, "群聊通知自动完成"))
 
 	// 3. 瞬时自动穿透推进：驱动群聊通知节点下一步流转决策
-	nextDec, err := session.Plan().ResolveNextStep(node.ID, inst.Variables, session.AllTasks(), batchCode)
+	nextDec, err := session.Plan().ResolveNextStep(node.ID, inst.Variables, session.AllTasks())
 	if err != nil {
 		return err
 	}

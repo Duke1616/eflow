@@ -5,8 +5,17 @@ import (
 	"github.com/samber/lo"
 )
 
+// BranchState 描述汇聚网关上游分支在当前流转轮次的快照定态
+type BranchState struct {
+	NodeID    string // 前置有效节点 ID
+	NodeName  string // 前置节点名称
+	HasTask   bool   // 该分支是否已到达并产生物理任务
+	IsPassed  bool   // 该分支是否已满足流转推进条件
+	IsSkipped bool   // 该分支是否已被系统标记为跳过 (TaskSkipped)
+}
+
 // IsJoinSatisfied 裁决汇聚网关（Join）的上游前置分支是否全部就绪
-// 支持递归穿透非任务型网关，并委托给强内聚的 IJoinStrategy 策略进行多路汇聚放行判定
+// 支持递归穿透非任务型网关，逐条萃取分支定态后交由 isJoinSatisfied 裁决开闸
 func (p *ExecutionPlan) IsJoinSatisfied(joinNode model.NodeSpec, allTasks []*model.Task) bool {
 	// 只有显式声明为并行 (PARALLEL) 或包容 (INCLUSIVE) 的网关，才执行多分支同步汇聚屏障
 	// 排他网关 (EXCLUSIVE) 或普通节点直接放行 (首到即走)
@@ -19,9 +28,28 @@ func (p *ExecutionPlan) IsJoinSatisfied(joinNode model.NodeSpec, allTasks []*mod
 		return true // 非多路汇聚点，直接放行
 	}
 
-	strategy := GetJoinStrategy(joinNode.Type)
-	branchStates := p.extractBranchStates(joinNode, allTasks)
-	return strategy.IsSatisfied(branchStates)
+	return isJoinSatisfied(p.extractBranchStates(joinNode, allTasks))
+}
+
+// isJoinSatisfied 裁决分支定态集合是否满足开闸条件：
+// 每条入边分支都必须已到达并定态（通过或跳过），且至少一条真实通过——全部被跳过时不盲目放行。
+// 并行(AND)与包容(OR)共用这一份判定：两者当前都要求全部入边分支到达。
+// 严格意义的 OR 汇聚只等被激活的分支，那是行为变更，不属于本次同构收敛
+func isJoinSatisfied(branches []BranchState) bool {
+	if len(branches) == 0 {
+		return true
+	}
+
+	passed := 0
+	for _, b := range branches {
+		if !b.HasTask || (!b.IsPassed && !b.IsSkipped) {
+			return false
+		}
+		if b.IsPassed {
+			passed++
+		}
+	}
+	return passed > 0
 }
 
 // extractBranchStates 逆向萃取汇聚网关所有入边分支的物理任务流转定态快照

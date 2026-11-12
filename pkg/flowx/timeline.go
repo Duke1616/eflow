@@ -18,9 +18,6 @@ func buildTimelineFromTasks(allTasks []*model.Task) []model.TimelineEvent {
 	})
 
 	events := lo.FilterMap(lo.Values(groups), func(tasks []*model.Task, _ int) (model.TimelineEvent, bool) {
-		if len(tasks) == 0 {
-			return model.TimelineEvent{}, false
-		}
 		first := tasks[0]
 
 		// 利用 lo.Reduce 函数式规约提取该节点批次下的最晚发生时间
@@ -38,23 +35,18 @@ func buildTimelineFromTasks(allTasks []*model.Task) []model.TimelineEvent {
 			OccurredAt: occurredAt,
 			Tasks:      tasks,
 			IsFinished: lo.EveryBy(tasks, func(t *model.Task) bool {
-				return t.Status != model.TaskPending
+				return t.IsTerminal()
 			}),
 		}, true
 	})
 
 	// 严格按流转批次升序呈现时间线；同批次内按发生时间升序，次级按节点 ID 排序，保证绝对稳定的渲染顺序
 	slices.SortFunc(events, func(a, b model.TimelineEvent) int {
-		if n := cmp.Compare(a.BatchCode, b.BatchCode); n != 0 {
-			return n
-		}
-		if !a.OccurredAt.Equal(b.OccurredAt) {
-			if a.OccurredAt.Before(b.OccurredAt) {
-				return -1
-			}
-			return 1
-		}
-		return cmp.Compare(a.NodeID, b.NodeID)
+		return cmp.Or(
+			cmp.Compare(a.BatchCode, b.BatchCode),
+			a.OccurredAt.Compare(b.OccurredAt),
+			cmp.Compare(a.NodeID, b.NodeID),
+		)
 	})
 
 	return events

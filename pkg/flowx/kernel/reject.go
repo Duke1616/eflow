@@ -57,15 +57,6 @@ func (p *ExecutionPlan) filterMostImmediateNodes(nodes []model.NodeSpec) []model
 	})
 }
 
-// FindUpstreamApprovalNode 保持兼容性包装，返回首个有效前置审批节点
-func (p *ExecutionPlan) FindUpstreamApprovalNode(currentNodeID string) (model.NodeSpec, error) {
-	nodes, err := p.FindUpstreamRejectNodes(currentNodeID)
-	if err != nil || len(nodes) == 0 {
-		return model.NodeSpec{}, err
-	}
-	return nodes[0], nil
-}
-
 // searchUpstreamCandidates 逆向广度优先搜索，寻找最近一层的审批候选节点与开始节点
 // 若分支上的审批节点未实际审批通过（未激活、被跳过或根本未参与），自动穿透跨越继续向上寻找更上游节点
 func (p *ExecutionPlan) searchUpstreamCandidates(startNodeID string, tasks []*model.Task) (approvals []model.NodeSpec, starts []model.NodeSpec) {

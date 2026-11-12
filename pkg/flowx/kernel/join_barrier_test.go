@@ -134,3 +134,103 @@ func TestExecutionPlan_IsJoinSatisfied_ThroughNestedGateways(t *testing.T) {
 		})
 	}
 }
+
+func TestIsJoinSatisfied(t *testing.T) {
+	testCases := []struct {
+		name      string
+		branches  []BranchState
+		wantAllow bool
+	}{
+		{
+			name:      "空分支集合_放行",
+			branches:  nil,
+			wantAllow: true,
+		},
+		{
+			name: "全部分支通过_放行",
+			branches: []BranchState{
+				{NodeID: "a", HasTask: true, IsPassed: true},
+				{NodeID: "b", HasTask: true, IsPassed: true},
+			},
+			wantAllow: true,
+		},
+		{
+			name: "存在未到达分支_阻断",
+			branches: []BranchState{
+				{NodeID: "a", HasTask: true, IsPassed: true},
+				{NodeID: "b", HasTask: false},
+			},
+			wantAllow: false,
+		},
+		{
+			name: "存在待办未通过分支_阻断",
+			branches: []BranchState{
+				{NodeID: "a", HasTask: true, IsPassed: true},
+				{NodeID: "b", HasTask: true, IsPassed: false, IsSkipped: false},
+			},
+			wantAllow: false,
+		},
+		{
+			name: "分支通过且另一分支被跳过_放行",
+			branches: []BranchState{
+				{NodeID: "a", HasTask: true, IsPassed: true},
+				{NodeID: "b", HasTask: true, IsSkipped: true},
+			},
+			wantAllow: true,
+		},
+		{
+			name: "全部分支被跳过_防卫阻断",
+			branches: []BranchState{
+				{NodeID: "a", HasTask: true, IsSkipped: true},
+				{NodeID: "b", HasTask: true, IsSkipped: true},
+			},
+			wantAllow: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.wantAllow, isJoinSatisfied(tc.branches))
+		})
+	}
+}
+
+// TestExecutionPlan_IsJoinSatisfied_GatewayTypeGuard 只有并行/包容网关才设汇聚屏障，排他网关首到即走。
+// 这道守卫原先由 GetJoinStrategy 的 default 分支间接覆盖，策略收敛后它落在 IsJoinSatisfied 自身，
+// 必须在此保住覆盖面——用同一拓扑只换网关类型做差分，避免断言空转
+func TestExecutionPlan_IsJoinSatisfied_GatewayTypeGuard(t *testing.T) {
+	testCases := []struct {
+		name string
+		typ  model.NodeType
+		want bool
+	}{
+		{name: "排他网关_分支未齐也放行", typ: model.NodeGatewayExclusive, want: true},
+		{name: "并行网关_分支未齐必须阻断", typ: model.NodeGatewayParallel, want: false},
+		{name: "包容网关_分支未齐必须阻断", typ: model.NodeGatewayInclusive, want: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := NewExecutionPlan(model.ProcessDefinition{
+				Key: "gw_guard", Name: "网关类型守卫", Version: 1,
+				Nodes: []model.NodeSpec{
+					{ID: "start", Type: model.NodeStart, Name: "开始"},
+					{ID: "a1", Type: model.NodeApproval, Name: "审批1"},
+					{ID: "a2", Type: model.NodeApproval, Name: "审批2"},
+					{ID: "gw", Type: tc.typ, Name: "网关"},
+				},
+				Edges: []model.EdgeSpec{
+					{Source: "start", Target: "a1"},
+					{Source: "start", Target: "a2"},
+					{Source: "a1", Target: "gw"},
+					{Source: "a2", Target: "gw"},
+				},
+			})
+			tasks := []*model.Task{
+				{ID: "t1", NodeID: "a1", Status: model.TaskPassed, BatchCode: 1},
+				{ID: "t2", NodeID: "a2", Status: model.TaskPending, BatchCode: 1},
+			}
+			assert.Equal(t, tc.want, plan.IsJoinSatisfied(plan.NodesMap["gw"], tasks))
+		})
+	}
+}
