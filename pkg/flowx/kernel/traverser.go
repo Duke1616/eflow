@@ -113,7 +113,7 @@ func (t *executionTracer) resolveWaitingGateways() {
 		}
 
 		// 若存在已完成的前驱分支（排除排他网关的未选分支），说明流转确已流经到达该网关
-		hasCompletedInflow := lo.SomeBy(t.plan.InEdges[n.ID], func(edge model.EdgeSpec) bool {
+		hasCompletedInflow := lo.SomeBy(t.plan.InEdges[n.ID], func(edge Edge) bool {
 			if !t.completed[edge.Source] {
 				return false
 			}

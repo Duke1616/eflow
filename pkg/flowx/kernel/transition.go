@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/Duke1616/eflow/pkg/flowx/model"
-	"github.com/Duke1616/eflow/pkg/flowx/rule"
 	"github.com/samber/lo"
 )
 
@@ -19,7 +18,7 @@ type StepDecision struct {
 	ReadyNodes     []model.NodeSpec // 本轮最终就绪、需派发生成待办的目标节点列表
 	SkippedNodes   []model.NodeSpec // 条件未满足、需标记为 TaskSkipped 的节点列表
 	SkippedTaskIDs []string         // 因排他汇聚竞争放行需更新跳过/作废的未决前置任务 ID 列表
-	IsBlocked      bool             // 是否存在汇聚网关屏障未全部就绪而需保持等待
+	IsBlocked      bool             // 存在汇聚屏障未就绪的分支；仅用于抑制断流误报，不影响同轮 ReadyNodes 派发
 }
 
 // ResolveNextStep 综合求解下一步流转决策：网关分流 + 自动Skip识别 + 汇聚屏障过滤 + 跨汇聚网关下游递归穿透 (支持多层级联网关)
@@ -209,17 +208,10 @@ func (p *ExecutionPlan) reachableFrom(roots []model.NodeSpec) map[string]struct{
 	})
 }
 
-// evaluateEdge 优先面向标准 RuleGroup 规则组进行求值；若无 RuleGroup 但配置了文本表达式，则委托表达式引擎求值
-func (p *ExecutionPlan) evaluateEdge(edge model.EdgeSpec, variables model.Variables) bool {
-	if edge.RuleGroup != nil {
-		return rule.EvaluateRuleGroup(edge.RuleGroup, variables)
+// evaluateEdge 裁决连线条件；无条件约束的边默认放行
+func (p *ExecutionPlan) evaluateEdge(edge Edge, variables model.Variables) bool {
+	if edge.Rule == nil {
+		return true
 	}
-	if edge.Condition != "" {
-		res, err := rule.GetDefaultEngine().Evaluate(edge.Condition, variables)
-		if err != nil {
-			return false
-		}
-		return res
-	}
-	return true // 无任何规则约束，默认放行
+	return edge.Rule.Eval(variables)
 }

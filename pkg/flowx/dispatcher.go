@@ -64,13 +64,12 @@ func (e *flowEngine) applyStepDecision(ctx context.Context, session *flowSession
 		}
 	}
 
-	// 3. 若汇聚网关尚未全部就绪，流程实例保存当前流转上下文，等待其他兄弟分支推进
-	if dec.IsBlocked {
-		return session.SaveInstance(ctx)
-	}
-
-	// 核心断流拦截：若未被汇聚网关阻断，但下游完全无可用就绪节点，判定为分支条件未命中导致的断流
+	// 3. 断流拦截：IsBlocked 只表示某条汇聚分支仍在等待，同轮其他已就绪分支必须照常派发。
+	// 若按全局阻断在此提前返回，并行分流中已算出的待办会被静默丢弃，且流程仍能经其他分支正常办结、无任何报错
 	if len(dec.ReadyNodes) == 0 {
+		if dec.IsBlocked {
+			return session.SaveInstance(ctx)
+		}
 		return ErrNoAvailablePath
 	}
 

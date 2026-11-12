@@ -160,23 +160,43 @@ func (b *ProcessBuilder) Edge(source, target string) *ProcessBuilder {
 	return b
 }
 
-// ConditionEdge 添加带条件的连线（语法糖：在构建期自动将简易表达式编译为强类型 RuleGroup）
+// ConditionEdge 添加带条件的连线（语法糖：构建期把条件文本编译成树，再映射为持久化 DTO）
 func (b *ProcessBuilder) ConditionEdge(source, target, condition string) *ProcessBuilder {
 	b.def.Edges = append(b.def.Edges, model.EdgeSpec{
 		Source:    source,
 		Target:    target,
 		Condition: condition,
-		RuleGroup: rule.ParseConditionText(condition),
+		RuleGroup: rule.ToGroup(rule.Parse(condition)),
 	})
 	return b
 }
 
-// RuleEdge 添加基于强类型规则引擎的条件连线 (对齐 ealert 规则规范)
-func (b *ProcessBuilder) RuleEdge(source, target string, group model.ConditionGroup) *ProcessBuilder {
+// StandardEdge 添加标准 expr 语法的连线（新接入方推荐）：文本一字不改交给 expr 引擎，
+// 严格类型、支持函数调用与算术，不走老画布的 SQL 方言与宽松比较。
+// 与 ConditionEdge 的区别只在语义：后者兼容 easyflow 老格式，会把数值字符串转成数值再比。
+func (b *ProcessBuilder) StandardEdge(source, target, expression string) *ProcessBuilder {
 	b.def.Edges = append(b.def.Edges, model.EdgeSpec{
 		Source:    source,
 		Target:    target,
-		RuleGroup: &group,
+		Condition: expression,
+		Standard:  true,
+	})
+	return b
+}
+
+// RuleEdge 添加基于条件树的连线，供调用方直接装配 And/Or/Compare 节点。
+// cond 传 nil 表示无条件约束，等价于 Edge。
+func (b *ProcessBuilder) RuleEdge(source, target string, cond rule.Condition) *ProcessBuilder {
+	group := rule.ToGroup(cond)
+	// 落库 DTO 表达不了的树 (含 Expr 节点) 必须在此中断：本入口不承载条件原文，
+	// 静默落成 nil 会让运行期把这条边当成无条件放行，比构建期报错危险得多。
+	if cond != nil && group == nil && b.err == nil {
+		b.err = fmt.Errorf("连线 [%s -> %s] 的条件树含无法落库的节点 (如 rule.Expr)，请改用 StandardEdge 或 ConditionEdge 以文本承载", source, target)
+	}
+	b.def.Edges = append(b.def.Edges, model.EdgeSpec{
+		Source:    source,
+		Target:    target,
+		RuleGroup: group,
 	})
 	return b
 }

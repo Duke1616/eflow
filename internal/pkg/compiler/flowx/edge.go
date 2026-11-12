@@ -23,10 +23,9 @@ func ConvertEdges(edges []flowdsl.Edge) []model.EdgeSpec {
 
 		rawExpr := strings.TrimSpace(e.Expression)
 		if rawExpr != "" && rawExpr != "1 = 1" && rawExpr != "true" {
-			// 采用规则引擎统一的规范化工具清洗表达式（消除前缀 $、转义单等号、规范化集合括号等）
-			cleanExpr := rule.NormalizeExpression(rawExpr)
-			edgeSpec.Condition = cleanExpr
-			edgeSpec.RuleGroup = rule.ParseConditionText(rawExpr)
+			// 条件树无法用 DTO 表达时（Expr 兜底节点）RuleGroup 为 nil，由 Condition 原文承载
+			edgeSpec.RuleGroup = rule.ToGroup(rule.Parse(rawExpr))
+			edgeSpec.Condition = rawExpr
 		}
 
 		return edgeSpec, true

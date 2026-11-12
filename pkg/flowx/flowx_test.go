@@ -7,6 +7,7 @@ import (
 
 	"github.com/Duke1616/eflow/pkg/flowx/middleware"
 	"github.com/Duke1616/eflow/pkg/flowx/model"
+	"github.com/Duke1616/eflow/pkg/flowx/rule"
 	"github.com/Duke1616/eflow/pkg/flowx/storage"
 	"github.com/Duke1616/eflow/pkg/flowx/storage/memory"
 	"github.com/samber/lo"
@@ -231,19 +232,13 @@ func (s *FlowxTestSuite) TestRuleEngine() {
 		Approval("audit_director", "总监直批", model.SignOneVote, "director_tom").
 		End("end", "免批办结").
 		Edge("start", "gateway_budget").
-		RuleEdge("gateway_budget", "audit_director", model.ConditionGroup{
-			Logic: "AND",
-			Conditions: []model.Condition{
-				{Field: "amount", Operator: model.OpGreaterThan, Value: 50000},
-				{Field: "department", Operator: model.OpEqual, Value: "Tech"},
-			},
+		RuleEdge("gateway_budget", "audit_director", rule.And{
+			rule.Compare{Field: "amount", Op: model.OpGreaterThan, Value: 50000},
+			rule.Compare{Field: "department", Op: model.OpEqual, Value: "Tech"},
 		}).
-		RuleEdge("gateway_budget", "end", model.ConditionGroup{
-			Logic: "OR",
-			Conditions: []model.Condition{
-				{Field: "amount", Operator: model.OpLessEqual, Value: 50000},
-				{Field: "trial", Operator: model.OpEqual, Value: true},
-			},
+		RuleEdge("gateway_budget", "end", rule.Or{
+			rule.Compare{Field: "amount", Op: model.OpLessEqual, Value: 50000},
+			rule.Compare{Field: "trial", Op: model.OpEqual, Value: true},
 		}).
 		Edge("audit_director", "end").
 		Build()
@@ -306,14 +301,11 @@ func (s *FlowxTestSuite) TestRuleEngine_EdgeOperators() {
 		Approval("special_audit", "特批", model.SignOneVote, "boss").
 		End("end", "结束").
 		Edge("start", "gw").
-		RuleEdge("gw", "special_audit", model.ConditionGroup{
-			Logic: "AND",
-			Conditions: []model.Condition{
-				{Field: "tags", Operator: model.OpContains, Value: "VIP"},
-				{Field: "approvers", Operator: model.OpNotEmpty},
-				{Field: "notes", Operator: model.OpEmpty},
-				{Field: "channel", Operator: model.OpNotIn, Value: []string{"web", "h5"}},
-			},
+		RuleEdge("gw", "special_audit", rule.And{
+			rule.Compare{Field: "tags", Op: model.OpContains, Value: "VIP"},
+			rule.Compare{Field: "approvers", Op: model.OpNotEmpty},
+			rule.Compare{Field: "notes", Op: model.OpEmpty},
+			rule.Compare{Field: "channel", Op: model.OpNotIn, Value: []string{"web", "h5"}},
 		}).
 		Edge("gw", "end").
 		Edge("special_audit", "end").
@@ -716,6 +708,58 @@ func (s *FlowxTestSuite) TestGateways() {
 		require.NoError(s.T(), engine.Pass(s.ctx, PassReq{TaskID: xTask.ID, Operator: "alice"}))
 		inst, _ := store.GetInstance(s.ctx, instID)
 		assert.Equal(s.T(), model.InstanceFinished, inst.Status)
+	})
+
+	s.Run("汇聚等待不得丢弃同轮已就绪分支", func() {
+		engine, store := s.newEngine()
+		// 拓扑: start -> fork -> [a, b]；a -> split -> [j, c]；b -> j；j -> tail -> end；c -> end
+		// a 通过时 split 穿透出 [j, c]：j 因 b 未通过而阻断，c 已就绪，两者必须互不牵连
+		def := NewProcess("blocked_ready_mix", "汇聚等待与就绪分支混合").
+			Start("start", "开始").
+			ParallelGateway("fork", "并行分流").
+			Approval("a", "A审批", model.SignOneVote, "alice").
+			Approval("b", "B审批", model.SignOneVote, "bob").
+			ParallelGateway("split", "二次分流").
+			ParallelGateway("j", "并行汇聚").
+			Approval("c", "C审批", model.SignOneVote, "carol").
+			Approval("tail", "尾审批", model.SignOneVote, "dave").
+			End("end", "结束").
+			Edge("start", "fork").
+			Edge("fork", "a").
+			Edge("fork", "b").
+			Edge("a", "split").
+			Edge("split", "j").
+			Edge("split", "c").
+			Edge("b", "j").
+			Edge("j", "tail").
+			Edge("tail", "end").
+			Edge("c", "end").
+			Build()
+		require.NoError(s.T(), def.Validate())
+
+		instID, err := engine.Start(s.ctx, StartReq{Def: def, Starter: "tom"})
+		require.NoError(s.T(), err)
+
+		s.pass(engine, store, instID, "alice", "A通过")
+
+		tasks, _ := store.ListTasksByInstance(s.ctx, instID)
+		cTask, ok := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "c" })
+		require.True(s.T(), ok, "汇聚等待期间同轮已就绪的 C 分支必须照常派发待办，绝不能被静默丢弃")
+		assert.Equal(s.T(), model.TaskPending, cTask.Status)
+		_, tailExists := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "tail" })
+		assert.False(s.T(), tailExists, "b 未通过前汇聚屏障仍须阻断，尾审批不得提前派发")
+		inst, _ := store.GetInstance(s.ctx, instID)
+		assert.Equal(s.T(), model.InstanceRunning, inst.Status)
+
+		s.pass(engine, store, instID, "bob", "B通过")
+
+		tasks, _ = store.ListTasksByInstance(s.ctx, instID)
+		tailTask, ok := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "tail" })
+		require.True(s.T(), ok, "b 通过后汇聚屏障放行，尾审批必须派发")
+		assert.Equal(s.T(), model.TaskPending, tailTask.Status)
+		cTask, ok = lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "c" })
+		require.True(s.T(), ok)
+		assert.Equal(s.T(), model.TaskPending, cTask.Status, "C 分支待办不得因汇聚放行而被牵连取消")
 	})
 }
 

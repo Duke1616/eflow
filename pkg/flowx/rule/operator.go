@@ -3,65 +3,71 @@ package rule
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Duke1616/eflow/pkg/flowx/model"
 	"github.com/samber/lo"
 )
 
-// IOperator 算子求值策略接口
-// 将各种比对逻辑（等于、比较、包含、判空）解耦为独立算子对象，遵循开闭原则 (OCP)
-type IOperator interface {
-	Match(actual any, target any) bool
+// matchOperator 按算子裁决单项条件；未识别的算子判不通过，因为 op 来自持久化 JSON，误放行会让存量模板走错分支
+func matchOperator(op model.Op, actual, target any) bool {
+	switch op {
+	case model.OpEqual:
+		return matchEqual(actual, target)
+	case model.OpNotEqual:
+		return !matchEqual(actual, target)
+	case model.OpGreaterThan:
+		return matchNumeric(actual, target, func(a, b float64) bool { return a > b })
+	case model.OpGreaterEqual:
+		return matchNumeric(actual, target, func(a, b float64) bool { return a >= b })
+	case model.OpLessThan:
+		return matchNumeric(actual, target, func(a, b float64) bool { return a < b })
+	case model.OpLessEqual:
+		return matchNumeric(actual, target, func(a, b float64) bool { return a <= b })
+	case model.OpIn:
+		return matchIn(actual, target)
+	case model.OpNotIn:
+		return !matchIn(actual, target)
+	case model.OpContains:
+		return matchContains(actual, target)
+	case model.OpEmpty:
+		return matchEmpty(actual)
+	case model.OpNotEmpty:
+		return !matchEmpty(actual)
+	default:
+		return false
+	}
 }
 
-// equalOperator 等值比对算子
-type equalOperator struct{}
-
-func (o *equalOperator) Match(actual any, target any) bool {
-	if leftNum, ok1 := ToNumeric(actual); ok1 {
-		if rightNum, ok2 := ToNumeric(target); ok2 {
+// matchEqual 优先按数值比（兼容 JSON 反序列化后 float64 与 int 跨类型），再兼容多选切片，最后退化为字符串比对
+func matchEqual(actual, target any) bool {
+	if leftNum, ok1 := toNumeric(actual); ok1 {
+		if rightNum, ok2 := toNumeric(target); ok2 {
 			return leftNum == rightNum
 		}
 	}
 
-	// 智能兼容表单多选切片与目标标量的匹配（如 $environment = 'backend'）
+	// 兼容表单多选切片与目标标量的匹配（如 $environment = 'backend'）
 	if actualSlice, isSlice := extractSlice(actual); isSlice {
-		targetStr := fmt.Sprintf("%v", target)
-		return lo.Contains(actualSlice, targetStr)
+		return lo.Contains(actualSlice, fmt.Sprintf("%v", target))
 	}
 
 	return fmt.Sprintf("%v", actual) == fmt.Sprintf("%v", target)
 }
 
-// notEqualOperator 不等比对算子
-type notEqualOperator struct {
-	eq equalOperator
-}
-
-func (o *notEqualOperator) Match(actual any, target any) bool {
-	return !o.eq.Match(actual, target)
-}
-
-// numericCompareOperator 数值大小比对算子
-type numericCompareOperator struct {
-	cmp func(left, right float64) bool
-}
-
-func (o *numericCompareOperator) Match(actual any, target any) bool {
-	left, ok1 := ToNumeric(actual)
-	right, ok2 := ToNumeric(target)
+func matchNumeric(actual, target any, cmp func(left, right float64) bool) bool {
+	left, ok1 := toNumeric(actual)
+	right, ok2 := toNumeric(target)
 	if !ok1 || !ok2 {
 		return false
 	}
-	return o.cmp(left, right)
+	return cmp(left, right)
 }
 
-// inOperator 集合包含算子（支持标量 in 集合，以及表单多选切片与目标集合的交集匹配）
-type inOperator struct{}
-
-func (o *inOperator) Match(actual any, target any) bool {
-	condSlice := ToStringSlice(target)
+// matchIn 标量看是否命中集合，表单多选切片看与集合是否有交集
+func matchIn(actual, target any) bool {
+	condSlice := toStringSlice(target)
 	if len(condSlice) == 0 {
 		return false
 	}
@@ -73,23 +79,11 @@ func (o *inOperator) Match(actual any, target any) bool {
 		return len(lo.Intersect(actualSlice, condSlice)) > 0
 	}
 
-	targetStr := fmt.Sprintf("%v", actual)
-	return lo.Contains(condSlice, targetStr)
+	return lo.Contains(condSlice, fmt.Sprintf("%v", actual))
 }
 
-// notInOperator 集合不包含算子
-type notInOperator struct {
-	in inOperator
-}
-
-func (o *notInOperator) Match(actual any, target any) bool {
-	return !o.in.Match(actual, target)
-}
-
-// containsOperator 字符串子串包含算子（切片按元素精准包含，标量按子串匹配）
-type containsOperator struct{}
-
-func (o *containsOperator) Match(actual any, target any) bool {
+// matchContains 切片按元素精准包含，标量按子串匹配
+func matchContains(actual, target any) bool {
 	if actual == nil || target == nil {
 		return false
 	}
@@ -97,14 +91,10 @@ func (o *containsOperator) Match(actual any, target any) bool {
 	if actualSlice, isSlice := extractSlice(actual); isSlice {
 		return lo.Contains(actualSlice, targetStr)
 	}
-	actualStr := fmt.Sprintf("%v", actual)
-	return strings.Contains(actualStr, targetStr)
+	return strings.Contains(fmt.Sprintf("%v", actual), targetStr)
 }
 
-// emptyOperator 判空算子（支持标量为空与空切片判定）
-type emptyOperator struct{}
-
-func (o *emptyOperator) Match(actual any, _ any) bool {
+func matchEmpty(actual any) bool {
 	if actual == nil || actual == "" {
 		return true
 	}
@@ -112,30 +102,6 @@ func (o *emptyOperator) Match(actual any, _ any) bool {
 		return len(actualSlice) == 0
 	}
 	return false
-}
-
-// notEmptyOperator 非空算子
-type notEmptyOperator struct {
-	empty emptyOperator
-}
-
-func (o *notEmptyOperator) Match(actual any, _ any) bool {
-	return !o.empty.Match(actual, nil)
-}
-
-// operatorRegistry 全局算子注册表
-var operatorRegistry = map[model.Op]IOperator{
-	model.OpEqual:        &equalOperator{},
-	model.OpNotEqual:     &notEqualOperator{},
-	model.OpGreaterThan:  &numericCompareOperator{cmp: func(a, b float64) bool { return a > b }},
-	model.OpGreaterEqual: &numericCompareOperator{cmp: func(a, b float64) bool { return a >= b }},
-	model.OpLessThan:     &numericCompareOperator{cmp: func(a, b float64) bool { return a < b }},
-	model.OpLessEqual:    &numericCompareOperator{cmp: func(a, b float64) bool { return a <= b }},
-	model.OpIn:           &inOperator{},
-	model.OpNotIn:        &notInOperator{},
-	model.OpContains:     &containsOperator{},
-	model.OpEmpty:        &emptyOperator{},
-	model.OpNotEmpty:     &notEmptyOperator{},
 }
 
 // extractSlice 提取表单实际值的切片表示并指示其是否属于集合/切片类型（支持 []string, []any, JSON array 字符串, 逗号分隔字符串）
@@ -164,8 +130,51 @@ func extractSlice(val any) ([]string, bool) {
 	return nil, false
 }
 
-// extractActualSlice 兼容历史调用，返回切片
-func extractActualSlice(val any) []string {
-	slice, _ := extractSlice(val)
-	return slice
+func toNumeric(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case int32:
+		return float64(n), true
+	case int16:
+		return float64(n), true
+	case int8:
+		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	case uint16:
+		return float64(n), true
+	case uint8:
+		return float64(n), true
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case string:
+		if num, err := strconv.ParseFloat(n, 64); err == nil {
+			return num, true
+		}
+	}
+	return 0, false
+}
+
+// toStringSlice 把条件目标值归一为字符串集合；与 extractSlice 不同，此处不拆分逗号串
+func toStringSlice(v any) []string {
+	if v == nil {
+		return nil
+	}
+	switch s := v.(type) {
+	case []string:
+		return s
+	case []any:
+		return lo.Map(s, func(item any, _ int) string { return fmt.Sprintf("%v", item) })
+	default:
+		return []string{fmt.Sprintf("%v", v)}
+	}
 }

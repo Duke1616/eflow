@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestEvaluateRuleGroup_AllOperators(t *testing.T) {
-	vars := map[string]any{
+func TestEval_AllOperators(t *testing.T) {
+	vars := model.Variables{
 		"age":       28,
 		"city":      "Hangzhou",
 		"roles":     []string{"admin", "dev"},
@@ -16,7 +16,7 @@ func TestEvaluateRuleGroup_AllOperators(t *testing.T) {
 		"empty_str": "",
 	}
 
-	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+	assert.True(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "age", Operator: model.OpEqual, Value: 28},
 			{Field: "age", Operator: model.OpGreaterThan, Value: 20},
@@ -29,18 +29,18 @@ func TestEvaluateRuleGroup_AllOperators(t *testing.T) {
 			{Field: "empty_str", Operator: model.OpEmpty, Value: nil},
 			{Field: "city", Operator: model.OpNotEmpty, Value: nil},
 		},
-	}, vars))
+	}).Eval(vars))
 }
 
-func TestEvaluateRuleGroup_NestedSubGroups(t *testing.T) {
-	vars := map[string]any{
+func TestEval_NestedSubGroups(t *testing.T) {
+	vars := model.Variables{
 		"amount": 6000,
 		"dept":   "IT",
 		"role":   "engineer",
 	}
 
 	// (amount > 5000 AND dept == 'IT') OR (role == 'director')
-	rule := &model.ConditionGroup{
+	group := &model.ConditionGroup{
 		Logic: "OR",
 		SubGroups: []model.ConditionGroup{
 			{
@@ -59,18 +59,18 @@ func TestEvaluateRuleGroup_NestedSubGroups(t *testing.T) {
 		},
 	}
 
-	assert.True(t, EvaluateRuleGroup(rule, vars))
+	assert.True(t, FromGroup(group).Eval(vars))
 }
 
-func TestEvaluateRuleGroup_TypeCoercion(t *testing.T) {
+func TestEval_TypeCoercion(t *testing.T) {
 	// 验证 JSON 反序列化后常见的 float64 与 int 跨类型数值等值比较
-	vars := map[string]any{
+	vars := model.Variables{
 		"amount_float": float64(100),
 		"count_uint":   uint(5),
 		"str_num":      "50",
 	}
 
-	rule := &model.ConditionGroup{
+	group := &model.ConditionGroup{
 		Logic: "AND",
 		Conditions: []model.Condition{
 			{Field: "amount_float", Operator: model.OpEqual, Value: 100},   // float64 vs int
@@ -80,51 +80,51 @@ func TestEvaluateRuleGroup_TypeCoercion(t *testing.T) {
 		},
 	}
 
-	assert.True(t, EvaluateRuleGroup(rule, vars))
+	assert.True(t, FromGroup(group).Eval(vars))
 }
 
-func TestEvaluateRuleGroup_InWithSliceAndJSON(t *testing.T) {
+func TestEval_InWithSliceAndJSON(t *testing.T) {
 	// 场景 1: 表单变量为 JSON 数组字符串
-	varsJSON := map[string]any{
+	varsJSON := model.Variables{
 		"environment": `["ocr","frontend","backend"]`,
 	}
 	// 命中 backend
-	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+	assert.True(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "environment", Operator: model.OpIn, Value: []string{"backend"}},
 		},
-	}, varsJSON))
+	}).Eval(varsJSON))
 	// 命中 frontend
-	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+	assert.True(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "environment", Operator: model.OpIn, Value: []string{"frontend"}},
 		},
-	}, varsJSON))
+	}).Eval(varsJSON))
 	// 未命中 java
-	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+	assert.False(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "environment", Operator: model.OpIn, Value: []string{"java"}},
 		},
-	}, varsJSON))
+	}).Eval(varsJSON))
 
 	// 场景 2: 表单变量为原生切片 []string
-	varsSlice := map[string]any{
+	varsSlice := model.Variables{
 		"environment": []string{"ocr", "frontend", "backend"},
 	}
-	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+	assert.True(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "environment", Operator: model.OpIn, Value: []string{"backend"}},
 		},
-	}, varsSlice))
-	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+	}).Eval(varsSlice))
+	assert.False(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "environment", Operator: model.OpIn, Value: []string{"java"}},
 		},
-	}, varsSlice))
+	}).Eval(varsSlice))
 }
 
-func TestEvaluateRuleGroup_SliceAdaptation(t *testing.T) {
-	vars := map[string]any{
+func TestEval_SliceAdaptation(t *testing.T) {
+	vars := model.Variables{
 		"env_slice":      []any{"frontend", "backend"},
 		"env_empty":      []any{},
 		"env_json_empty": "[]",
@@ -132,72 +132,104 @@ func TestEvaluateRuleGroup_SliceAdaptation(t *testing.T) {
 	}
 
 	// 1. 等于 (OpEqual): 切片中包含即为 true
-	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+	assert.True(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "env_slice", Operator: model.OpEqual, Value: "backend"},
 		},
-	}, vars))
-	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+	}).Eval(vars))
+	assert.True(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "env_slice", Operator: model.OpEqual, Value: "frontend"},
 		},
-	}, vars))
-	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+	}).Eval(vars))
+	assert.False(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "env_slice", Operator: model.OpEqual, Value: "ocr"},
 		},
-	}, vars))
+	}).Eval(vars))
 
 	// 2. 不等于 (OpNotEqual): 切片中不包含才为 true
-	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+	assert.True(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "env_slice", Operator: model.OpNotEqual, Value: "ocr"},
 		},
-	}, vars))
-	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+	}).Eval(vars))
+	assert.False(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "env_slice", Operator: model.OpNotEqual, Value: "backend"},
 		},
-	}, vars))
+	}).Eval(vars))
 
 	// 3. 包含 (OpContains): 元素匹配
-	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+	assert.True(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "env_slice", Operator: model.OpContains, Value: "backend"},
 		},
-	}, vars))
-	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+	}).Eval(vars))
+	assert.False(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "env_slice", Operator: model.OpContains, Value: "ocr"},
 		},
-	}, vars))
+	}).Eval(vars))
 
 	// 4. 为空 (OpEmpty): 空切片被识别为空
-	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+	assert.True(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "env_empty", Operator: model.OpEmpty, Value: nil},
 		},
-	}, vars))
-	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+	}).Eval(vars))
+	assert.True(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "env_json_empty", Operator: model.OpEmpty, Value: nil},
 		},
-	}, vars))
-	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+	}).Eval(vars))
+	assert.False(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "env_slice", Operator: model.OpEmpty, Value: nil},
 		},
-	}, vars))
+	}).Eval(vars))
 
 	// 5. 非空 (OpNotEmpty):
-	assert.True(t, EvaluateRuleGroup(&model.ConditionGroup{
+	assert.True(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "env_slice", Operator: model.OpNotEmpty, Value: nil},
 		},
-	}, vars))
-	assert.False(t, EvaluateRuleGroup(&model.ConditionGroup{
+	}).Eval(vars))
+	assert.False(t, FromGroup(&model.ConditionGroup{
 		Conditions: []model.Condition{
 			{Field: "env_empty", Operator: model.OpNotEmpty, Value: nil},
 		},
-	}, vars))
+	}).Eval(vars))
+}
+
+func TestEval_UnknownOperatorNeverPasses(t *testing.T) {
+	// op 来自持久化 JSON，存量模板可能带本版本不认识的算子，必须判不通过而不是默认放行
+	testCases := []struct {
+		name string
+		op   model.Op
+	}{
+		{"未定义算子", model.Op("BOGUS")},
+		{"空算子", model.Op("")},
+		{"大小写不匹配已知算子", model.Op("eq")},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			group := &model.ConditionGroup{
+				Conditions: []model.Condition{
+					{Field: "dept", Operator: tc.op, Value: "IT"},
+				},
+			}
+			assert.False(t, FromGroup(group).Eval(model.Variables{"dept": "IT"}))
+		})
+	}
+}
+
+// 空树表示无条件约束，调用方按放行处理；FromGroup 对空组必须返回 nil 而不是空 And
+func TestEval_NilMeansUnconditional(t *testing.T) {
+	assert.Nil(t, FromGroup(nil))
+	assert.Nil(t, FromGroup(&model.ConditionGroup{}))
+	assert.Nil(t, FromGroup(&model.ConditionGroup{Logic: "AND"}))
+	assert.True(t, And(nil).Eval(model.Variables{}))
+	assert.False(t, Or(nil).Eval(model.Variables{}))
 }

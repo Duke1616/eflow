@@ -562,10 +562,10 @@ func TestFlowxConverter_ConditionNodeCompatibility(t *testing.T) {
 	require.True(t, found)
 	assert.Equal(t, model.NodeGatewayInclusive, condNode.Type)
 
-	// 断言连线上的条件表达式被正确规范化为标准表达式
+	// 连线保留画布原文，条件在加载时编译成树；原文与规范化文本对解析器等价
 	condEdge, foundEdge := lo.Find(def.Edges, func(e model.EdgeSpec) bool { return e.Source == "cond_backend" && e.Target == "user_backend" })
 	require.True(t, foundEdge)
-	assert.Equal(t, "environment in ['backend']", condEdge.Condition)
+	assert.Equal(t, "$environment in ('backend')", condEdge.Condition)
 	require.NotNil(t, condEdge.RuleGroup)
 
 	// 部署到 FlowX 引擎验证

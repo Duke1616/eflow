@@ -154,4 +154,7 @@ type EdgeSpec struct {
 	Target    string          `json:"target"`               // 目标节点 ID
 	Condition string          `json:"condition,omitempty"`  // 兼容简易表达式文本 (如 "days > 3")
 	RuleGroup *ConditionGroup `json:"rule_group,omitempty"` // 强类型规则引擎条件组 (推荐优先使用)
+	// Standard 标记 Condition 为标准 expr 原文：不做 SQL 方言适配、不映射宽松比较树，严格类型求值。
+	// 零值即老方言，存量编译产物零迁移；标准模式无法用 RuleGroup 表达，故两者互斥。
+	Standard bool `json:"standard,omitempty"`
 }

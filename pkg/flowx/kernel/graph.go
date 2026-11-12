@@ -56,7 +56,7 @@ func (p *ExecutionPlan) walk(roots []string, forward bool, visit func(model.Node
 }
 
 // adjacent 取指定方向的邻接边：forward 为顺流出边，否则为逆流入了边
-func (p *ExecutionPlan) adjacent(nodeID string, forward bool) []model.EdgeSpec {
+func (p *ExecutionPlan) adjacent(nodeID string, forward bool) []Edge {
 	if forward {
 		return p.OutEdges[nodeID]
 	}
@@ -65,7 +65,7 @@ func (p *ExecutionPlan) adjacent(nodeID string, forward bool) []model.EdgeSpec {
 
 // neighborIDs 取指定方向的邻接节点 ID，用于以"前驱/后继"而非自身作为遍历起点
 func (p *ExecutionPlan) neighborIDs(nodeID string, forward bool) []string {
-	return lo.Map(p.adjacent(nodeID, forward), func(e model.EdgeSpec, _ int) string {
+	return lo.Map(p.adjacent(nodeID, forward), func(e Edge, _ int) string {
 		if forward {
 			return e.Target
 		}
