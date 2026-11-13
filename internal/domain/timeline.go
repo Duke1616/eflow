@@ -112,6 +112,14 @@ type RejectSnapshot struct {
 	FinishTime string // 驳回办结时间 (标准格式 YYYY-MM-DD HH:mm:ss)
 }
 
+// AuditContext 工单详情页审批面板的只读上下文聚合，让审批人在填写自己的意见前就能读到链路历史。
+// 两个区块各自独立降级：任一查询失败只丢该区块，不连带工单详情主体打不开
+type AuditContext struct {
+	LatestReject      *LatestReject  // 最近一次激活未闭环的驳回快照，无驳回或已走回来时为 nil
+	PriorComments     []PriorComment // 按办结时间倒序的最近若干条前序审批意见
+	PriorCommentTotal int64          // 可见前序意见总数，供前端折叠展开
+}
+
 // PriorComment 前序审批意见摘要条目，让审批人在填写自己的意见前就能读到链路历史，
 // 而不必先切到审批记录页；账号与姓名同时保留，避免同名展示姓名无法区分是否本人意见
 type PriorComment struct {

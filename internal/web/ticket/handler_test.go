@@ -402,23 +402,25 @@ func TestHandler_Detail(t *testing.T) {
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice"}}, nil)
 				mockRating.EXPECT().FindByTicketID(gomock.Any(), int64(101)).
 					Return(domain.TicketRating{}, false, nil)
-				mockQuery.EXPECT().GetLatestReject(gomock.Any(), domain.NewID("377374770910412800")).
-					Return(&domain.LatestReject{
-						RejectedBy:     "bob",
-						RejectedByName: "鲍勃主管",
-						NodeID:         "node-mgr",
-						NodeName:       "主管审批",
-						Reason:         "金额超标请修改",
-						RejectedAt:     "2026-11-11 10:00:00",
-					}, nil)
-				mockQuery.EXPECT().PriorComments(gomock.Any(), domain.NewID("377374770910412800")).
-					Return([]domain.PriorComment{
-						{
-							NodeID: "node-mgr", NodeName: "主管审批",
-							ApprovedBy: "bob", ApprovedByName: "鲍勃主管",
-							Status: 2, Comment: "金额超标请修改", OccurredAt: "2026-11-11 10:00:00",
+				mockQuery.EXPECT().AuditContext(gomock.Any(), domain.NewID("377374770910412800")).
+					Return(domain.AuditContext{
+						LatestReject: &domain.LatestReject{
+							RejectedBy:     "bob",
+							RejectedByName: "鲍勃主管",
+							NodeID:         "node-mgr",
+							NodeName:       "主管审批",
+							Reason:         "金额超标请修改",
+							RejectedAt:     "2026-11-11 10:00:00",
 						},
-					}, int64(3), nil)
+						PriorComments: []domain.PriorComment{
+							{
+								NodeID: "node-mgr", NodeName: "主管审批",
+								ApprovedBy: "bob", ApprovedByName: "鲍勃主管",
+								Status: 2, Comment: "金额超标请修改", OccurredAt: "2026-11-11 10:00:00",
+							},
+						},
+						PriorCommentTotal: int64(3),
+					})
 			},
 			wantCode: 0,
 			assertVO: func(t *testing.T, ticket Ticket) {
@@ -438,7 +440,7 @@ func TestHandler_Detail(t *testing.T) {
 			},
 		},
 		{
-			name: "前序意见查询失败时降级_工单详情仍可打开",
+			name: "审批上下文整体降级为空_工单详情仍可打开",
 			req:  DetailProcessInstIdReq{ProcessInstanceId: InstanceID("377374770910412800")},
 			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService, mockQuery *ticketmocks.MockQueryService) {
 				mockSvc.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID("377374770910412800")).
@@ -447,14 +449,35 @@ func TestHandler_Detail(t *testing.T) {
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice"}}, nil)
 				mockRating.EXPECT().FindByTicketID(gomock.Any(), int64(101)).
 					Return(domain.TicketRating{}, false, nil)
-				mockQuery.EXPECT().GetLatestReject(gomock.Any(), domain.NewID("377374770910412800")).
-					Return(nil, nil)
-				mockQuery.EXPECT().PriorComments(gomock.Any(), domain.NewID("377374770910412800")).
-					Return(nil, int64(0), errors.New("db down"))
+				mockQuery.EXPECT().AuditContext(gomock.Any(), domain.NewID("377374770910412800")).
+					Return(domain.AuditContext{})
 			},
 			wantCode: 0,
 			assertVO: func(t *testing.T, ticket Ticket) {
+				assert.Nil(t, ticket.LatestReject)
 				assert.Nil(t, ticket.PriorComments, "意见摘要属展示增强，失败只降级掉该区块")
+			},
+		},
+		{
+			name: "仅驳回横幅有值时意见摘要缺省_两区块独立映射",
+			req:  DetailProcessInstIdReq{ProcessInstanceId: InstanceID("377374770910412800")},
+			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService, mockQuery *ticketmocks.MockQueryService) {
+				mockSvc.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID("377374770910412800")).
+					Return(domain.Ticket{Id: 101, CreateBy: "alice"}, nil)
+				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
+					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice"}}, nil)
+				mockRating.EXPECT().FindByTicketID(gomock.Any(), int64(101)).
+					Return(domain.TicketRating{}, false, nil)
+				mockQuery.EXPECT().AuditContext(gomock.Any(), domain.NewID("377374770910412800")).
+					Return(domain.AuditContext{
+						LatestReject: &domain.LatestReject{RejectedBy: "bob", RejectedByName: "鲍勃主管", Reason: "金额超标请修改"},
+					})
+			},
+			wantCode: 0,
+			assertVO: func(t *testing.T, ticket Ticket) {
+				require.NotNil(t, ticket.LatestReject)
+				assert.Equal(t, "鲍勃主管", ticket.LatestReject.RejectedByName)
+				assert.Nil(t, ticket.PriorComments)
 			},
 		},
 		{
@@ -467,10 +490,8 @@ func TestHandler_Detail(t *testing.T) {
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice"}}, nil)
 				mockRating.EXPECT().FindByTicketID(gomock.Any(), int64(101)).
 					Return(domain.TicketRating{}, false, nil)
-				mockQuery.EXPECT().GetLatestReject(gomock.Any(), domain.NewID("377374770910412800")).
-					Return(nil, nil)
-				mockQuery.EXPECT().PriorComments(gomock.Any(), domain.NewID("377374770910412800")).
-					Return([]domain.PriorComment{}, int64(0), nil)
+				mockQuery.EXPECT().AuditContext(gomock.Any(), domain.NewID("377374770910412800")).
+					Return(domain.AuditContext{PriorComments: []domain.PriorComment{}, PriorCommentTotal: 0})
 			},
 			wantCode: 0,
 			assertVO: func(t *testing.T, ticket Ticket) {

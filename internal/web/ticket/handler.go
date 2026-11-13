@@ -472,25 +472,20 @@ func (h *Handler) Detail(ctx *ginx.Context, req DetailProcessInstIdReq) (ginx.Re
 		result.Rating = toRatingVO(rating)
 	}
 
-	// 聚合最新驳回快照（用于前端顶部警示横幅提示提单人修改）
-	if latestReject, auditErr := h.querySvc.GetLatestReject(ctx.Context, req.ProcessInstanceId); auditErr == nil && latestReject != nil {
+	// 审批面板上下文（驳回横幅 + 前序意见摘要）由 Service 一次聚合，各区块失败自行降级
+	audit := h.querySvc.AuditContext(ctx.Context, req.ProcessInstanceId)
+	if audit.LatestReject != nil {
 		result.LatestReject = &LatestRejectVO{
-			RejectedBy:     latestReject.RejectedBy,
-			RejectedByName: latestReject.RejectedByName,
-			NodeID:         latestReject.NodeID,
-			NodeName:       latestReject.NodeName,
-			Reason:         latestReject.Reason,
-			RejectedAt:     latestReject.RejectedAt,
+			RejectedBy:     audit.LatestReject.RejectedBy,
+			RejectedByName: audit.LatestReject.RejectedByName,
+			NodeID:         audit.LatestReject.NodeID,
+			NodeName:       audit.LatestReject.NodeName,
+			Reason:         audit.LatestReject.Reason,
+			RejectedAt:     audit.LatestReject.RejectedAt,
 		}
 	}
-
-	// 聚合前序审批意见：审批人在本面板填写意见前即可读到链路历史，无需切到审批记录页；
-	// 摘要属展示增强，查询失败只降级掉该区块，不能连带整个工单详情打不开
-	if comments, commentTotal, commentErr := h.querySvc.PriorComments(ctx.Context, req.ProcessInstanceId); commentErr != nil {
-		h.logger.Warn("获取前序审批意见失败，降级为空意见摘要",
-			elog.String("process_instance_id", req.ProcessInstanceId.String()), elog.FieldErr(commentErr))
-	} else if commentTotal > 0 {
-		result.PriorComments = &PriorCommentsVO{Items: toVoPriorComments(comments), Total: commentTotal}
+	if audit.PriorCommentTotal > 0 {
+		result.PriorComments = &PriorCommentsVO{Items: toVoPriorComments(audit.PriorComments), Total: audit.PriorCommentTotal}
 	}
 
 	return ginx.Result{Data: result}, nil

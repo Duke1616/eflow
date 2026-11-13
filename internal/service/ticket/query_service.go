@@ -30,10 +30,9 @@ type QueryService interface {
 	TaskRecord(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error)
 	// TaskTimeline 以节点执行批次为单位聚合可见任务时间线事件，聚合审批汇总与参与人真名
 	TaskTimeline(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskTimelineEvent, int64, error)
-	// GetLatestReject 解析流程实例最近一次被驳回的快照信息
-	GetLatestReject(ctx context.Context, processInstID domain.ID) (*domain.LatestReject, error)
-	// PriorComments 汇总链路上已裁决且填写了意见的前序审批记录，返回最近若干条与意见总数
-	PriorComments(ctx context.Context, processInstID domain.ID) ([]domain.PriorComment, int64, error)
+	// AuditContext 一次聚合审批面板上下文（驳回横幅 + 前序意见摘要），内部只解析一次引擎路由；
+	// 各区块查询失败自行降级为空，不向调用方抛错，避免展示增强拖垮工单详情主体
+	AuditContext(ctx context.Context, processInstID domain.ID) domain.AuditContext
 }
 
 type queryService struct {
@@ -297,13 +296,15 @@ func (q *queryService) TaskTimeline(ctx context.Context, processInstID domain.ID
 	return events, total, nil
 }
 
-// resolveEngineType 根据流程实例标识反查工单绑定的流程引擎驱动类型，未找到或老数据为空时兜底为 EasyFlow
+// resolveEngineType 根据流程实例标识反查工单绑定的流程引擎驱动类型。
+// 走轻量 lookup 而非工单详情服务：后者会额外触发流程策略解析，读路径不该为此付出 workflow I/O。
+// 查库失败沿用既有兜底语义返回 EasyFlow，不因路由解析失败阻断读场景
 func (q *queryService) resolveEngineType(ctx context.Context, processInstID domain.ID) domain.EngineType {
 	ticket, err := q.repo.DetailByProcessInstance(ctx, processInstID)
-	if err == nil && ticket.Process.EngineType != "" {
-		return ticket.Process.EngineType
+	if err != nil {
+		return domain.EngineTypeEasyFlow
 	}
-	return domain.EngineTypeEasyFlow
+	return ticket.Process.ResolveEngineType()
 }
 
 func (q *queryService) assembleTimelineEvents(ctx context.Context, groups []domain.TaskTimelineGroup) []domain.TaskTimelineEvent {
@@ -380,21 +381,36 @@ func (q *queryService) toTaskRecords(ctx context.Context, ts []domain.TaskRecord
 	})
 }
 
-// GetLatestReject 查询当前流程实例中处于活跃未闭环状态的最近一次驳回快照
-// 若未发生驳回、或驳回后已被重新推进办结（已走回来），流程引擎会返回 nil
-func (q *queryService) GetLatestReject(ctx context.Context, processInstID domain.ID) (*domain.LatestReject, error) {
+// AuditContext 一次解析引擎路由后聚合审批面板的两个展示区块。
+// 两块互不牵连：驳回快照失败只丢横幅，前序意见失败只丢摘要，工单详情主体照常返回
+func (q *queryService) AuditContext(ctx context.Context, processInstID domain.ID) domain.AuditContext {
 	if processInstID.IsZero() {
-		return nil, nil
+		return domain.AuditContext{}
 	}
 
 	engineType := q.resolveEngineType(ctx, processInstID)
+	audit := domain.AuditContext{LatestReject: q.latestReject(ctx, engineType, processInstID)}
+
+	comments, total, err := q.priorComments(ctx, engineType, processInstID)
+	if err != nil {
+		q.logger.Warn("获取前序审批意见失败，降级为空意见摘要",
+			elog.String("process_instance_id", processInstID.String()), elog.FieldErr(err))
+		return audit
+	}
+	audit.PriorComments, audit.PriorCommentTotal = comments, total
+	return audit
+}
+
+// latestReject 查询当前流程实例中处于活跃未闭环状态的最近一次驳回快照
+// 若未发生驳回、或驳回后已被重新推进办结（已走回来），流程引擎会返回 nil
+func (q *queryService) latestReject(ctx context.Context, engineType domain.EngineType, processInstID domain.ID) *domain.LatestReject {
 	snapshot, err := q.engine.GetActiveReject(ctx, engineType, processInstID)
 	if err != nil {
 		q.logger.Warn("获取驳回快照失败，降级返回空驳回信息", elog.FieldErr(err), elog.String("process_instance_id", processInstID.String()))
-		return nil, nil
+		return nil
 	}
 	if snapshot == nil {
-		return nil, nil
+		return nil
 	}
 
 	// 仅定向解析驳回人真名，避免全员 RPC 浪费
@@ -411,21 +427,16 @@ func (q *queryService) GetLatestReject(ctx context.Context, processInstID domain
 		NodeName:       snapshot.NodeName,
 		Reason:         snapshot.Comment,
 		RejectedAt:     snapshot.FinishTime,
-	}, nil
+	}
 }
 
 // priorCommentPageSize 审批面板默认展开的最近意见条数，其余由前端按 total 折叠
 const priorCommentPageSize = 5
 
-// PriorComments 汇总链路上已裁决且填写了意见的前序审批记录，按办结时间倒序返回最近若干条与意见总数
+// priorComments 汇总链路上已裁决且填写了意见的前序审批记录，按办结时间倒序返回最近若干条与意见总数
 // 过滤、排序与时间格式化由各引擎驱动下推完成，本层只负责解析处理人真名；
 // 可见范围沿用审批记录同一条受工单权限约束的查询路径，不额外放宽
-func (q *queryService) PriorComments(ctx context.Context, processInstID domain.ID) ([]domain.PriorComment, int64, error) {
-	if processInstID.IsZero() {
-		return nil, 0, nil
-	}
-
-	engineType := q.resolveEngineType(ctx, processInstID)
+func (q *queryService) priorComments(ctx context.Context, engineType domain.EngineType, processInstID domain.ID) ([]domain.PriorComment, int64, error) {
 	comments, total, err := q.engine.GetPriorComments(ctx, engineType, processInstID, priorCommentPageSize)
 	if err != nil {
 		return nil, 0, fmt.Errorf("查询流程实例 [%s] 前序审批意见失败: %w", processInstID, err)

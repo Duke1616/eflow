@@ -449,21 +449,19 @@ func TestQueryService_TaskTimeline_MultiEngineResolution(t *testing.T) {
 	}
 }
 
-func TestQueryService_GetLatestReject(t *testing.T) {
+func TestQueryService_LatestReject(t *testing.T) {
 	testCases := []struct {
 		name             string
 		instID           domain.ID
-		repoTicket       domain.Ticket
+		engineType       domain.EngineType
 		mockSnapshot     *domain.RejectSnapshot
 		mockSnapshotErr  error
 		wantLatestReject *domain.LatestReject
 	}{
 		{
-			name:   "驳回后处于待办重审阶段精准提取驳回信息",
-			instID: domain.NewID("proc_1001"),
-			repoTicket: domain.Ticket{
-				Process: domain.Process{EngineType: domain.EngineTypeFlowx},
-			},
+			name:       "驳回后处于待办重审阶段精准提取驳回信息",
+			instID:     domain.NewID("proc_1001"),
+			engineType: domain.EngineTypeFlowx,
 			mockSnapshot: &domain.RejectSnapshot{
 				NodeID:     "node_finance",
 				NodeName:   "财务初审",
@@ -481,21 +479,24 @@ func TestQueryService_GetLatestReject(t *testing.T) {
 			},
 		},
 		{
-			name:   "驳回后提单人已重新提交且流程已重新推进走回来_引擎返回nil",
-			instID: domain.NewID("proc_1003"),
-			repoTicket: domain.Ticket{
-				Process: domain.Process{EngineType: domain.EngineTypeFlowx},
-			},
+			name:             "驳回后提单人已重新提交且流程已重新推进走回来_引擎返回nil",
+			instID:           domain.NewID("proc_1003"),
+			engineType:       domain.EngineTypeFlowx,
 			mockSnapshot:     nil,
 			wantLatestReject: nil, // 已走回来，横幅自动消隐
 		},
 		{
-			name:   "无驳回仅审批通过流转",
-			instID: domain.NewID("proc_1002"),
-			repoTicket: domain.Ticket{
-				Process: domain.Process{EngineType: domain.EngineTypeFlowx},
-			},
+			name:             "无驳回仅审批通过流转",
+			instID:           domain.NewID("proc_1002"),
+			engineType:       domain.EngineTypeFlowx,
 			mockSnapshot:     nil,
+			wantLatestReject: nil,
+		},
+		{
+			name:             "引擎查询失败时降级为空驳回信息_不向上抛错",
+			instID:           domain.NewID("proc_1004"),
+			engineType:       domain.EngineTypeFlowx,
+			mockSnapshotErr:  errors.New("engine down"),
 			wantLatestReject: nil,
 		},
 	}
@@ -509,9 +510,7 @@ func TestQueryService_GetLatestReject(t *testing.T) {
 			mockEngine := enginemocks.NewMockIEngine(ctrl)
 			mockUser := usermocks.NewMockUserServiceClient(ctrl)
 
-			mockRepo.EXPECT().DetailByProcessInstance(gomock.Any(), tc.instID).
-				Return(tc.repoTicket, nil)
-			mockEngine.EXPECT().GetActiveReject(gomock.Any(), tc.repoTicket.Process.EngineType, tc.instID).
+			mockEngine.EXPECT().GetActiveReject(gomock.Any(), tc.engineType, tc.instID).
 				Return(tc.mockSnapshot, tc.mockSnapshotErr)
 
 			if tc.wantLatestReject != nil {
@@ -523,9 +522,8 @@ func TestQueryService_GetLatestReject(t *testing.T) {
 					}, nil)
 			}
 
-			svc := NewQueryService(mockRepo, mockEngine, mockUser, nil)
-			latestReject, err := svc.GetLatestReject(context.Background(), tc.instID)
-			require.NoError(t, err)
+			svc := NewQueryService(mockRepo, mockEngine, mockUser, nil).(*queryService)
+			latestReject := svc.latestReject(context.Background(), tc.engineType, tc.instID)
 
 			if tc.wantLatestReject == nil {
 				assert.Nil(t, latestReject)
@@ -544,25 +542,23 @@ func TestQueryService_GetLatestReject(t *testing.T) {
 // 过滤、排序与时间形态都由引擎驱动承担
 func TestQueryService_PriorComments(t *testing.T) {
 	testCases := []struct {
-		name           string
-		instID         domain.ID
-		repoTicket     domain.Ticket
-		wantEngineType domain.EngineType
-		comments       []domain.PriorComment
-		total          int64
-		engineErr      error
-		wantUserCall   bool
-		userErr        error
-		wantErr        bool
-		wantTotal      int64
-		wantComments   []string
-		wantNames      []string
+		name         string
+		instID       domain.ID
+		engineType   domain.EngineType
+		comments     []domain.PriorComment
+		total        int64
+		engineErr    error
+		wantUserCall bool
+		userErr      error
+		wantErr      bool
+		wantTotal    int64
+		wantComments []string
+		wantNames    []string
 	}{
 		{
-			name:           "按展开上限下推查询并解析处理人真名",
-			instID:         domain.NewID("flowx_inst_1"),
-			repoTicket:     domain.Ticket{Process: domain.Process{EngineType: domain.EngineTypeFlowx}},
-			wantEngineType: domain.EngineTypeFlowx,
+			name:       "按展开上限下推查询并解析处理人真名",
+			instID:     domain.NewID("flowx_inst_1"),
+			engineType: domain.EngineTypeFlowx,
 			comments: []domain.PriorComment{
 				{NodeID: "product", NodeName: "产品", ApprovedBy: "bob", Status: 2, Comment: "口径不对请重算", OccurredAt: "2026-11-11 10:00:00"},
 				{NodeID: "backend", NodeName: "后端", ApprovedBy: "alice", Status: 1, Comment: "构建通过", OccurredAt: "2026-11-09 09:00:00"},
@@ -574,24 +570,9 @@ func TestQueryService_PriorComments(t *testing.T) {
 			wantNames:    []string{"鲍勃", "爱丽丝"},
 		},
 		{
-			name:           "老数据未标记引擎类型时兜底EasyFlow",
-			instID:         domain.NewID(888),
-			repoTicket:     domain.Ticket{Process: domain.Process{EngineType: ""}},
-			wantEngineType: domain.EngineTypeEasyFlow,
-			comments: []domain.PriorComment{
-				{ApprovedBy: "alice", Status: 1, Comment: "同意", OccurredAt: "2026-11-09 09:00:00"},
-			},
-			total:        1,
-			wantUserCall: true,
-			wantTotal:    1,
-			wantComments: []string{"同意"},
-			wantNames:    []string{"爱丽丝"},
-		},
-		{
-			name:           "用户服务失败时降级展示账号不阻塞意见摘要",
-			instID:         domain.NewID("flowx_inst_2"),
-			repoTicket:     domain.Ticket{Process: domain.Process{EngineType: domain.EngineTypeFlowx}},
-			wantEngineType: domain.EngineTypeFlowx,
+			name:       "用户服务失败时降级展示账号不阻塞意见摘要",
+			instID:     domain.NewID("flowx_inst_2"),
+			engineType: domain.EngineTypeFlowx,
 			comments: []domain.PriorComment{
 				{ApprovedBy: "bob", Status: 2, Comment: "口径不对请重算", OccurredAt: "2026-11-11 10:00:00"},
 			},
@@ -603,28 +584,19 @@ func TestQueryService_PriorComments(t *testing.T) {
 			wantNames:    []string{"bob"},
 		},
 		{
-			name:           "引擎查询失败时携带根因返回",
-			instID:         domain.NewID("flowx_inst_3"),
-			repoTicket:     domain.Ticket{Process: domain.Process{EngineType: domain.EngineTypeFlowx}},
-			wantEngineType: domain.EngineTypeFlowx,
-			engineErr:      errors.New("db down"),
-			wantErr:        true,
+			name:       "引擎查询失败时携带根因返回",
+			instID:     domain.NewID("flowx_inst_3"),
+			engineType: domain.EngineTypeFlowx,
+			engineErr:  errors.New("db down"),
+			wantErr:    true,
 		},
 		{
-			name:           "无可读意见时不触发用户RPC",
-			instID:         domain.NewID("flowx_inst_4"),
-			repoTicket:     domain.Ticket{Process: domain.Process{EngineType: domain.EngineTypeFlowx}},
-			wantEngineType: domain.EngineTypeFlowx,
-			comments:       []domain.PriorComment{},
-			total:          0,
-			wantUserCall:   false,
-			wantTotal:      0,
-			wantComments:   []string{},
-			wantNames:      []string{},
-		},
-		{
-			name:         "流程实例标识为空时短路_不查仓储与引擎",
-			instID:       domain.ID(""),
+			name:         "无可读意见时不触发用户RPC",
+			instID:       domain.NewID("flowx_inst_4"),
+			engineType:   domain.EngineTypeFlowx,
+			comments:     []domain.PriorComment{},
+			total:        0,
+			wantUserCall: false,
 			wantTotal:    0,
 			wantComments: []string{},
 			wantNames:    []string{},
@@ -640,12 +612,9 @@ func TestQueryService_PriorComments(t *testing.T) {
 			mockEngine := enginemocks.NewMockIEngine(ctrl)
 			mockUser := usermocks.NewMockUserServiceClient(ctrl)
 
-			if !tc.instID.IsZero() {
-				mockRepo.EXPECT().DetailByProcessInstance(gomock.Any(), tc.instID).Return(tc.repoTicket, nil)
-				// 展开上限固定 5 条：驱动必须按此取数，而不是全量拉回任务链再内存截断
-				mockEngine.EXPECT().GetPriorComments(gomock.Any(), tc.wantEngineType, tc.instID, 5).
-					Return(tc.comments, tc.total, tc.engineErr)
-			}
+			// 展开上限固定 5 条：驱动必须按此取数，而不是全量拉回任务链再内存截断
+			mockEngine.EXPECT().GetPriorComments(gomock.Any(), tc.engineType, tc.instID, 5).
+				Return(tc.comments, tc.total, tc.engineErr)
 			if tc.wantUserCall {
 				mockUser.EXPECT().QueryByUsernames(gomock.Any(), gomock.Any()).
 					Return(&userv1.QueryUsersResp{
@@ -656,8 +625,8 @@ func TestQueryService_PriorComments(t *testing.T) {
 					}, tc.userErr)
 			}
 
-			svc := NewQueryService(mockRepo, mockEngine, mockUser, nil)
-			comments, total, err := svc.PriorComments(context.Background(), tc.instID)
+			svc := NewQueryService(mockRepo, mockEngine, mockUser, nil).(*queryService)
+			comments, total, err := svc.priorComments(context.Background(), tc.engineType, tc.instID)
 			if tc.wantErr {
 				require.Error(t, err)
 				assert.ErrorIs(t, err, tc.engineErr)
@@ -668,6 +637,158 @@ func TestQueryService_PriorComments(t *testing.T) {
 			assert.Equal(t, tc.wantTotal, total)
 			assert.Equal(t, tc.wantComments, lo.Map(comments, func(c domain.PriorComment, _ int) string { return c.Comment }))
 			assert.Equal(t, tc.wantNames, lo.Map(comments, func(c domain.PriorComment, _ int) string { return c.ApprovedByName }))
+		})
+	}
+}
+
+// TestQueryService_AuditContext 验证审批面板上下文聚合：引擎路由只解析一次供两个区块复用，
+// 且任一区块失败只降级自身，不连带另一区块与工单详情主体
+func TestQueryService_AuditContext(t *testing.T) {
+	rejectSnapshot := &domain.RejectSnapshot{
+		NodeID: "node_finance", NodeName: "财务初审", Operator: "finance_user",
+		Comment: "缺少发票抬头", FinishTime: "2026-11-11 09:30:00",
+	}
+	priorComments := []domain.PriorComment{
+		{ApprovedBy: "bob", Status: 2, Comment: "口径不对请重算", OccurredAt: "2026-11-11 10:00:00"},
+	}
+
+	testCases := []struct {
+		name            string
+		instID          domain.ID
+		repoTicket      domain.Ticket
+		repoErr         error
+		wantEngineType  domain.EngineType
+		snapshot        *domain.RejectSnapshot
+		snapshotErr     error
+		comments        []domain.PriorComment
+		commentTotal    int64
+		commentErr      error
+		wantReject      bool
+		wantComments    int
+		wantCommentTot  int64
+		wantRepoLookup  bool
+		wantEngineCalls bool
+	}{
+		{
+			name:            "两个区块齐备_引擎路由只反查一次",
+			instID:          domain.NewID("flowx_inst_1"),
+			repoTicket:      domain.Ticket{Process: domain.Process{EngineType: domain.EngineTypeFlowx}},
+			wantEngineType:  domain.EngineTypeFlowx,
+			snapshot:        rejectSnapshot,
+			comments:        priorComments,
+			commentTotal:    8,
+			wantReject:      true,
+			wantComments:    1,
+			wantCommentTot:  8,
+			wantRepoLookup:  true,
+			wantEngineCalls: true,
+		},
+		{
+			name:            "老数据未标记引擎类型时两个区块统一兜底EasyFlow",
+			instID:          domain.NewID(888),
+			repoTicket:      domain.Ticket{Process: domain.Process{EngineType: ""}},
+			wantEngineType:  domain.EngineTypeEasyFlow,
+			snapshot:        rejectSnapshot,
+			comments:        priorComments,
+			commentTotal:    1,
+			wantReject:      true,
+			wantComments:    1,
+			wantCommentTot:  1,
+			wantRepoLookup:  true,
+			wantEngineCalls: true,
+		},
+		{
+			name:            "前序意见查询失败只丢摘要_驳回横幅照常返回",
+			instID:          domain.NewID("flowx_inst_2"),
+			repoTicket:      domain.Ticket{Process: domain.Process{EngineType: domain.EngineTypeFlowx}},
+			wantEngineType:  domain.EngineTypeFlowx,
+			snapshot:        rejectSnapshot,
+			commentErr:      errors.New("db down"),
+			wantReject:      true,
+			wantComments:    0,
+			wantCommentTot:  0,
+			wantRepoLookup:  true,
+			wantEngineCalls: true,
+		},
+		{
+			name:            "驳回快照查询失败只丢横幅_前序意见照常返回",
+			instID:          domain.NewID("flowx_inst_3"),
+			repoTicket:      domain.Ticket{Process: domain.Process{EngineType: domain.EngineTypeFlowx}},
+			wantEngineType:  domain.EngineTypeFlowx,
+			snapshotErr:     errors.New("engine down"),
+			comments:        priorComments,
+			commentTotal:    3,
+			wantReject:      false,
+			wantComments:    1,
+			wantCommentTot:  3,
+			wantRepoLookup:  true,
+			wantEngineCalls: true,
+		},
+		{
+			name:            "路由反查失败时兜底EasyFlow_不阻断两个区块",
+			instID:          domain.NewID("flowx_inst_4"),
+			repoErr:         errors.New("repo down"),
+			wantEngineType:  domain.EngineTypeEasyFlow,
+			snapshot:        rejectSnapshot,
+			comments:        priorComments,
+			commentTotal:    2,
+			wantReject:      true,
+			wantComments:    1,
+			wantCommentTot:  2,
+			wantRepoLookup:  true,
+			wantEngineCalls: true,
+		},
+		{
+			name:            "流程实例标识为空时短路_不查仓储与引擎",
+			instID:          domain.ID(""),
+			wantReject:      false,
+			wantComments:    0,
+			wantCommentTot:  0,
+			wantRepoLookup:  false,
+			wantEngineCalls: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockRepo := repomocks.NewMockTicketRepository(ctrl)
+			mockEngine := enginemocks.NewMockIEngine(ctrl)
+			mockUser := usermocks.NewMockUserServiceClient(ctrl)
+
+			if tc.wantRepoLookup {
+				// 默认 Times(1)：两个区块共用同一次路由解析，多查一次即红
+				mockRepo.EXPECT().DetailByProcessInstance(gomock.Any(), tc.instID).
+					Return(tc.repoTicket, tc.repoErr)
+			}
+			if tc.wantEngineCalls {
+				mockEngine.EXPECT().GetActiveReject(gomock.Any(), tc.wantEngineType, tc.instID).
+					Return(tc.snapshot, tc.snapshotErr)
+				mockEngine.EXPECT().GetPriorComments(gomock.Any(), tc.wantEngineType, tc.instID, 5).
+					Return(tc.comments, tc.commentTotal, tc.commentErr)
+			}
+			mockUser.EXPECT().QueryByUsernames(gomock.Any(), gomock.Any()).
+				Return(&userv1.QueryUsersResp{
+					Users: []*userv1.User{
+						{Username: "finance_user", DisplayName: "财务小张"},
+						{Username: "bob", DisplayName: "鲍勃"},
+					},
+				}, nil).AnyTimes()
+
+			svc := NewQueryService(mockRepo, mockEngine, mockUser, nil)
+			audit := svc.AuditContext(context.Background(), tc.instID)
+
+			if tc.wantReject {
+				require.NotNil(t, audit.LatestReject)
+				assert.Equal(t, "finance_user", audit.LatestReject.RejectedBy)
+				assert.Equal(t, "财务小张", audit.LatestReject.RejectedByName)
+			} else {
+				assert.Nil(t, audit.LatestReject)
+			}
+			assert.Len(t, audit.PriorComments, tc.wantComments)
+			assert.Equal(t, tc.wantCommentTot, audit.PriorCommentTotal)
 		})
 	}
 }
