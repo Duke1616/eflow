@@ -121,12 +121,13 @@ func DefaultEasyflowPolicy() FlowPolicy {
 	}
 }
 
-// DefaultFlowxPolicy 获取 flowx 现代图引擎的默认策略（转签默认关闭，驳回默认开启且限定为顺序驳回）
+// DefaultFlowxPolicy 获取 flowx 现代图引擎的默认策略（转签默认关闭，驳回默认开启且四种模式全开）
+// 历史未注入策略的工单统一走 AUTO 引擎决策：引擎在许可类别内自动回溯，首节点无上游审批时兜底回提单人
 func DefaultFlowxPolicy() FlowPolicy {
 	return FlowPolicy{
 		AllowTransfer: false,
 		AllowReject:   true,
-		RejectModes:   []RejectMode{RejectModeHistory},
+		RejectModes:   []RejectMode{RejectModeStarter, RejectModeHistory, RejectModeTerminate},
 	}
 }
 
@@ -220,7 +221,7 @@ func (w Workflow) ResolveFlowPolicy() FlowPolicy {
 	// 若开启了驳回但未配置任何驳回模式，采用引擎默认模式
 	if len(policy.RejectModes) == 0 && policy.AllowReject {
 		if engine.IsFlowx() {
-			policy.RejectModes = []RejectMode{RejectModeHistory}
+			policy.RejectModes = []RejectMode{RejectModeStarter, RejectModeHistory, RejectModeTerminate}
 		} else {
 			policy.RejectModes = []RejectMode{RejectModeTerminate}
 		}

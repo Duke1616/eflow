@@ -438,6 +438,16 @@ func (s *ticketService) Reject(ctx context.Context, ticketId int64, taskId strin
 		return err
 	}
 
+	// 从策略推导许可的退回类别下推引擎：AUTO 据此收敛落点、CUSTOM 据此校验目标，
+	// 杜绝默认回溯静默落到被策略禁止的类别（如仅许可历史环节时兜底回提单人）
+	var allowedModes []domain.RejectMode
+	if policy.AllowsMode(domain.RejectModeStarter) {
+		allowedModes = append(allowedModes, domain.RejectModeStarter)
+	}
+	if policy.AllowsMode(domain.RejectModeHistory) {
+		allowedModes = append(allowedModes, domain.RejectModeHistory)
+	}
+
 	return s.engine.Reject(ctx, domain.TaskRejectReq{
 		EngineType:   opCtx.ticket.Process.ResolveEngineType(),
 		TaskId:       opCtx.tID,
@@ -445,6 +455,7 @@ func (s *ticketService) Reject(ctx context.Context, ticketId int64, taskId strin
 		Comment:      comment,
 		TargetNodeId: targetNodeId,
 		Terminate:    terminate,
+		AllowedModes: allowedModes,
 	})
 }
 

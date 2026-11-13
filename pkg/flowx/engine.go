@@ -57,6 +57,9 @@ type RejectReq struct {
 	TargetNodeID string
 	// 是否直接终止/作废流程实例（可选；若为 true 则直接终结工单，不进行回退流转）
 	Terminate bool
+	// AllowedTargetKinds 许可的驳回目标节点类别（NodeStart/NodeApproval）；为空表示不限制，兼容历史调用。
+	// AUTO 回溯据此收敛落点（仅许可起点时直接回提单人、不许可起点时剔除兜底起点），CUSTOM 据此校验目标类别
+	AllowedTargetKinds []model.NodeType
 }
 
 // RevokeReq 流程实例撤回请求
@@ -599,42 +602,10 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 		return session.Flush(ctx)
 	}
 
-	// 4. 确定驳回的目标节点（自选目标节点 vs 默认回溯上游）
-	var targetNodes []model.NodeSpec
-	if req.TargetNodeID != "" {
-		tn, ok := session.Plan().NodesMap[req.TargetNodeID]
-		if !ok {
-			return fmt.Errorf("%w: 指定的驳回目标节点 [%s] 不存在", ErrInvalidTargetNode, req.TargetNodeID)
-		}
-		if !tn.CanRejectTo() {
-			return fmt.Errorf("%w: 驳回目标必须是人工审批或提单节点", ErrInvalidTargetNode)
-		}
-
-		// 防御校验：指定的驳回目标必须属于当前流转实际可达的合法候选（防止伪造请求向未走过的分支或跳过节点驳回）
-		validTargets, err := session.Plan().FindAllUpstreamRejectTargets(task.NodeID, session.AllTasks())
-		if err != nil {
-			return fmt.Errorf("推导合法驳回目标失败: %w", err)
-		}
-		if !lo.SomeBy(validTargets, func(item model.NodeSpec) bool { return item.ID == req.TargetNodeID }) {
-			return fmt.Errorf("%w: 节点 [%s] 未在当前实际执行路径中审批通过，不可作为驳回目标", ErrInvalidTargetNode, req.TargetNodeID)
-		}
-
-		targetNodes = []model.NodeSpec{tn}
-	} else {
-		nodes, err := session.Plan().FindUpstreamRejectNodes(task.NodeID, session.AllTasks())
-		if err != nil {
-			// 回溯失败属于拓扑异常，必须中断并回滚；严禁降级为终态驳回，否则工单侧收不到事件将永久滞留流转中
-			return fmt.Errorf("回溯上游驳回目标节点失败 [node_id=%s]: %w", task.NodeID, err)
-		}
-		if len(nodes) == 0 {
-			session.Instance().Reject() // 无可用上游审批节点，流程置为终态 Rejected
-			if err := session.SaveInstance(ctx); err != nil {
-				return err
-			}
-			e.publisher.Publish(ctx, NewProcessEvent(EventProcessRejected, session.Instance(), req.Operator, req.Comment))
-			return session.Flush(ctx)
-		}
-		targetNodes = nodes
+	// 4. 解析驳回回退的目标节点集合（自选定点 vs 许可类别内自动回溯）
+	targetNodes, err := resolveRejectTargets(session, task, req)
+	if err != nil {
+		return err
 	}
 
 	// 5. 流转批次号自增 (batch_code + 1)，激活回退的目标节点集合
@@ -659,6 +630,58 @@ func (e *flowEngine) doReject(ctx context.Context, req RejectReq) error {
 		return err
 	}
 	return session.Flush(ctx)
+}
+
+// resolveRejectTargets 解析驳回回退的目标节点集合：自选目标定点校验，否则按许可类别自动回溯上游。
+// 许可类别为空表示不限制（历史未注入策略的直连调用），保持原有拓扑回溯行为
+func resolveRejectTargets(session *flowSession, task *model.Task, req RejectReq) ([]model.NodeSpec, error) {
+	allowKind := func(t model.NodeType) bool {
+		return len(req.AllowedTargetKinds) == 0 || lo.Contains(req.AllowedTargetKinds, t)
+	}
+
+	// 自选目标：定点校验类别与拓扑可达性
+	if req.TargetNodeID != "" {
+		tn, ok := session.Plan().NodesMap[req.TargetNodeID]
+		if !ok {
+			return nil, fmt.Errorf("%w: 指定的驳回目标节点 [%s] 不存在", ErrInvalidTargetNode, req.TargetNodeID)
+		}
+		if !tn.CanRejectTo() {
+			return nil, fmt.Errorf("%w: 驳回目标必须是人工审批或提单节点", ErrInvalidTargetNode)
+		}
+		if !allowKind(tn.Type) {
+			return nil, fmt.Errorf("%w: 当前驳回策略不允许退回该类别节点 [%s]", ErrInvalidTargetNode, req.TargetNodeID)
+		}
+		// 防御校验：指定的驳回目标必须属于当前流转实际可达的合法候选（防止伪造请求向未走过的分支或跳过节点驳回）
+		validTargets, err := session.Plan().FindAllUpstreamRejectTargets(task.NodeID, session.AllTasks())
+		if err != nil {
+			return nil, fmt.Errorf("推导合法驳回目标失败: %w", err)
+		}
+		if !lo.SomeBy(validTargets, func(item model.NodeSpec) bool { return item.ID == req.TargetNodeID }) {
+			return nil, fmt.Errorf("%w: 节点 [%s] 未在当前实际执行路径中审批通过，不可作为驳回目标", ErrInvalidTargetNode, req.TargetNodeID)
+		}
+		return []model.NodeSpec{tn}, nil
+	}
+
+	// 仅许可退回发起人：直接定位起点，不做上游审批回溯（否则回溯会停在紧邻审批环节而够不到起点）
+	if allowKind(model.NodeStart) && !allowKind(model.NodeApproval) {
+		startNode, err := session.Plan().FindStartNode()
+		if err != nil {
+			return nil, fmt.Errorf("定位提单起点失败: %w", err)
+		}
+		return []model.NodeSpec{startNode}, nil
+	}
+
+	// 自动回溯：不许可退回发起人时剔除兜底起点；剔除后无合法候选必须报错，严禁静默落到被策略禁止的类别
+	nodes, err := session.Plan().FindUpstreamRejectNodes(task.NodeID, session.AllTasks())
+	if err != nil {
+		// 回溯失败属于拓扑异常，必须中断并回滚；严禁降级为终态驳回，否则工单侧收不到事件将永久滞留流转中
+		return nil, fmt.Errorf("回溯上游驳回目标节点失败 [node_id=%s]: %w", task.NodeID, err)
+	}
+	nodes = lo.Filter(nodes, func(n model.NodeSpec, _ int) bool { return allowKind(n.Type) })
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("%w: 当前驳回策略下无可退回的目标节点", ErrInvalidTargetNode)
+	}
+	return nodes, nil
 }
 
 // Revoke 提单人主动撤回正在流转中的工单

@@ -106,6 +106,9 @@ type TaskRejectReq struct {
 	Comment      string     // 驳回原因（必填）
 	TargetNodeId string     // 回退目标节点 ID（可选）
 	Terminate    bool       // 是否直接否决并终结流程（可选）
+	// AllowedModes 许可的退回目标模式（starter/history），由服务层从流程策略推导后下推。
+	// 为空表示不限制，兼容历史未注入策略的直连调用；引擎据此约束 AUTO 回溯落点与 CUSTOM 目标类别
+	AllowedModes []RejectMode
 }
 
 // Validate 审批驳回入参自卫校验

@@ -439,10 +439,11 @@ func TestTicketService_Reject(t *testing.T) {
 					IsFinished:        false,
 				}, nil)
 				dispatcher.EXPECT().Reject(gomock.Any(), domain.TaskRejectReq{
-					EngineType: domain.EngineTypeEasyFlow,
-					TaskId:     domain.NewID("202"),
-					Operator:   "auditor1",
-					Comment:    "材料不齐，驳回修改",
+					EngineType:   domain.EngineTypeEasyFlow,
+					TaskId:       domain.NewID("202"),
+					Operator:     "auditor1",
+					Comment:      "材料不齐，驳回修改",
+					AllowedModes: []domain.RejectMode{domain.RejectModeStarter, domain.RejectModeHistory},
 				}).Return(nil)
 				return repo, dispatcher
 			},
@@ -506,6 +507,52 @@ func TestTicketService_Reject(t *testing.T) {
 					FlowPolicy: domain.FlowPolicy{
 						AllowReject: true,
 						RejectModes: []domain.RejectMode{domain.RejectModeTerminate},
+					},
+				}, nil).AnyTimes()
+				return wfSvc
+			},
+			wantErr: nil,
+		},
+		{
+			name:     "flowx收窄仅history_许可模式精确下推",
+			taskId:   "task_fx",
+			operator: "auditor1",
+			comment:  "口径不对请重算",
+			mock: func(ctrl *gomock.Controller) (*repomocks.MockTicketRepository, *enginemocks.MockIEngine) {
+				repo := repomocks.NewMockTicketRepository(ctrl)
+				repo.EXPECT().Detail(gomock.Any(), int64(1001)).Return(domain.Ticket{
+					Id:         1001,
+					WorkflowId: 10,
+					Process: domain.Process{
+						EngineType: domain.EngineTypeFlowx,
+						InstanceID: domain.NewID("proc_1"),
+					},
+				}, nil).AnyTimes()
+				dispatcher := enginemocks.NewMockIEngine(ctrl)
+				dispatcher.EXPECT().GetTaskContext(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("task_fx")).Return(domain.TaskContext{
+					EngineType:        domain.EngineTypeFlowx,
+					TaskID:            domain.NewID("task_fx"),
+					ProcessInstanceID: domain.NewID("proc_1"),
+					Assignee:          "auditor1",
+					IsFinished:        false,
+				}, nil)
+				dispatcher.EXPECT().Reject(gomock.Any(), domain.TaskRejectReq{
+					EngineType:   domain.EngineTypeFlowx,
+					TaskId:       domain.NewID("task_fx"),
+					Operator:     "auditor1",
+					Comment:      "口径不对请重算",
+					AllowedModes: []domain.RejectMode{domain.RejectModeHistory},
+				}).Return(nil)
+				return repo, dispatcher
+			},
+			mockWf: func(ctrl *gomock.Controller) workflowSvc.Service {
+				wfSvc := workflowmocks.NewMockIWorkflowCoreService(ctrl)
+				wfSvc.EXPECT().Find(gomock.Any(), int64(10)).Return(domain.Workflow{
+					Id:         10,
+					EngineType: domain.EngineTypeFlowx,
+					FlowPolicy: domain.FlowPolicy{
+						AllowReject: true,
+						RejectModes: []domain.RejectMode{domain.RejectModeHistory},
 					},
 				}, nil).AnyTimes()
 				return wfSvc

@@ -115,11 +115,27 @@ func (a *flowxEngine) Reject(ctx context.Context, req domain.TaskRejectReq) erro
 	}
 
 	return a.engine.Reject(ctx, flowx.RejectReq{
-		TaskID:       req.TaskId.String(),
-		Operator:     req.Operator,
-		Comment:      req.Comment,
-		TargetNodeID: req.TargetNodeId,
-		Terminate:    req.Terminate,
+		TaskID:             req.TaskId.String(),
+		Operator:           req.Operator,
+		Comment:            req.Comment,
+		TargetNodeID:       req.TargetNodeId,
+		Terminate:          req.Terminate,
+		AllowedTargetKinds: toFlowxRejectKinds(req.AllowedModes),
+	})
+}
+
+// toFlowxRejectKinds 将领域许可模式翻译为引擎目标节点类别；terminate 不参与回退落点，忽略。
+// 空入参返回空切片，引擎侧据此判定为不限制，兼容历史未注入策略的调用
+func toFlowxRejectKinds(modes []domain.RejectMode) []flowxModel.NodeType {
+	return lo.FilterMap(modes, func(m domain.RejectMode, _ int) (flowxModel.NodeType, bool) {
+		switch m {
+		case domain.RejectModeStarter:
+			return flowxModel.NodeStart, true
+		case domain.RejectModeHistory:
+			return flowxModel.NodeApproval, true
+		default:
+			return "", false
+		}
 	})
 }
 

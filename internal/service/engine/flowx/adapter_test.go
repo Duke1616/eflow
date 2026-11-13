@@ -791,6 +791,135 @@ func TestFlowxAdapter_GetActiveReject_RetreatScenarios(t *testing.T) {
 	}
 }
 
+// TestFlowxAdapter_RejectAllowedKinds 验证许可类别下推后 AUTO 落点与 CUSTOM 目标均受策略约束：
+// 默认全开保持原有回溯（首节点兜底回提单人），收窄策略时不得静默落到被禁类别，空许可兼容历史直连调用
+func TestFlowxAdapter_RejectAllowedKinds(t *testing.T) {
+	ctx := context.Background()
+
+	def := flowxModel.ProcessDefinition{
+		Key: "wf_reject_kinds", Name: "驳回类别约束",
+		Nodes: []flowxModel.NodeSpec{
+			{ID: "start", Type: flowxModel.NodeStart},
+			{ID: "a", Name: "一级审批", Type: flowxModel.NodeApproval, Assignees: []string{"alice"}},
+			{ID: "b", Name: "二级审批", Type: flowxModel.NodeApproval, Assignees: []string{"bob"}},
+			{ID: "end", Type: flowxModel.NodeEnd},
+		},
+		Edges: []flowxModel.EdgeSpec{
+			{Source: "start", Target: "a"},
+			{Source: "a", Target: "b"},
+			{Source: "b", Target: "end"},
+		},
+	}
+
+	testCases := []struct {
+		name        string
+		passA       bool                // 先通过一级审批，使驳回发生在二级节点（存在上游审批）
+		modes       []domain.RejectMode // 下推的许可模式
+		target      string              // CUSTOM 目标节点（空=AUTO）
+		wantErrIs   error               // 期望错误（nil=成功）
+		wantLanding string              // 成功时期望的新待办落点
+	}{
+		{
+			name:        "默认全开_首节点AUTO_兜底回提单人",
+			modes:       []domain.RejectMode{domain.RejectModeStarter, domain.RejectModeHistory},
+			wantLanding: "start",
+		},
+		{
+			name:        "默认全开_二级AUTO_回紧邻上游审批",
+			passA:       true,
+			modes:       []domain.RejectMode{domain.RejectModeStarter, domain.RejectModeHistory},
+			wantLanding: "a",
+		},
+		{
+			name:      "仅history_首节点AUTO_无合法目标报错",
+			modes:     []domain.RejectMode{domain.RejectModeHistory},
+			wantErrIs: flowx.ErrInvalidTargetNode,
+		},
+		{
+			name:        "仅history_二级AUTO_回上游审批",
+			passA:       true,
+			modes:       []domain.RejectMode{domain.RejectModeHistory},
+			wantLanding: "a",
+		},
+		{
+			name:        "仅starter_二级AUTO_直接回提单人",
+			passA:       true,
+			modes:       []domain.RejectMode{domain.RejectModeStarter},
+			wantLanding: "start",
+		},
+		{
+			name:      "仅history_CUSTOM指定start_类别拒绝",
+			passA:     true,
+			modes:     []domain.RejectMode{domain.RejectModeHistory},
+			target:    "start",
+			wantErrIs: flowx.ErrInvalidTargetNode,
+		},
+		{
+			name:      "仅starter_CUSTOM指定审批_类别拒绝",
+			passA:     true,
+			modes:     []domain.RejectMode{domain.RejectModeStarter},
+			target:    "a",
+			wantErrIs: flowx.ErrInvalidTargetNode,
+		},
+		{
+			name:        "空许可_历史兼容_二级AUTO行为保持",
+			passA:       true,
+			modes:       nil,
+			wantLanding: "a",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			core := flowx.NewEngine(flowxMem.NewStorage())
+			adapter := NewEngine(core, nil)
+			_, err := adapter.Deploy(ctx, def)
+			require.NoError(t, err)
+			instID, err := core.Start(ctx, flowx.StartReq{Key: def.Key, Starter: "alice"})
+			require.NoError(t, err)
+
+			pending := func(node string) *flowxModel.Task {
+				all, listErr := core.ListTasksByInstance(ctx, instID)
+				require.NoError(t, listErr)
+				task, found := lo.Find(all, func(x *flowxModel.Task) bool {
+					return x.NodeID == node && x.Status == flowxModel.TaskPending
+				})
+				require.True(t, found, "节点 %s 无待办任务", node)
+				return task
+			}
+
+			if tc.passA {
+				require.NoError(t, adapter.Pass(ctx, domain.TaskPassReq{
+					EngineType: domain.EngineTypeFlowx, TaskId: domain.NewID(pending("a").ID),
+					Operator: "alice", Comment: "提交",
+				}))
+			}
+
+			rejectNode := "a"
+			if tc.passA {
+				rejectNode = "b"
+			}
+			err = adapter.Reject(ctx, domain.TaskRejectReq{
+				EngineType: domain.EngineTypeFlowx, TaskId: domain.NewID(pending(rejectNode).ID),
+				Operator: "bob", Comment: "驳回", TargetNodeId: tc.target, AllowedModes: tc.modes,
+			})
+
+			if tc.wantErrIs != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, tc.wantErrIs)
+				return
+			}
+			require.NoError(t, err)
+			all, listErr := core.ListTasksByInstance(ctx, instID)
+			require.NoError(t, listErr)
+			landings := lo.FilterMap(all, func(x *flowxModel.Task, _ int) (string, bool) {
+				return x.NodeID, x.Status == flowxModel.TaskPending
+			})
+			assert.Contains(t, landings, tc.wantLanding, "驳回后新待办应落在许可类别的目标节点")
+		})
+	}
+}
+
 // TestFlowxAdapter_GetPriorComments 验证前序意见的过滤、倒序与截断全部在驱动内完成，
 // 且 OccurredAt 已是标准时间字符串，服务层不必再感知引擎时间形态
 func TestFlowxAdapter_GetPriorComments(t *testing.T) {
