@@ -607,35 +607,25 @@ func (a *adapter) GetActiveReject(ctx context.Context, instanceID domain.ID) (*d
 		return nil, nil
 	}
 
+	// 按办结时间倒序锁定最近一次驳回：easyflow 的 BatchCode 是引擎用 SELECT UUID() 生成的随机串，
+	// 字典序与轮次先后无关，拿它当主排序键会取到旧一轮的驳回意见
 	sort.SliceStable(rejectTasks, func(i, j int) bool {
-		if rejectTasks[i].BatchCode != rejectTasks[j].BatchCode {
-			return rejectTasks[i].BatchCode > rejectTasks[j].BatchCode
+		ti, tj := fmt.Sprintf("%v", rejectTasks[i].FinishedTime), fmt.Sprintf("%v", rejectTasks[j].FinishedTime)
+		if ti != tj {
+			return ti > tj
 		}
-		return fmt.Sprintf("%v", rejectTasks[i].FinishedTime) > fmt.Sprintf("%v", rejectTasks[j].FinishedTime)
+		return rejectTasks[i].TaskID.Int() > rejectTasks[j].TaskID.Int()
 	})
 	latest := rejectTasks[0]
 
-	latestBatch, _ := strconv.Atoi(latest.BatchCode)
-	latestFinished := fmt.Sprintf("%v", latest.FinishedTime)
-
-	hasAdvancedAfterReject := lo.SomeBy(ts, func(t domain.TaskRecord) bool {
-		if t.TaskID == latest.TaskID {
-			return false
-		}
-		if t.Status != 1 && t.Status != 3 {
-			return false
-		}
-		b, _ := strconv.Atoi(t.BatchCode)
-		if b > latestBatch {
-			return true
-		}
-		tFinished := fmt.Sprintf("%v", t.FinishedTime)
-		if tFinished != "" && latestFinished != "" && tFinished > latestFinished {
-			return true
-		}
-		return false
+	// 闭环判定：流程是否已重新走回驳回节点（该节点出现更晚创建的任务）
+	// 不按"任一任务在驳回后通过"判定：自由驳回会同时打开多个上游重审节点，先提交的那一个
+	// 会把其他尚未响应者的驳回意见一并抹掉，而这条意见可能正是写给后者的
+	// 先后比较用自增 TaskID 而非 BatchCode，因为 UUID 批次码不具顺序语义
+	hasClosedLoop := lo.SomeBy(ts, func(t domain.TaskRecord) bool {
+		return t.NodeID == latest.NodeID && t.TaskID.Int() > latest.TaskID.Int()
 	})
-	if hasAdvancedAfterReject {
+	if hasClosedLoop {
 		return nil, nil
 	}
 
@@ -653,4 +643,43 @@ func (a *adapter) GetActiveReject(ctx context.Context, instanceID domain.ID) (*d
 		Comment:    latest.Comment,
 		FinishTime: fmt.Sprintf("%v", latest.FinishedTime),
 	}, nil
+}
+
+// GetPriorComments 过滤、排序与截断全部下推给 SQL，只回传前端要展开的最近 limit 条意见，
+// 避免为了几条意见把整个实例的任务链拉进内存
+func (a *adapter) GetPriorComments(ctx context.Context, instanceID domain.ID, limit int) ([]domain.PriorComment, int64, error) {
+	procInstID := instanceID.Int()
+	if procInstID <= 0 {
+		return nil, 0, fmt.Errorf("%w: easyflow 流程实例 ID 非法: %s", engine.ErrInvalidParameter, instanceID)
+	}
+
+	var (
+		tasks []model.Task
+		total int64
+		eg    errgroup.Group
+	)
+	eg.Go(func() error {
+		var err error
+		tasks, err = a.repo.ListAccessiblePriorComments(ctx, procInstID, limit)
+		return err
+	})
+	eg.Go(func() error {
+		var err error
+		total, err = a.repo.CountAccessiblePriorComments(ctx, procInstID)
+		return err
+	})
+	if err := eg.Wait(); err != nil {
+		return nil, 0, fmt.Errorf("easyflow 查询前序审批意见失败: %w", err)
+	}
+
+	return lo.Map(tasks, func(t model.Task, _ int) domain.PriorComment {
+		return domain.PriorComment{
+			NodeID:     t.NodeID,
+			NodeName:   t.NodeName,
+			ApprovedBy: t.UserID,
+			Status:     t.Status,
+			Comment:    t.Comment,
+			OccurredAt: t.FinishedTime.String(),
+		}
+	}), total, nil
 }

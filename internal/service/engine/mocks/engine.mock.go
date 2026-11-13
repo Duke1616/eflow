@@ -140,6 +140,22 @@ func (mr *MockIEngineMockRecorder) GetInstanceExecutionView(ctx, engineType, ins
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInstanceExecutionView", reflect.TypeOf((*MockIEngine)(nil).GetInstanceExecutionView), ctx, engineType, instanceID)
 }
 
+// GetPriorComments mocks base method.
+func (m *MockIEngine) GetPriorComments(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, limit int) ([]domain.PriorComment, int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPriorComments", ctx, engineType, instanceID, limit)
+	ret0, _ := ret[0].([]domain.PriorComment)
+	ret1, _ := ret[1].(int64)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// GetPriorComments indicates an expected call of GetPriorComments.
+func (mr *MockIEngineMockRecorder) GetPriorComments(ctx, engineType, instanceID, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPriorComments", reflect.TypeOf((*MockIEngine)(nil).GetPriorComments), ctx, engineType, instanceID, limit)
+}
+
 // GetRejectTargets mocks base method.
 func (m *MockIEngine) GetRejectTargets(ctx context.Context, engineType domain.EngineType, taskID domain.ID) ([]domain.RejectTarget, error) {
 	m.ctrl.T.Helper()
@@ -430,6 +446,22 @@ func (m *MockIDriver) GetInstanceExecutionView(ctx context.Context, instanceID d
 func (mr *MockIDriverMockRecorder) GetInstanceExecutionView(ctx, instanceID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetInstanceExecutionView", reflect.TypeOf((*MockIDriver)(nil).GetInstanceExecutionView), ctx, instanceID)
+}
+
+// GetPriorComments mocks base method.
+func (m *MockIDriver) GetPriorComments(ctx context.Context, instanceID domain.ID, limit int) ([]domain.PriorComment, int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPriorComments", ctx, instanceID, limit)
+	ret0, _ := ret[0].([]domain.PriorComment)
+	ret1, _ := ret[1].(int64)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// GetPriorComments indicates an expected call of GetPriorComments.
+func (mr *MockIDriverMockRecorder) GetPriorComments(ctx, instanceID, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPriorComments", reflect.TypeOf((*MockIDriver)(nil).GetPriorComments), ctx, instanceID, limit)
 }
 
 // GetRejectTargets mocks base method.

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/Duke1616/eflow/internal/repository"
@@ -534,26 +535,13 @@ func (a *flowxEngine) GetActiveReject(ctx context.Context, instanceID domain.ID)
 	})
 	latest := rejectTasks[0]
 
-	// 3. 闭环判定：检查在该次驳回之后，流程是否已被响应并重新向前推进（如提单人重新提交、上一环节重新同意）
-	hasAdvancedAfterReject := lo.SomeBy(allTasks, func(t *flowxModel.Task) bool {
-		if t.ID == latest.ID {
-			return false
-		}
-		// 任务状态为通过或系统通过
-		if t.Status != flowxModel.TaskPassed && t.Status != flowxModel.TaskSystemPassed {
-			return false
-		}
-		// 批次号大于驳回批次
-		if t.BatchCode > latest.BatchCode {
-			return true
-		}
-		// 或办结时间严格晚于驳回时间
-		if !t.FinishTime.IsZero() && !latest.FinishTime.IsZero() && t.FinishTime.After(latest.FinishTime) {
-			return true
-		}
-		return false
+	// 3. 闭环判定：流程是否已重新走回驳回节点（该节点收到更新批次的任务，含改道后被跳过的投影）
+	// 不按"任一任务在驳回后通过"判定：自由驳回会同时打开多个上游重审节点，先提交的那一个
+	// 会把其他尚未响应者的驳回意见一并抹掉，而这条意见可能正是写给后者的
+	hasClosedLoop := lo.SomeBy(allTasks, func(t *flowxModel.Task) bool {
+		return t.NodeID == latest.NodeID && t.BatchCode > latest.BatchCode
 	})
-	if hasAdvancedAfterReject {
+	if hasClosedLoop {
 		return nil, nil // 驳回已被响应闭环，不再置顶展示提示条
 	}
 
@@ -577,6 +565,45 @@ func (a *flowxEngine) GetActiveReject(ctx context.Context, instanceID domain.ID)
 		Comment:    latest.Comment,
 		FinishTime: finishTimeStr,
 	}, nil
+}
+
+// GetPriorComments 在驱动内完成过滤、排序与截断，时间格式化不外泄给服务层
+func (a *flowxEngine) GetPriorComments(ctx context.Context, instanceID domain.ID, limit int) ([]domain.PriorComment, int64, error) {
+	if a.engine == nil {
+		return nil, 0, errors.New("flowx 流程引擎未初始化")
+	}
+
+	tasks, err := a.engine.ListTasksByInstance(ctx, instanceID.String())
+	if err != nil {
+		return nil, 0, fmt.Errorf("flowx 查询前序审批意见失败: %w", err)
+	}
+
+	// 只取人工裁决（通过/驳回）且意见非空白的任务，与 easyflow 侧下推的 SQL 过滤口径保持一致
+	audited := lo.Filter(tasks, func(t *flowxModel.Task, _ int) bool {
+		return (t.Status == flowxModel.TaskPassed || t.Status == flowxModel.TaskRejected) && strings.TrimSpace(t.Comment) != ""
+	})
+	slices.SortStableFunc(audited, func(x, y *flowxModel.Task) int {
+		if c := y.FinishTime.Compare(x.FinishTime); c != 0 {
+			return c
+		}
+		return cmp.Compare(y.ID, x.ID) // 同一时刻的确定性兜底，不让顺序随存储返回序漂移
+	})
+
+	total := int64(len(audited))
+	return lo.Map(paginateSlice(audited, 0, limit), func(t *flowxModel.Task, _ int) domain.PriorComment {
+		occurredAt := ""
+		if !t.FinishTime.IsZero() {
+			occurredAt = t.FinishTime.Format("2006-01-02 15:04:05")
+		}
+		return domain.PriorComment{
+			NodeID:     t.NodeID,
+			NodeName:   t.NodeName,
+			ApprovedBy: t.Assignee,
+			Status:     int(t.Status),
+			Comment:    t.Comment,
+			OccurredAt: occurredAt,
+		}
+	}), total, nil
 }
 
 func paginateSlice[T any](items []T, offset, limit int) []T {

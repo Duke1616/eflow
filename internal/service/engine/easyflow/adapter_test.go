@@ -3,11 +3,16 @@ package easyflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
+	"github.com/Bunny3th/easy-workflow/workflow/database"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
 	repoMocks "github.com/Duke1616/eflow/internal/repository/mocks"
+	"github.com/Duke1616/eflow/internal/service/engine"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -146,6 +151,231 @@ func TestAdapter_Revoke(t *testing.T) {
 				}
 			} else {
 				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestAdapter_GetActiveReject 覆盖驳回横幅的展示与消隐时机。
+// easyflow 的 BatchCode 是引擎用 SELECT UUID() 生成的随机串，不具轮次顺序语义，
+// 因此"最近一次驳回"必须按办结时间锁定，闭环必须按自增 TaskID 判定先后。
+func TestAdapter_GetActiveReject(t *testing.T) {
+	localTime := func(s string) *database.LocalTime {
+		parsed, err := time.Parse("2006-01-02 15:04:05", s)
+		require.NoError(t, err)
+		v := database.LocalTime(parsed)
+		return &v
+	}
+
+	testCases := []struct {
+		name        string
+		tasks       []model.Task
+		wantShow    bool
+		wantNode    string
+		wantComment string
+	}{
+		{
+			name: "并行双节点自由驳回_两人都待办时意见可见",
+			tasks: []model.Task{
+				{TaskID: 1, NodeID: "backend", NodeName: "后端审批", UserID: "bob", BatchCode: "aaaaaaaa-1111", Status: 1, IsFinished: 1, FinishedTime: localTime("2026-11-12 10:00:00")},
+				{TaskID: 2, NodeID: "algo", NodeName: "算法审批", UserID: "dave", BatchCode: "aaaaaaaa-1111", Status: 1, IsFinished: 1, FinishedTime: localTime("2026-11-12 10:01:00")},
+				{TaskID: 3, NodeID: "product", NodeName: "产品审批", UserID: "carol", BatchCode: "aaaaaaaa-1111", Status: 2, IsFinished: 1, Comment: "算法侧口径不对，请重算", FinishedTime: localTime("2026-11-12 10:02:00")},
+				{TaskID: 4, NodeID: "backend", NodeName: "后端审批", UserID: "bob", BatchCode: "bbbbbbbb-2222", Status: 0, IsFinished: 0},
+				{TaskID: 5, NodeID: "algo", NodeName: "算法审批", UserID: "dave", BatchCode: "bbbbbbbb-2222", Status: 0, IsFinished: 0},
+			},
+			wantShow: true, wantNode: "product", wantComment: "算法侧口径不对，请重算",
+		},
+		{
+			name: "并行双节点自由驳回_一人提交不得抹掉另一人的意见",
+			tasks: []model.Task{
+				{TaskID: 1, NodeID: "backend", NodeName: "后端审批", UserID: "bob", BatchCode: "aaaaaaaa-1111", Status: 1, IsFinished: 1, FinishedTime: localTime("2026-11-12 10:00:00")},
+				{TaskID: 2, NodeID: "algo", NodeName: "算法审批", UserID: "dave", BatchCode: "aaaaaaaa-1111", Status: 1, IsFinished: 1, FinishedTime: localTime("2026-11-12 10:01:00")},
+				{TaskID: 3, NodeID: "product", NodeName: "产品审批", UserID: "carol", BatchCode: "aaaaaaaa-1111", Status: 2, IsFinished: 1, Comment: "算法侧口径不对，请重算", FinishedTime: localTime("2026-11-12 10:02:00")},
+				{TaskID: 4, NodeID: "backend", NodeName: "后端审批", UserID: "bob", BatchCode: "bbbbbbbb-2222", Status: 1, IsFinished: 1, Comment: "同意", FinishedTime: localTime("2026-11-12 11:00:00")},
+				{TaskID: 5, NodeID: "algo", NodeName: "算法审批", UserID: "dave", BatchCode: "bbbbbbbb-2222", Status: 0, IsFinished: 0},
+			},
+			wantShow: true, wantNode: "product", wantComment: "算法侧口径不对，请重算",
+		},
+		{
+			name: "两轮驳回_UUID字典序与时间序相反时仍取最近一轮",
+			tasks: []model.Task{
+				{TaskID: 10, NodeID: "leader", NodeName: "主管审批", UserID: "bob", BatchCode: "ffffffff-9999", Status: 2, IsFinished: 1, Comment: "第一轮驳回", FinishedTime: localTime("2026-11-12 09:00:00")},
+				{TaskID: 20, NodeID: "product", NodeName: "产品审批", UserID: "carol", BatchCode: "00000000-0000", Status: 2, IsFinished: 1, Comment: "第二轮驳回", FinishedTime: localTime("2026-11-12 12:00:00")},
+				{TaskID: 21, NodeID: "leader", NodeName: "主管审批", UserID: "bob", BatchCode: "11111111-1111", Status: 0, IsFinished: 0},
+			},
+			wantShow: true, wantNode: "product", wantComment: "第二轮驳回",
+		},
+		{
+			name: "单目标驳回_已走回驳回节点则横幅消隐",
+			tasks: []model.Task{
+				{TaskID: 1, NodeID: "submitter", NodeName: "提单人录入", UserID: "alice", BatchCode: "aaaaaaaa-1111", Status: 1, IsFinished: 1, FinishedTime: localTime("2026-11-12 10:00:00")},
+				{TaskID: 2, NodeID: "auditor", NodeName: "主管审批", UserID: "bob", BatchCode: "aaaaaaaa-1111", Status: 2, IsFinished: 1, Comment: "资料不全", FinishedTime: localTime("2026-11-12 10:02:00")},
+				{TaskID: 3, NodeID: "submitter", NodeName: "提单人录入", UserID: "alice", BatchCode: "bbbbbbbb-2222", Status: 1, IsFinished: 1, FinishedTime: localTime("2026-11-12 11:00:00")},
+				{TaskID: 4, NodeID: "auditor", NodeName: "主管审批", UserID: "bob", BatchCode: "bbbbbbbb-2222", Status: 0, IsFinished: 0},
+			},
+			wantShow: false,
+		},
+		{
+			name: "从未发生驳回_返回空快照",
+			tasks: []model.Task{
+				{TaskID: 1, NodeID: "submitter", NodeName: "提单人录入", UserID: "alice", BatchCode: "aaaaaaaa-1111", Status: 1, IsFinished: 1, FinishedTime: localTime("2026-11-12 10:00:00")},
+				{TaskID: 2, NodeID: "auditor", NodeName: "主管审批", UserID: "bob", BatchCode: "aaaaaaaa-1111", Status: 0, IsFinished: 0},
+			},
+			wantShow: false,
+		},
+		{
+			name: "驳回后流程已终结_无待办则横幅消隐",
+			tasks: []model.Task{
+				{TaskID: 1, NodeID: "submitter", NodeName: "提单人录入", UserID: "alice", BatchCode: "aaaaaaaa-1111", Status: 1, IsFinished: 1, FinishedTime: localTime("2026-11-12 10:00:00")},
+				{TaskID: 2, NodeID: "auditor", NodeName: "主管审批", UserID: "bob", BatchCode: "aaaaaaaa-1111", Status: 2, IsFinished: 1, Comment: "资质不合规，驳回终止", FinishedTime: localTime("2026-11-12 10:02:00")},
+			},
+			wantShow: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockRepo := repoMocks.NewMockIEngineRepository(ctrl)
+			mockRepo.EXPECT().ListAccessibleTaskRecord(gomock.Any(), 100, 0, 1000).Return(tc.tasks, nil)
+			mockRepo.EXPECT().CountAccessibleTaskRecord(gomock.Any(), 100).Return(int64(len(tc.tasks)), nil)
+
+			snap, err := NewEngine(mockRepo).GetActiveReject(context.Background(), domain.NewID(100))
+			require.NoError(t, err)
+
+			if !tc.wantShow {
+				assert.Nil(t, snap)
+				return
+			}
+			require.NotNil(t, snap)
+			assert.Equal(t, tc.wantNode, snap.NodeID)
+			assert.Equal(t, tc.wantComment, snap.Comment)
+		})
+	}
+}
+
+// TestAdapter_GetPriorComments 验证 easyflow 侧把过滤、排序与截断交给 SQL，
+// 驱动只按仓储给定的 limit 取数并做字段映射与时间格式化，不再全量拉取任务链
+func TestAdapter_GetPriorComments(t *testing.T) {
+	localTime := func(s string) *database.LocalTime {
+		parsed, err := time.Parse("2006-01-02 15:04:05", s)
+		require.NoError(t, err)
+		v := database.LocalTime(parsed)
+		return &v
+	}
+
+	testCases := []struct {
+		name         string
+		instID       domain.ID
+		limit        int
+		tasks        []model.Task
+		total        int64
+		listErr      error
+		countErr     error
+		wantErr      bool
+		wantErrIs    error
+		wantTotal    int64
+		wantComments []string
+		wantTimes    []string
+		wantFirst    *domain.PriorComment
+	}{
+		{
+			name:   "按仓储返回序映射字段并格式化办结时间",
+			instID: domain.NewID(100),
+			limit:  5,
+			tasks: []model.Task{
+				{TaskID: 21, NodeID: "product", NodeName: "产品审批", UserID: "bob", Status: 2, Comment: "口径不对请重算", FinishedTime: localTime("2026-11-11 10:00:00")},
+				{TaskID: 20, NodeID: "backend", NodeName: "后端审批", UserID: "alice", Status: 1, Comment: "构建通过", FinishedTime: localTime("2026-11-09 09:00:00")},
+			},
+			total:        8,
+			wantTotal:    8,
+			wantComments: []string{"口径不对请重算", "构建通过"},
+			wantTimes:    []string{"2026-11-11 10:00:00", "2026-11-09 09:00:00"},
+			wantFirst: &domain.PriorComment{
+				NodeID: "product", NodeName: "产品审批",
+				ApprovedBy: "bob", Status: 2,
+				Comment: "口径不对请重算", OccurredAt: "2026-11-11 10:00:00",
+			},
+		},
+		{
+			name:   "办结时间缺失时归一为空串",
+			instID: domain.NewID(100),
+			limit:  5,
+			tasks: []model.Task{
+				{TaskID: 30, NodeID: "node", NodeName: "环节", UserID: "alice", Status: 1, Comment: "同意", FinishedTime: nil},
+			},
+			total:        1,
+			wantTotal:    1,
+			wantComments: []string{"同意"},
+			wantTimes:    []string{""},
+		},
+		{
+			name:         "无可读意见时返回空摘要",
+			instID:       domain.NewID(100),
+			limit:        5,
+			tasks:        []model.Task{},
+			total:        0,
+			wantTotal:    0,
+			wantComments: []string{},
+		},
+		{
+			name:    "列表查询失败时携带根因返回",
+			instID:  domain.NewID(100),
+			limit:   5,
+			listErr: errors.New("db down"),
+			wantErr: true,
+		},
+		{
+			name:     "计数查询失败时携带根因返回",
+			instID:   domain.NewID(100),
+			limit:    5,
+			countErr: errors.New("db down"),
+			wantErr:  true,
+		},
+		{
+			name:      "非法流程实例ID直接拒绝_不触达仓储",
+			instID:    domain.NewID(0),
+			limit:     5,
+			wantErr:   true,
+			wantErrIs: engine.ErrInvalidParameter,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockRepo := repoMocks.NewMockIEngineRepository(ctrl)
+			if tc.instID.Int() > 0 {
+				// limit 必须原样下推：这里断言的就是"不再按 1000 全量扫描"
+				mockRepo.EXPECT().ListAccessiblePriorComments(gomock.Any(), tc.instID.Int(), tc.limit).
+					Return(tc.tasks, tc.listErr)
+				mockRepo.EXPECT().CountAccessiblePriorComments(gomock.Any(), tc.instID.Int()).
+					Return(tc.total, tc.countErr)
+			}
+
+			comments, total, err := NewEngine(mockRepo).GetPriorComments(context.Background(), tc.instID, tc.limit)
+			if tc.wantErr {
+				require.Error(t, err)
+				if tc.wantErrIs != nil {
+					assert.ErrorIs(t, err, tc.wantErrIs)
+				} else {
+					assert.Contains(t, err.Error(), "easyflow 查询前序审批意见失败")
+				}
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantTotal, total)
+			assert.Equal(t, tc.wantComments, lo.Map(comments, func(c domain.PriorComment, _ int) string { return c.Comment }))
+			if tc.wantTimes != nil {
+				assert.Equal(t, tc.wantTimes, lo.Map(comments, func(c domain.PriorComment, _ int) string { return c.OccurredAt }))
+			}
+			if tc.wantFirst != nil {
+				require.NotEmpty(t, comments)
+				assert.Equal(t, *tc.wantFirst, comments[0])
 			}
 		})
 	}

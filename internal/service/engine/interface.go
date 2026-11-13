@@ -67,6 +67,10 @@ type IEngine interface {
 
 	// GetActiveReject 获取流程实例当前正处于待处理/待响应状态的最新驳回上下文（若无驳回或已重新推进闭环，返回 nil）
 	GetActiveReject(ctx context.Context, engineType domain.EngineType, instanceID domain.ID) (*domain.RejectSnapshot, error)
+
+	// GetPriorComments 精确获取流程实例最近 limit 条人工裁决意见与意见总数，按办结时间倒序。
+	// 与 GetTaskRecords 的区别：过滤与排序下推到各引擎自身存储，调用方无需全量取回再内存排序
+	GetPriorComments(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, limit int) ([]domain.PriorComment, int64, error)
 }
 
 // IDriver 底层流程引擎驱动 SPI（Service Provider Interface），由 flowx / easyflow 适配层实现
@@ -126,4 +130,9 @@ type IDriver interface {
 
 	// GetActiveReject 获取流程实例当前正处于待处理/待响应状态的最新驳回上下文（若无驳回或已重新推进闭环，返回 nil）
 	GetActiveReject(ctx context.Context, instanceID domain.ID) (*domain.RejectSnapshot, error)
+
+	// GetPriorComments 精确获取最近 limit 条人工裁决意见与意见总数，按办结时间倒序。
+	// 过滤、排序与时间格式化必须在本驱动内完成：返回的 OccurredAt 已是标准字符串，
+	// 调用方不该再感知各引擎的时间形态差异；ApprovedByName 留空由服务层解析真名填充
+	GetPriorComments(ctx context.Context, instanceID domain.ID, limit int) ([]domain.PriorComment, int64, error)
 }

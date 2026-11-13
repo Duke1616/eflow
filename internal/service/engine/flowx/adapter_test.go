@@ -2,6 +2,7 @@ package flowx
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -578,4 +579,324 @@ func TestFlowxAdapter_GetActiveReject_Lifecycle(t *testing.T) {
 	rejectSnapAfterAdvance, err := adapter.GetActiveReject(ctx, instDomainID)
 	require.NoError(t, err)
 	assert.Nil(t, rejectSnapAfterAdvance, "流程已被提单人响应并重新向前推进，旧驳回横幅必须自动消隐")
+}
+
+// TestFlowxAdapter_GetActiveReject_RetreatScenarios 覆盖各种回退形态下驳回横幅的展示与消隐时机。
+// 核心不变量：意见必须一直挂到流程重新走回驳回节点，不能被"某个重审人先提交"提前抹掉——
+// 自由驳回会同时打开多个上游节点，那条意见可能正是写给尚未响应的那个人的。
+func TestFlowxAdapter_GetActiveReject_RetreatScenarios(t *testing.T) {
+	type step struct {
+		action   string // pass / reject
+		node     string
+		operator string
+		target   string         // reject 的定向目标，空即自由驳回
+		vars     map[string]any // pass 时合并的增量变量
+		wantShow bool
+		wantNode string
+	}
+
+	approval := func(id, name, assignee string) flowxModel.NodeSpec {
+		return flowxModel.NodeSpec{ID: id, Name: name, Type: flowxModel.NodeApproval, Assignees: []string{assignee}}
+	}
+
+	testCases := []struct {
+		name      string
+		def       flowxModel.ProcessDefinition
+		startVars map[string]any
+		steps     []step
+	}{
+		{
+			name: "并行双节点自由驳回_一人提交不得抹掉另一人的意见",
+			def: flowxModel.ProcessDefinition{
+				Key: "wf_banner_parallel", Name: "并行双节点",
+				Nodes: []flowxModel.NodeSpec{
+					{ID: "start", Type: flowxModel.NodeStart},
+					{ID: "fork", Type: flowxModel.NodeGatewayParallel},
+					approval("backend", "后端审批", "bob"),
+					approval("algo", "算法审批", "dave"),
+					{ID: "join", Type: flowxModel.NodeGatewayParallel},
+					approval("product", "产品审批", "carol"),
+					{ID: "end", Type: flowxModel.NodeEnd},
+				},
+				Edges: []flowxModel.EdgeSpec{
+					{Source: "start", Target: "fork"}, {Source: "fork", Target: "backend"}, {Source: "fork", Target: "algo"},
+					{Source: "backend", Target: "join"}, {Source: "algo", Target: "join"},
+					{Source: "join", Target: "product"}, {Source: "product", Target: "end"},
+				},
+			},
+			steps: []step{
+				{action: "pass", node: "backend", operator: "bob"},
+				{action: "pass", node: "algo", operator: "dave"},
+				{action: "reject", node: "product", operator: "carol", wantShow: true, wantNode: "product"},
+				{action: "pass", node: "backend", operator: "bob", wantShow: true, wantNode: "product"},
+				{action: "pass", node: "algo", operator: "dave"},
+			},
+		},
+		{
+			name: "单目标定向驳回_提单人重报即闭环",
+			def: flowxModel.ProcessDefinition{
+				Key: "wf_banner_linear", Name: "串行单目标",
+				Nodes: []flowxModel.NodeSpec{
+					{ID: "start", Type: flowxModel.NodeStart},
+					approval("submitter", "提单人录入", "alice"),
+					approval("auditor", "主管审批", "bob"),
+					{ID: "end", Type: flowxModel.NodeEnd},
+				},
+				Edges: []flowxModel.EdgeSpec{
+					{Source: "start", Target: "submitter"}, {Source: "submitter", Target: "auditor"}, {Source: "auditor", Target: "end"},
+				},
+			},
+			steps: []step{
+				{action: "pass", node: "submitter", operator: "alice"},
+				{action: "reject", node: "auditor", operator: "bob", target: "submitter", wantShow: true, wantNode: "auditor"},
+				{action: "pass", node: "submitter", operator: "alice"},
+			},
+		},
+		{
+			name: "定向驳回跨多跳_中途停留期间意见持续可见",
+			def: flowxModel.ProcessDefinition{
+				Key: "wf_banner_multihop", Name: "多跳回退",
+				Nodes: []flowxModel.NodeSpec{
+					{ID: "start", Type: flowxModel.NodeStart},
+					approval("submitter", "提单人录入", "alice"),
+					approval("leader", "主管审批", "bob"),
+					approval("product", "产品审批", "carol"),
+					{ID: "end", Type: flowxModel.NodeEnd},
+				},
+				Edges: []flowxModel.EdgeSpec{
+					{Source: "start", Target: "submitter"}, {Source: "submitter", Target: "leader"},
+					{Source: "leader", Target: "product"}, {Source: "product", Target: "end"},
+				},
+			},
+			steps: []step{
+				{action: "pass", node: "submitter", operator: "alice"},
+				{action: "pass", node: "leader", operator: "bob"},
+				{action: "reject", node: "product", operator: "carol", target: "submitter", wantShow: true, wantNode: "product"},
+				{action: "pass", node: "submitter", operator: "alice", wantShow: true, wantNode: "product"},
+				{action: "pass", node: "leader", operator: "bob"},
+			},
+		},
+		{
+			name: "多轮驳回_每轮各自独立闭环",
+			def: flowxModel.ProcessDefinition{
+				Key: "wf_banner_rounds", Name: "多轮驳回",
+				Nodes: []flowxModel.NodeSpec{
+					{ID: "start", Type: flowxModel.NodeStart},
+					approval("submitter", "提单人录入", "alice"),
+					approval("leader", "主管审批", "bob"),
+					approval("product", "产品审批", "carol"),
+					approval("final", "终审", "eve"),
+					{ID: "end", Type: flowxModel.NodeEnd},
+				},
+				Edges: []flowxModel.EdgeSpec{
+					{Source: "start", Target: "submitter"}, {Source: "submitter", Target: "leader"},
+					{Source: "leader", Target: "product"}, {Source: "product", Target: "final"}, {Source: "final", Target: "end"},
+				},
+			},
+			steps: []step{
+				{action: "pass", node: "submitter", operator: "alice"},
+				{action: "pass", node: "leader", operator: "bob"},
+				{action: "pass", node: "product", operator: "carol"},
+				{action: "reject", node: "final", operator: "eve", target: "leader", wantShow: true, wantNode: "final"},
+				{action: "pass", node: "leader", operator: "bob", wantShow: true, wantNode: "final"},
+				{action: "pass", node: "product", operator: "carol"},
+				{action: "reject", node: "final", operator: "eve", target: "leader", wantShow: true, wantNode: "final"},
+				{action: "pass", node: "leader", operator: "bob", wantShow: true, wantNode: "final"},
+				{action: "pass", node: "product", operator: "carol"},
+			},
+		},
+		{
+			name: "重报改道_驳回节点被跳过后横幅不得滞留",
+			def: flowxModel.ProcessDefinition{
+				Key: "wf_banner_reroute", Name: "重报改道",
+				Nodes: []flowxModel.NodeSpec{
+					{ID: "start", Type: flowxModel.NodeStart},
+					approval("submitter", "提单人录入", "alice"),
+					{ID: "xor", Type: flowxModel.NodeGatewayExclusive},
+					approval("leader", "主管审批", "bob"),
+					approval("product", "产品审批", "carol"),
+					approval("other", "另一条分支审批", "dave"),
+					{ID: "xorJoin", Type: flowxModel.NodeGatewayExclusive},
+					{ID: "end", Type: flowxModel.NodeEnd},
+				},
+				Edges: []flowxModel.EdgeSpec{
+					{Source: "start", Target: "submitter"}, {Source: "submitter", Target: "xor"},
+					{Source: "xor", Target: "leader", Condition: "route == 'a'", Standard: true},
+					{Source: "xor", Target: "other", Condition: "route == 'b'", Standard: true},
+					{Source: "leader", Target: "product"}, {Source: "product", Target: "xorJoin"},
+					{Source: "other", Target: "xorJoin"}, {Source: "xorJoin", Target: "end"},
+				},
+			},
+			startVars: map[string]any{"route": "a"},
+			steps: []step{
+				{action: "pass", node: "submitter", operator: "alice"},
+				{action: "pass", node: "leader", operator: "bob"},
+				{action: "reject", node: "product", operator: "carol", target: "submitter", wantShow: true, wantNode: "product"},
+				{action: "pass", node: "submitter", operator: "alice", vars: map[string]any{"route": "b"}},
+				{action: "pass", node: "other", operator: "dave"},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			core := flowx.NewEngine(flowxMem.NewStorage())
+			adapter := NewEngine(core, nil)
+
+			_, err := adapter.Deploy(ctx, tc.def)
+			require.NoError(t, err)
+			instID, err := core.Start(ctx, flowx.StartReq{Key: tc.def.Key, Starter: "alice", Variables: tc.startVars})
+			require.NoError(t, err)
+
+			// 每步都重新取待办：回退会重建任务，缓存旧 ID 会打到已办结的历史任务上
+			pending := func(node string) *flowxModel.Task {
+				all, listErr := core.ListTasksByInstance(ctx, instID)
+				require.NoError(t, listErr)
+				task, found := lo.Find(all, func(x *flowxModel.Task) bool {
+					return x.NodeID == node && x.Status == flowxModel.TaskPending
+				})
+				require.True(t, found, "节点 %s 无待办任务", node)
+				return task
+			}
+
+			for i, st := range tc.steps {
+				task := pending(st.node)
+				switch st.action {
+				case "pass":
+					require.NoError(t, adapter.Pass(ctx, domain.TaskPassReq{
+						EngineType: domain.EngineTypeFlowx, TaskId: domain.NewID(task.ID),
+						Operator: st.operator, Comment: "同意", Variables: st.vars,
+					}))
+				case "reject":
+					require.NoError(t, adapter.Reject(ctx, domain.TaskRejectReq{
+						EngineType: domain.EngineTypeFlowx, TaskId: domain.NewID(task.ID),
+						Operator: st.operator, Comment: "算法侧口径不对，请重算", TargetNodeId: st.target,
+					}))
+				default:
+					t.Fatalf("未知动作: %s", st.action)
+				}
+
+				snap, snapErr := adapter.GetActiveReject(ctx, domain.NewID(instID))
+				require.NoError(t, snapErr)
+				if !st.wantShow {
+					assert.Nil(t, snap, "第%d步(%s %s)后横幅应消隐", i+1, st.action, st.node)
+					continue
+				}
+				require.NotNil(t, snap, "第%d步(%s %s)后横幅应仍在展示", i+1, st.action, st.node)
+				assert.Equal(t, st.wantNode, snap.NodeID, "第%d步后横幅应指向驳回节点", i+1)
+				assert.Equal(t, "算法侧口径不对，请重算", snap.Comment, "第%d步后驳回意见不得丢失", i+1)
+			}
+		})
+	}
+}
+
+// TestFlowxAdapter_GetPriorComments 验证前序意见的过滤、倒序与截断全部在驱动内完成，
+// 且 OccurredAt 已是标准时间字符串，服务层不必再感知引擎时间形态
+func TestFlowxAdapter_GetPriorComments(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+
+	seed := func(id, node, assignee string, status flowxModel.TaskStatus, comment string, finish time.Time) *flowxModel.Task {
+		return &flowxModel.Task{
+			ID: id, InstanceID: "inst_prior_comments",
+			NodeID: node, NodeName: node + "环节",
+			Assignee: assignee, Status: status, Comment: comment,
+			CreateTime: base, FinishTime: finish,
+		}
+	}
+
+	testCases := []struct {
+		name         string
+		tasks        []*flowxModel.Task
+		limit        int
+		wantTotal    int64
+		wantComments []string
+		wantTimes    []string
+		wantFirst    *domain.PriorComment
+	}{
+		{
+			name: "只保留人工裁决且意见非空白_待办与系统裁决全部剔除",
+			tasks: []*flowxModel.Task{
+				seed("t1", "backend", "alice", flowxModel.TaskPassed, "构建通过", base.Add(time.Hour)),
+				seed("t2", "product", "bob", flowxModel.TaskRejected, "口径不对请重算", base.Add(3*time.Hour)),
+				seed("t3", "algo", "carol", flowxModel.TaskPending, "", time.Time{}),
+				seed("t4", "ops", "dave", flowxModel.TaskSystemPassed, "系统自动放行", base.Add(2*time.Hour)),
+				seed("t5", "qa", "eve", flowxModel.TaskSkipped, "条件未命中跳过", base.Add(2*time.Hour)),
+				seed("t6", "ui", "frank", flowxModel.TaskPassed, "   ", base.Add(4*time.Hour)),
+				seed("t7", "db", "grace", flowxModel.TaskPassed, "", base.Add(5*time.Hour)),
+				seed("t8", "sec", "heidi", flowxModel.TaskSystemRejected, "会签联动取消", base.Add(2*time.Hour)),
+			},
+			limit:        5,
+			wantTotal:    2,
+			wantComments: []string{"口径不对请重算", "构建通过"},
+			wantTimes:    []string{"2026-11-10 12:00:00", "2026-11-10 10:00:00"},
+			wantFirst: &domain.PriorComment{
+				NodeID: "product", NodeName: "product环节",
+				ApprovedBy: "bob", Status: 2,
+				Comment: "口径不对请重算", OccurredAt: "2026-11-10 12:00:00",
+			},
+		},
+		{
+			name: "超过展开上限按办结时间倒序截断_总数仍为全量意见数",
+			tasks: lo.Map(lo.Range(7), func(i int, _ int) *flowxModel.Task {
+				return seed(fmt.Sprintf("t%d", i), "node", "alice", flowxModel.TaskPassed,
+					fmt.Sprintf("意见%d", i+1), base.Add(time.Duration(i+1)*time.Hour))
+			}),
+			limit:        5,
+			wantTotal:    7,
+			wantComments: []string{"意见7", "意见6", "意见5", "意见4", "意见3"},
+		},
+		{
+			name: "同一时刻办结按任务ID倒序兜底_顺序不随存储返回序漂移",
+			tasks: []*flowxModel.Task{
+				seed("a_task", "node", "alice", flowxModel.TaskPassed, "先入库", base.Add(time.Hour)),
+				seed("b_task", "node", "bob", flowxModel.TaskPassed, "后入库", base.Add(time.Hour)),
+			},
+			limit:        5,
+			wantTotal:    2,
+			wantComments: []string{"后入库", "先入库"},
+		},
+		{
+			name: "limit非正数时不截断",
+			tasks: []*flowxModel.Task{
+				seed("t1", "node", "alice", flowxModel.TaskPassed, "意见1", base.Add(time.Hour)),
+				seed("t2", "node", "bob", flowxModel.TaskPassed, "意见2", base.Add(2*time.Hour)),
+				seed("t3", "node", "carol", flowxModel.TaskPassed, "意见3", base.Add(3*time.Hour)),
+			},
+			limit:        0,
+			wantTotal:    3,
+			wantComments: []string{"意见3", "意见2", "意见1"},
+		},
+		{
+			name: "链路无任何可读意见时返回空摘要",
+			tasks: []*flowxModel.Task{
+				seed("t1", "algo", "carol", flowxModel.TaskPending, "", time.Time{}),
+				seed("t2", "ui", "frank", flowxModel.TaskPassed, "  ", base.Add(time.Hour)),
+			},
+			limit:        5,
+			wantTotal:    0,
+			wantComments: []string{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := flowxMem.NewStorage()
+			require.NoError(t, store.SaveTasks(ctx, tc.tasks))
+			adapter := NewEngine(flowx.NewEngine(store), nil)
+
+			comments, total, err := adapter.GetPriorComments(ctx, domain.NewID("inst_prior_comments"), tc.limit)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantTotal, total)
+			assert.Equal(t, tc.wantComments, lo.Map(comments, func(c domain.PriorComment, _ int) string { return c.Comment }))
+			if tc.wantTimes != nil {
+				assert.Equal(t, tc.wantTimes, lo.Map(comments, func(c domain.PriorComment, _ int) string { return c.OccurredAt }))
+			}
+			if tc.wantFirst != nil {
+				require.NotEmpty(t, comments)
+				assert.Equal(t, *tc.wantFirst, comments[0], "驱动必须完成字段映射与时间格式化，真名留空由服务层填充")
+			}
+		})
+	}
 }

@@ -359,3 +359,12 @@ func (d *engineDispatcher) GetActiveReject(ctx context.Context, engineType domai
 	}
 	return eng.GetActiveReject(ctx, instanceID)
 }
+
+// GetPriorComments 精确获取流程实例最近 limit 条人工裁决意见与意见总数，按办结时间倒序
+func (d *engineDispatcher) GetPriorComments(ctx context.Context, engineType domain.EngineType, instanceID domain.ID, limit int) ([]domain.PriorComment, int64, error) {
+	eng, err := d.getEngine(engineType)
+	if err != nil {
+		return nil, 0, err
+	}
+	return eng.GetPriorComments(ctx, instanceID, limit)
+}

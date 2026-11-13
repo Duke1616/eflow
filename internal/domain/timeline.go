@@ -111,3 +111,15 @@ type RejectSnapshot struct {
 	Comment    string // 驳回意见或修改批注
 	FinishTime string // 驳回办结时间 (标准格式 YYYY-MM-DD HH:mm:ss)
 }
+
+// PriorComment 前序审批意见摘要条目，让审批人在填写自己的意见前就能读到链路历史，
+// 而不必先切到审批记录页；账号与姓名同时保留，避免同名展示姓名无法区分是否本人意见
+type PriorComment struct {
+	NodeID         string // 流程节点定义标识
+	NodeName       string // 流程节点展示名称
+	ApprovedBy     string // 处理人账号
+	ApprovedByName string // 处理人展示姓名
+	Status         int    // 审批裁决状态（1: 通过, 2: 驳回）
+	Comment        string // 审批意见
+	OccurredAt     string // 审批办结时间 (标准格式 YYYY-MM-DD HH:mm:ss)
+}

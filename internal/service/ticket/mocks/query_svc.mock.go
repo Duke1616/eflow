@@ -120,6 +120,22 @@ func (mr *MockQueryServiceMockRecorder) ListUserTodo(ctx, username, processName,
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUserTodo", reflect.TypeOf((*MockQueryService)(nil).ListUserTodo), ctx, username, processName, sortByAsc, offset, limit)
 }
 
+// PriorComments mocks base method.
+func (m *MockQueryService) PriorComments(ctx context.Context, processInstID domain.ID) ([]domain.PriorComment, int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PriorComments", ctx, processInstID)
+	ret0, _ := ret[0].([]domain.PriorComment)
+	ret1, _ := ret[1].(int64)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// PriorComments indicates an expected call of PriorComments.
+func (mr *MockQueryServiceMockRecorder) PriorComments(ctx, processInstID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PriorComments", reflect.TypeOf((*MockQueryService)(nil).PriorComments), ctx, processInstID)
+}
+
 // TaskRecord mocks base method.
 func (m *MockQueryService) TaskRecord(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskRecord, int64, error) {
 	m.ctrl.T.Helper()

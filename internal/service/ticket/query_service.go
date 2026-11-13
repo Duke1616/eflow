@@ -2,6 +2,7 @@ package ticket
 
 import (
 	"context"
+	"fmt"
 
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
 	"github.com/Duke1616/eflow/internal/domain"
@@ -31,6 +32,8 @@ type QueryService interface {
 	TaskTimeline(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskTimelineEvent, int64, error)
 	// GetLatestReject 解析流程实例最近一次被驳回的快照信息
 	GetLatestReject(ctx context.Context, processInstID domain.ID) (*domain.LatestReject, error)
+	// PriorComments 汇总链路上已裁决且填写了意见的前序审批记录，返回最近若干条与意见总数
+	PriorComments(ctx context.Context, processInstID domain.ID) ([]domain.PriorComment, int64, error)
 }
 
 type queryService struct {
@@ -409,6 +412,37 @@ func (q *queryService) GetLatestReject(ctx context.Context, processInstID domain
 		Reason:         snapshot.Comment,
 		RejectedAt:     snapshot.FinishTime,
 	}, nil
+}
+
+// priorCommentPageSize 审批面板默认展开的最近意见条数，其余由前端按 total 折叠
+const priorCommentPageSize = 5
+
+// PriorComments 汇总链路上已裁决且填写了意见的前序审批记录，按办结时间倒序返回最近若干条与意见总数
+// 过滤、排序与时间格式化由各引擎驱动下推完成，本层只负责解析处理人真名；
+// 可见范围沿用审批记录同一条受工单权限约束的查询路径，不额外放宽
+func (q *queryService) PriorComments(ctx context.Context, processInstID domain.ID) ([]domain.PriorComment, int64, error) {
+	if processInstID.IsZero() {
+		return nil, 0, nil
+	}
+
+	engineType := q.resolveEngineType(ctx, processInstID)
+	comments, total, err := q.engine.GetPriorComments(ctx, engineType, processInstID, priorCommentPageSize)
+	if err != nil {
+		return nil, 0, fmt.Errorf("查询流程实例 [%s] 前序审批意见失败: %w", processInstID, err)
+	}
+
+	// 仅为实际返回的条目解析真名，被折叠掉的历史意见不触发无谓 RPC
+	uMap := q.getUserMap(ctx, lo.Uniq(lo.FilterMap(comments, func(c domain.PriorComment, _ int) (string, bool) {
+		return c.ApprovedBy, c.ApprovedBy != ""
+	})))
+
+	return lo.Map(comments, func(c domain.PriorComment, _ int) domain.PriorComment {
+		c.ApprovedByName = uMap[c.ApprovedBy]
+		if c.ApprovedByName == "" {
+			c.ApprovedByName = c.ApprovedBy
+		}
+		return c
+	}), total, nil
 }
 
 // fetchPagedParallel 通用轻量分页并发拉取辅助函数，将明细切片与记录总数解耦并行查询，消除样板代码

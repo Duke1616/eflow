@@ -125,6 +125,23 @@ type LatestRejectVO struct {
 	RejectedAt     string `json:"rejected_at"`      // 驳回时间
 }
 
+// PriorCommentsVO 审批面板的前序意见摘要：Items 是最近若干条，Total 是链路意见总数（供前端折叠提示）
+type PriorCommentsVO struct {
+	Items []PriorCommentVO `json:"items"`
+	Total int64            `json:"total"`
+}
+
+// PriorCommentVO 单条前序审批意见的展示视图
+type PriorCommentVO struct {
+	NodeID         string `json:"node_id"`
+	NodeName       string `json:"node_name"`
+	ApprovedBy     string `json:"approved_by"`
+	ApprovedByName string `json:"approved_by_name"`
+	Status         int    `json:"status"`
+	Comment        string `json:"comment"`
+	OccurredAt     string `json:"occurred_at"`
+}
+
 type RetrieveTickets struct {
 	Total int64    `json:"total"`
 	Tasks []Ticket `json:"tasks"`
@@ -199,6 +216,7 @@ type Ticket struct {
 	ProcessStartError    string                 `json:"process_start_error,omitempty"`
 	ProcessStartAttempts int                    `json:"process_start_attempts,omitempty"`
 	LatestReject         *LatestRejectVO        `json:"latest_reject,omitempty"`
+	PriorComments        *PriorCommentsVO       `json:"prior_comments,omitempty"`
 	FlowPolicy           *FlowPolicyVO          `json:"flow_policy,omitempty"`
 }
 

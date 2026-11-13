@@ -484,6 +484,15 @@ func (h *Handler) Detail(ctx *ginx.Context, req DetailProcessInstIdReq) (ginx.Re
 		}
 	}
 
+	// 聚合前序审批意见：审批人在本面板填写意见前即可读到链路历史，无需切到审批记录页；
+	// 摘要属展示增强，查询失败只降级掉该区块，不能连带整个工单详情打不开
+	if comments, commentTotal, commentErr := h.querySvc.PriorComments(ctx.Context, req.ProcessInstanceId); commentErr != nil {
+		h.logger.Warn("获取前序审批意见失败，降级为空意见摘要",
+			elog.String("process_instance_id", req.ProcessInstanceId.String()), elog.FieldErr(commentErr))
+	} else if commentTotal > 0 {
+		result.PriorComments = &PriorCommentsVO{Items: toVoPriorComments(comments), Total: commentTotal}
+	}
+
 	return ginx.Result{Data: result}, nil
 }
 
@@ -554,6 +563,20 @@ func toVoTimelineEvents(events []domain.TaskTimelineEvent) []TaskTimelineEvent {
 				Pending:        group.Summary.Pending,
 			},
 			Members: toVoTaskRecords(group.Members),
+		}
+	})
+}
+
+func toVoPriorComments(comments []domain.PriorComment) []PriorCommentVO {
+	return lo.Map(comments, func(src domain.PriorComment, _ int) PriorCommentVO {
+		return PriorCommentVO{
+			NodeID:         src.NodeID,
+			NodeName:       src.NodeName,
+			ApprovedBy:     src.ApprovedBy,
+			ApprovedByName: src.ApprovedByName,
+			Status:         src.Status,
+			Comment:        src.Comment,
+			OccurredAt:     src.OccurredAt,
 		}
 	})
 }

@@ -31,6 +31,10 @@ type IEngineRepository interface {
 	ListAccessibleTaskRecord(ctx context.Context, processInstId, offset, limit int) ([]model.Task, error)
 	// CountAccessibleTaskRecord 使用与列表相同的 AccessScope 统计流转记录。
 	CountAccessibleTaskRecord(ctx context.Context, processInstId int) (int64, error)
+	// ListAccessiblePriorComments 查询可见的人工裁决意见，按办结时间倒序取最近 limit 条。
+	ListAccessiblePriorComments(ctx context.Context, processInstId, limit int) ([]model.Task, error)
+	// CountAccessiblePriorComments 使用与列表相同的过滤条件统计意见条数。
+	CountAccessiblePriorComments(ctx context.Context, processInstId int) (int64, error)
 	// ListAccessibleTaskTimelineGroups 按节点执行批次聚合可见任务，供时间线分页展示。
 	ListAccessibleTaskTimelineGroups(ctx context.Context, processInstId, offset, limit int) ([]domain.TaskTimelineGroup, error)
 	// CountAccessibleTaskTimelineGroups 统计可见的节点执行批次数。
@@ -211,6 +215,14 @@ func (repo *engineRepository) ListAccessibleTaskRecord(ctx context.Context, proc
 
 func (repo *engineRepository) CountAccessibleTaskRecord(ctx context.Context, processInstId int) (int64, error) {
 	return repo.engineDao.CountAccessibleTaskRecord(ctx, processInstId)
+}
+
+func (repo *engineRepository) ListAccessiblePriorComments(ctx context.Context, processInstId, limit int) ([]model.Task, error) {
+	return repo.engineDao.ListAccessiblePriorComments(ctx, processInstId, limit)
+}
+
+func (repo *engineRepository) CountAccessiblePriorComments(ctx context.Context, processInstId int) (int64, error) {
+	return repo.engineDao.CountAccessiblePriorComments(ctx, processInstId)
 }
 
 func (repo *engineRepository) ListAccessibleTaskTimelineGroups(ctx context.Context, processInstId, offset, limit int) ([]domain.TaskTimelineGroup, error) {
