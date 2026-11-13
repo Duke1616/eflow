@@ -43,18 +43,18 @@ func (m *MockIEngineRepository) EXPECT() *MockIEngineRepositoryMockRecorder {
 }
 
 // CountAccessiblePriorComments mocks base method.
-func (m *MockIEngineRepository) CountAccessiblePriorComments(ctx context.Context, processInstId int) (int64, error) {
+func (m *MockIEngineRepository) CountAccessiblePriorComments(ctx context.Context, processInstId int, excludeNodeIDs []string) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CountAccessiblePriorComments", ctx, processInstId)
+	ret := m.ctrl.Call(m, "CountAccessiblePriorComments", ctx, processInstId, excludeNodeIDs)
 	ret0, _ := ret[0].(int64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CountAccessiblePriorComments indicates an expected call of CountAccessiblePriorComments.
-func (mr *MockIEngineRepositoryMockRecorder) CountAccessiblePriorComments(ctx, processInstId any) *gomock.Call {
+func (mr *MockIEngineRepositoryMockRecorder) CountAccessiblePriorComments(ctx, processInstId, excludeNodeIDs any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountAccessiblePriorComments", reflect.TypeOf((*MockIEngineRepository)(nil).CountAccessiblePriorComments), ctx, processInstId)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountAccessiblePriorComments", reflect.TypeOf((*MockIEngineRepository)(nil).CountAccessiblePriorComments), ctx, processInstId, excludeNodeIDs)
 }
 
 // CountAccessibleTaskRecord mocks base method.
@@ -339,18 +339,18 @@ func (mr *MockIEngineRepositoryMockRecorder) GetTicketIdByVariable(ctx, processI
 }
 
 // ListAccessiblePriorComments mocks base method.
-func (m *MockIEngineRepository) ListAccessiblePriorComments(ctx context.Context, processInstId, limit int) ([]model.Task, error) {
+func (m *MockIEngineRepository) ListAccessiblePriorComments(ctx context.Context, processInstId, limit int, excludeNodeIDs []string) ([]model.Task, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListAccessiblePriorComments", ctx, processInstId, limit)
+	ret := m.ctrl.Call(m, "ListAccessiblePriorComments", ctx, processInstId, limit, excludeNodeIDs)
 	ret0, _ := ret[0].([]model.Task)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListAccessiblePriorComments indicates an expected call of ListAccessiblePriorComments.
-func (mr *MockIEngineRepositoryMockRecorder) ListAccessiblePriorComments(ctx, processInstId, limit any) *gomock.Call {
+func (mr *MockIEngineRepositoryMockRecorder) ListAccessiblePriorComments(ctx, processInstId, limit, excludeNodeIDs any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAccessiblePriorComments", reflect.TypeOf((*MockIEngineRepository)(nil).ListAccessiblePriorComments), ctx, processInstId, limit)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAccessiblePriorComments", reflect.TypeOf((*MockIEngineRepository)(nil).ListAccessiblePriorComments), ctx, processInstId, limit, excludeNodeIDs)
 }
 
 // ListAccessibleTaskRecord mocks base method.

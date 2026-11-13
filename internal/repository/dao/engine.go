@@ -63,9 +63,11 @@ type IEngineDAO interface {
 	// CountAccessibleTaskRecord 使用与列表相同的 AccessScope 统计流转记录。
 	CountAccessibleTaskRecord(ctx context.Context, processInstId int) (int64, error)
 	// ListAccessiblePriorComments 查询可见的人工裁决意见，按办结时间倒序取最近 limit 条。
-	ListAccessiblePriorComments(ctx context.Context, processInstId, limit int) ([]model.Task, error)
+	// excludeNodeIDs 为机器节点，必须在 SQL 层排除：其裁决状态与文案和人工同形，
+	// 取回内存再过滤会让机器条目挤占 limit 名额并虚增总数。
+	ListAccessiblePriorComments(ctx context.Context, processInstId, limit int, excludeNodeIDs []string) ([]model.Task, error)
 	// CountAccessiblePriorComments 使用与列表相同的过滤条件统计意见条数。
-	CountAccessiblePriorComments(ctx context.Context, processInstId int) (int64, error)
+	CountAccessiblePriorComments(ctx context.Context, processInstId int, excludeNodeIDs []string) (int64, error)
 	// ListAccessibleTaskTimelineGroups 按节点执行批次聚合可见任务，供时间线分页展示。
 	ListAccessibleTaskTimelineGroups(ctx context.Context, processInstId, offset, limit int) ([]TaskTimelineGroupPO, error)
 	// CountAccessibleTaskTimelineGroups 统计可见的节点执行批次数。
@@ -404,29 +406,34 @@ func (g *gormEngineDAO) CountAccessibleTaskRecord(ctx context.Context, processIn
 }
 
 // priorCommentScope 只保留人工裁决（1 通过 / 2 驳回）且意见非空白的任务。
-// 用 TRIM 而非直接比较空串：纯空白意见会挤占 LIMIT 名额，让前端折叠总数与真正可读的意见条数对不上
-func priorCommentScope(db *gorm.DB) *gorm.DB {
-	return db.Where("a.status IN ?", []int{1, 2}).Where("TRIM(a.comment) <> ''")
+// 用 TRIM 而非直接比较空串：纯空白意见会挤占 LIMIT 名额，让前端折叠总数与真正可读的意见条数对不上。
+// excludeNodeIDs 为机器节点（抄送/群聊/自动化/系统代理），同样必须在 SQL 层排除，理由同上
+func priorCommentScope(db *gorm.DB, excludeNodeIDs []string) *gorm.DB {
+	db = db.Where("a.status IN ?", []int{1, 2}).Where("TRIM(a.comment) <> ''")
+	if len(excludeNodeIDs) > 0 {
+		db = db.Where("a.node_id NOT IN ?", excludeNodeIDs)
+	}
+	return db
 }
 
-func (g *gormEngineDAO) ListAccessiblePriorComments(ctx context.Context, processInstId, limit int) ([]model.Task, error) {
+func (g *gormEngineDAO) ListAccessiblePriorComments(ctx context.Context, processInstId, limit int, excludeNodeIDs []string) ([]model.Task, error) {
 	db, err := g.accessibleTaskRecordQuery(ctx, processInstId)
 	if err != nil {
 		return nil, err
 	}
 	var result []model.Task
 	// 办结时间倒序 + 自增 id 兜底：同一秒内多人裁决时顺序必须确定，不能依赖 UNION 的物理返回序
-	err = priorCommentScope(db).Order("a.finished_time DESC, a.id DESC").Limit(limit).Scan(&result).Error
+	err = priorCommentScope(db, excludeNodeIDs).Order("a.finished_time DESC, a.id DESC").Limit(limit).Scan(&result).Error
 	return result, err
 }
 
-func (g *gormEngineDAO) CountAccessiblePriorComments(ctx context.Context, processInstId int) (int64, error) {
+func (g *gormEngineDAO) CountAccessiblePriorComments(ctx context.Context, processInstId int, excludeNodeIDs []string) (int64, error) {
 	db, err := g.accessibleTaskRecordQuery(ctx, processInstId)
 	if err != nil {
 		return 0, err
 	}
 	var total int64
-	err = priorCommentScope(db).Count(&total).Error
+	err = priorCommentScope(db, excludeNodeIDs).Count(&total).Error
 	return total, err
 }
 

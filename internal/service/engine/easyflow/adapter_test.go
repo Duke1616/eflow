@@ -10,6 +10,7 @@ import (
 	"github.com/Bunny3th/easy-workflow/workflow/database"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
+	compiler "github.com/Duke1616/eflow/internal/pkg/compiler/easyflow"
 	repoMocks "github.com/Duke1616/eflow/internal/repository/mocks"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/samber/lo"
@@ -270,6 +271,8 @@ func TestAdapter_GetPriorComments(t *testing.T) {
 		name         string
 		instID       domain.ID
 		limit        int
+		nodes        []model.Node // 实例锁定版本的定义拓扑，缺省为单个普通审批节点
+		wantExclude  []string     // 期望下推给 SQL 的机器节点排除集
 		tasks        []model.Task
 		total        int64
 		listErr      error
@@ -341,6 +344,53 @@ func TestAdapter_GetPriorComments(t *testing.T) {
 			wantErr:   true,
 			wantErrIs: engine.ErrInvalidParameter,
 		},
+		{
+			name:   "抄送群聊自动化与系统代理节点全部下推排除_审批与起点保留",
+			instID: domain.NewID(100),
+			limit:  5,
+			nodes: []model.Node{
+				// 起点节点无 StartEvents：驳回回退后退化成普通任务节点，承载提单人真实意见，不得排除
+				{NodeID: "start", NodeName: "提单", NodeType: model.RootNode,
+					UserIDs: []string{compiler.UserStarter}, NodeEndEvents: []string{compiler.EventStart}},
+				{NodeID: "leader", NodeName: "主管审批", NodeType: model.TaskNode,
+					UserIDs: []string{"alice"}, NodeStartEvents: []string{compiler.EventNotify}},
+				// 抄送解析到真实处理人，靠处理人哨兵识别不了，只能靠事件标记
+				{NodeID: "cc", NodeName: "抄送知会", NodeType: model.TaskNode,
+					UserIDs: []string{"carol"}, NodeStartEvents: []string{compiler.EventCarbonCopy}},
+				{NodeID: "chat", NodeName: "群通知", NodeType: model.TaskNode,
+					UserIDs: []string{compiler.ChatGroupApproval}, NodeStartEvents: []string{compiler.EventChatGroup}},
+				{NodeID: "auto", NodeName: "自动化作业", NodeType: model.TaskNode,
+					UserIDs: []string{compiler.AutomationApproval}, NodeStartEvents: []string{compiler.EventAutomation}},
+				// 系统代理节点挂的是普通 EventNotify，只有占位处理人能识别
+				{NodeID: "proxy", NodeName: "系统代理流转", NodeType: model.TaskNode,
+					UserIDs: []string{compiler.SysAutoUser}, NodeStartEvents: []string{compiler.EventNotify}},
+				{NodeID: "end", NodeName: "结束", NodeType: model.EndNode,
+					NodeStartEvents: []string{compiler.EventNotify}},
+			},
+			wantExclude: []string{"cc", "chat", "auto", "proxy"},
+			tasks: []model.Task{
+				{TaskID: 41, NodeID: "leader", NodeName: "主管审批", UserID: "alice", Status: 1, Comment: "同意", FinishedTime: localTime("2026-11-11 10:00:00")},
+				{TaskID: 40, NodeID: "start", NodeName: "提单", UserID: "bob", Status: 1, Comment: "补充了预算明细", FinishedTime: localTime("2026-11-10 09:00:00")},
+			},
+			total:        2,
+			wantTotal:    2,
+			wantComments: []string{"同意", "补充了预算明细"},
+		},
+		{
+			name:   "未能识别的节点默认按人工保留_宁可漏排也不误删真实意见",
+			instID: domain.NewID(100),
+			limit:  5,
+			nodes: []model.Node{
+				{NodeID: "legacy", NodeName: "历史环节", NodeType: model.TaskNode},
+			},
+			wantExclude: []string{},
+			tasks: []model.Task{
+				{TaskID: 50, NodeID: "legacy", NodeName: "历史环节", UserID: "alice", Status: 1, Comment: "老工单意见", FinishedTime: localTime("2026-11-11 10:00:00")},
+			},
+			total:        1,
+			wantTotal:    1,
+			wantComments: []string{"老工单意见"},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -350,10 +400,27 @@ func TestAdapter_GetPriorComments(t *testing.T) {
 
 			mockRepo := repoMocks.NewMockIEngineRepository(ctrl)
 			if tc.instID.Int() > 0 {
-				// limit 必须原样下推：这里断言的就是"不再按 1000 全量扫描"
-				mockRepo.EXPECT().ListAccessiblePriorComments(gomock.Any(), tc.instID.Int(), tc.limit).
+				// 定义必须按实例锁定的版本回源：期望值写死 (7, 2)，若改用最新版即失配
+				mockRepo.EXPECT().GetInstanceByID(gomock.Any(), tc.instID.Int()).
+					Return(domain.Instance{ProcInstID: tc.instID.Int(), ProcID: 7, ProcVersion: 2}, nil)
+				nodes := tc.nodes
+				if nodes == nil {
+					nodes = []model.Node{{
+						NodeID: "node", NodeName: "环节", NodeType: model.TaskNode,
+						UserIDs: []string{"alice"}, NodeStartEvents: []string{compiler.EventNotify},
+					}}
+				}
+				mockRepo.EXPECT().GetProcessDefineByVersion(gomock.Any(), 7, 2).
+					Return(model.Process{ProcessName: "请假流程", Nodes: nodes}, nil)
+
+				wantExclude := tc.wantExclude
+				if wantExclude == nil {
+					wantExclude = []string{}
+				}
+				// limit 与机器节点排除集都必须原样下推：断言"不再按 1000 全量扫描"且人机过滤在 SQL 层完成
+				mockRepo.EXPECT().ListAccessiblePriorComments(gomock.Any(), tc.instID.Int(), tc.limit, wantExclude).
 					Return(tc.tasks, tc.listErr)
-				mockRepo.EXPECT().CountAccessiblePriorComments(gomock.Any(), tc.instID.Int()).
+				mockRepo.EXPECT().CountAccessiblePriorComments(gomock.Any(), tc.instID.Int(), wantExclude).
 					Return(tc.total, tc.countErr)
 			}
 

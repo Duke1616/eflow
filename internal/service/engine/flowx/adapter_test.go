@@ -808,6 +808,7 @@ func TestFlowxAdapter_GetPriorComments(t *testing.T) {
 
 	testCases := []struct {
 		name         string
+		nodes        []flowxModel.NodeSpec // 缺省时把任务涉及的全部节点视为人工审批环节
 		tasks        []*flowxModel.Task
 		limit        int
 		wantTotal    int64
@@ -878,12 +879,88 @@ func TestFlowxAdapter_GetPriorComments(t *testing.T) {
 			wantTotal:    0,
 			wantComments: []string{},
 		},
+		{
+			name: "抄送群聊与自动化节点的系统文案全部剔除_只留审批与提单环节",
+			nodes: []flowxModel.NodeSpec{
+				{ID: "start", Name: "提单", Type: flowxModel.NodeStart},
+				{ID: "leader", Name: "主管审批", Type: flowxModel.NodeApproval},
+				{ID: "cc", Name: "抄送知会", Type: flowxModel.NodeCarbonCopy},
+				{ID: "chat", Name: "群聊通知", Type: flowxModel.NodeChatGroup},
+				{ID: "auto", Name: "自动化作业", Type: flowxModel.NodeTask},
+				{ID: "end", Name: "结束", Type: flowxModel.NodeEnd},
+			},
+			tasks: []*flowxModel.Task{
+				seed("t1", "start", "alice", flowxModel.TaskPassed, "补充了预算明细", base.Add(time.Hour)),
+				seed("t2", "leader", "bob", flowxModel.TaskPassed, "同意，注意成本控制", base.Add(2*time.Hour)),
+				// 抄送解析到真实处理人时同样写 TaskPassed，按处理人哨兵判定人机会漏掉这一条
+				seed("t3", "cc", "carol", flowxModel.TaskPassed, "系统抄送知会", base.Add(3*time.Hour)),
+				seed("t4", "chat", "chat_group", flowxModel.TaskPassed, "群聊通知自动完成", base.Add(4*time.Hour)),
+				seed("t5", "auto", "system", flowxModel.TaskPassed, "系统自动执行成功", base.Add(5*time.Hour)),
+				seed("t6", "leader", "dave", flowxModel.TaskRejected, "预算超标，请重填", base.Add(6*time.Hour)),
+			},
+			limit:        5,
+			wantTotal:    3,
+			wantComments: []string{"预算超标，请重填", "同意，注意成本控制", "补充了预算明细"},
+		},
+		{
+			name: "全链路只有机器节点时不得回落到未过滤口径",
+			nodes: []flowxModel.NodeSpec{
+				{ID: "cc", Name: "抄送知会", Type: flowxModel.NodeCarbonCopy},
+				{ID: "chat", Name: "群聊通知", Type: flowxModel.NodeChatGroup},
+				{ID: "auto", Name: "自动化作业", Type: flowxModel.NodeTask},
+			},
+			tasks: []*flowxModel.Task{
+				seed("t1", "cc", "carol", flowxModel.TaskPassed, "系统抄送知会", base.Add(time.Hour)),
+				seed("t2", "chat", "chat_group", flowxModel.TaskPassed, "群聊通知自动完成", base.Add(2*time.Hour)),
+				seed("t3", "auto", "system", flowxModel.TaskPassed, "系统异步作业执行完成", base.Add(3*time.Hour)),
+			},
+			limit:        5,
+			wantTotal:    0,
+			wantComments: []string{},
+		},
+		{
+			name: "机器节点不得挤占展开名额_截断必须发生在节点类型过滤之后",
+			nodes: []flowxModel.NodeSpec{
+				{ID: "leader", Name: "主管审批", Type: flowxModel.NodeApproval},
+				{ID: "cc", Name: "抄送知会", Type: flowxModel.NodeCarbonCopy},
+			},
+			// 机器条目全部晚于人工意见：若先截断再过滤，整页会被机器条目占满而人工意见一条不剩
+			tasks: append(
+				lo.Map(lo.Range(3), func(i int, _ int) *flowxModel.Task {
+					return seed(fmt.Sprintf("h%d", i), "leader", "alice", flowxModel.TaskPassed,
+						fmt.Sprintf("人工意见%d", i+1), base.Add(time.Duration(i+1)*time.Hour))
+				}),
+				lo.Map(lo.Range(7), func(i int, _ int) *flowxModel.Task {
+					return seed(fmt.Sprintf("m%d", i), "cc", "system", flowxModel.TaskPassed,
+						"系统抄送知会", base.Add(time.Duration(i+4)*time.Hour))
+				})...,
+			),
+			limit:        5,
+			wantTotal:    3,
+			wantComments: []string{"人工意见3", "人工意见2", "人工意见1"},
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			store := flowxMem.NewStorage()
 			require.NoError(t, store.SaveTasks(ctx, tc.tasks))
+
+			// 节点类型是判定人机的唯一依据，必须落定义与实例，否则驱动无法回源
+			nodes := tc.nodes
+			if nodes == nil {
+				nodes = lo.Map(lo.UniqBy(tc.tasks, func(t *flowxModel.Task) string { return t.NodeID }),
+					func(t *flowxModel.Task, _ int) flowxModel.NodeSpec {
+						return flowxModel.NodeSpec{ID: t.NodeID, Name: t.NodeName, Type: flowxModel.NodeApproval}
+					})
+			}
+			def := flowxModel.ProcessDefinition{Key: "wf_prior_comments", Version: 1, Nodes: nodes}
+			require.NoError(t, store.SaveDefinition(ctx, def))
+			require.NoError(t, store.SaveInstance(ctx, &flowxModel.Instance{
+				ID: "inst_prior_comments", ProcKey: def.Key, Version: def.Version,
+				Status: flowxModel.InstanceRunning, Variables: flowxModel.Variables{},
+			}))
+
 			adapter := NewEngine(flowx.NewEngine(store), nil)
 
 			comments, total, err := adapter.GetPriorComments(ctx, domain.NewID("inst_prior_comments"), tc.limit)

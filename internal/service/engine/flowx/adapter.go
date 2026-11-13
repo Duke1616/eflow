@@ -578,10 +578,11 @@ func (a *flowxEngine) GetPriorComments(ctx context.Context, instanceID domain.ID
 		return nil, 0, fmt.Errorf("flowx 查询前序审批意见失败: %w", err)
 	}
 
-	// 只取人工裁决（通过/驳回）且意见非空白的任务，与 easyflow 侧下推的 SQL 过滤口径保持一致
-	audited := lo.Filter(tasks, func(t *flowxModel.Task, _ int) bool {
-		return (t.Status == flowxModel.TaskPassed || t.Status == flowxModel.TaskRejected) && strings.TrimSpace(t.Comment) != ""
-	})
+	audited, err := a.humanComments(ctx, instanceID, tasks)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	slices.SortStableFunc(audited, func(x, y *flowxModel.Task) int {
 		if c := y.FinishTime.Compare(x.FinishTime); c != 0 {
 			return c
@@ -604,6 +605,48 @@ func (a *flowxEngine) GetPriorComments(ctx context.Context, instanceID domain.ID
 			OccurredAt: occurredAt,
 		}
 	}), total, nil
+}
+
+// humanComments 收敛出真实人工意见：先按裁决状态与意见文本筛，再按节点类型剔除机器文案。
+// 抄送/群聊/自动化节点由执行器写死 TaskPassed 与固定文案，状态和文本都区分不了人机，只能靠定义里的节点类型。
+// 无候选意见时短路，省掉实例与定义两次回源
+func (a *flowxEngine) humanComments(ctx context.Context, instanceID domain.ID, tasks []*flowxModel.Task) ([]*flowxModel.Task, error) {
+	// 与 easyflow 侧下推的 SQL 过滤口径保持一致
+	audited := lo.Filter(tasks, func(t *flowxModel.Task, _ int) bool {
+		return (t.Status == flowxModel.TaskPassed || t.Status == flowxModel.TaskRejected) && strings.TrimSpace(t.Comment) != ""
+	})
+	if len(audited) == 0 {
+		return audited, nil
+	}
+
+	humanNodes, err := a.humanCommentNodes(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	return lo.Filter(audited, func(t *flowxModel.Task, _ int) bool {
+		_, ok := humanNodes[t.NodeID]
+		return ok
+	}), nil
+}
+
+// humanCommentNodes 索引承载真实人工意见的节点：仅审批与提单环节。
+// 不复用 NodeSpec.CanRejectTo()——尽管其判定集恰好相同，但「可驳回目标」与「人工意见来源」是两条
+// 独立语义轴，共用会让任一侧口径调整意外波及另一侧
+func (a *flowxEngine) humanCommentNodes(ctx context.Context, instanceID domain.ID) (map[string]flowxModel.NodeSpec, error) {
+	inst, err := a.engine.GetInstance(ctx, instanceID.String())
+	if err != nil {
+		return nil, fmt.Errorf("flowx 查询流程实例失败 [instanceID=%s]: %w", instanceID.String(), err)
+	}
+
+	def, err := a.engine.GetDefinition(ctx, inst.ProcKey, inst.Version)
+	if err != nil {
+		return nil, fmt.Errorf("flowx 查询流程定义失败 [procKey=%s version=%d]: %w", inst.ProcKey, inst.Version, err)
+	}
+
+	human := lo.Filter(def.Nodes, func(n flowxModel.NodeSpec, _ int) bool {
+		return n.Type == flowxModel.NodeApproval || n.Type == flowxModel.NodeStart
+	})
+	return lo.KeyBy(human, func(n flowxModel.NodeSpec) string { return n.ID }), nil
 }
 
 func paginateSlice[T any](items []T, offset, limit int) []T {

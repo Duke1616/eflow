@@ -59,13 +59,18 @@ func (r *sqlRecorder) reset() {
 
 func insertPriorTask(t *testing.T, db *gorm.DB, table string, id, instID, status int, comment string, finished time.Time) {
 	t.Helper()
+	insertPriorTaskOnNode(t, db, table, id, instID, "node", status, comment, finished)
+}
+
+func insertPriorTaskOnNode(t *testing.T, db *gorm.DB, table string, id, instID int, nodeID string, status int, comment string, finished time.Time) {
+	t.Helper()
 	idCol := "id"
 	if table == "hist_proc_task" {
 		idCol = "task_id"
 	}
 	require.NoError(t, db.Exec(
 		"INSERT INTO "+table+" ("+idCol+","+priorTaskColumnNames+") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-		id, 7, instID, "biz", "alice", "node", "环节", "", 0, "batch", "alice", status, 1, comment,
+		id, 7, instID, "biz", "alice", nodeID, "环节", "", 0, "batch", "alice", status, 1, comment,
 		finished, finished, finished,
 	).Error)
 }
@@ -161,7 +166,7 @@ func TestListAccessiblePriorComments(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			tasks, err := dao.ListAccessiblePriorComments(ctx, 100, tc.limit)
+			tasks, err := dao.ListAccessiblePriorComments(ctx, 100, tc.limit, nil)
 			require.NoError(t, err)
 
 			gotIDs := make([]int, 0, len(tasks))
@@ -170,7 +175,7 @@ func TestListAccessiblePriorComments(t *testing.T) {
 			}
 			assert.Equal(t, tc.wantIDs, gotIDs)
 
-			total, err := dao.CountAccessiblePriorComments(ctx, 100)
+			total, err := dao.CountAccessiblePriorComments(ctx, 100, nil)
 			require.NoError(t, err)
 			assert.Equal(t, int64(6), total, "总数必须是过滤后的可读意见数，不随 limit 变化")
 		})
@@ -180,7 +185,7 @@ func TestListAccessiblePriorComments(t *testing.T) {
 func TestListAccessiblePriorComments_FieldMapping(t *testing.T) {
 	db, ctx, _ := setupPriorCommentDB(t)
 
-	tasks, err := NewProcessEngineDAO(db).ListAccessiblePriorComments(ctx, 100, 1)
+	tasks, err := NewProcessEngineDAO(db).ListAccessiblePriorComments(ctx, 100, 1, nil)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	// 归档表首列名为 task_id，靠 UNION 首个 SELECT 的列名统一成 id，这里验证该假设成立
@@ -199,9 +204,9 @@ func TestPriorCommentsPushdownToSQL(t *testing.T) {
 	db, ctx, rec := setupPriorCommentDB(t)
 	dao := NewProcessEngineDAO(db)
 
-	_, err := dao.ListAccessiblePriorComments(ctx, 100, 5)
+	_, err := dao.ListAccessiblePriorComments(ctx, 100, 5, nil)
 	require.NoError(t, err)
-	_, err = dao.CountAccessiblePriorComments(ctx, 100)
+	_, err = dao.CountAccessiblePriorComments(ctx, 100, nil)
 	require.NoError(t, err)
 
 	sql := rec.joined()
@@ -218,9 +223,51 @@ func TestPriorCommentsPushdownToSQL(t *testing.T) {
 	assert.Contains(t, sql, "hist_proc_task")
 }
 
+// TestPriorCommentsExcludeMachineNodes 验证机器节点排除真的落在 SQL 并生效。
+// 内置反向对照：同一批数据不排除时，机器条目既挤占 LIMIT 名额又虚增 COUNT，证明该过滤是承重的
+func TestPriorCommentsExcludeMachineNodes(t *testing.T) {
+	db, ctx, rec := setupPriorCommentDB(t)
+	dao := NewProcessEngineDAO(db)
+
+	at := func(day, hour int) time.Time { return time.Date(2026, 11, day, hour, 0, 0, 0, time.UTC) }
+	// 机器条目全部晚于人工意见：若先截断再过滤，整页会被机器条目占满而人工意见一条不剩
+	insertPriorTaskOnNode(t, db, "proc_task", 60, 100, "cc", 1, "CarbonCopy Auto Pass", at(14, 9))
+	insertPriorTaskOnNode(t, db, "proc_task", 61, 100, "chat", 1, "ChatGroup Auto Pass", at(14, 10))
+	insertPriorTaskOnNode(t, db, "proc_task", 62, 100, "proxy", 1, "Sys Auto Pass", at(14, 11))
+	insertPriorTaskOnNode(t, db, "hist_proc_task", 63, 100, "auto", 1, "自动化作业完成", at(14, 12))
+
+	exclude := []string{"cc", "chat", "proxy", "auto"}
+
+	tasks, err := dao.ListAccessiblePriorComments(ctx, 100, 5, exclude)
+	require.NoError(t, err)
+	gotIDs := make([]int, 0, len(tasks))
+	for _, task := range tasks {
+		gotIDs = append(gotIDs, task.TaskID)
+	}
+	assert.Equal(t, []int{10, 8, 7, 3, 2}, gotIDs, "机器条目不得挤占展开名额")
+
+	total, err := dao.CountAccessiblePriorComments(ctx, 100, exclude)
+	require.NoError(t, err)
+	assert.Equal(t, int64(6), total, "总数不得被机器条目虚增")
+
+	assert.Contains(t, rec.joined(), "a.node_id NOT IN", "排除必须下推到 SQL，不能取回内存再过滤")
+
+	rawTasks, err := dao.ListAccessiblePriorComments(ctx, 100, 5, nil)
+	require.NoError(t, err)
+	rawIDs := make([]int, 0, len(rawTasks))
+	for _, task := range rawTasks {
+		rawIDs = append(rawIDs, task.TaskID)
+	}
+	assert.Equal(t, []int{63, 62, 61, 60, 10}, rawIDs, "反向对照：不排除时整页被机器条目占满")
+
+	rawTotal, err := dao.CountAccessiblePriorComments(ctx, 100, nil)
+	require.NoError(t, err)
+	assert.Equal(t, int64(10), rawTotal, "反向对照：不排除时总数被机器条目虚增")
+}
+
 func TestListAccessiblePriorComments_TenantMissing(t *testing.T) {
 	db, _, _ := setupPriorCommentDB(t)
 
-	_, err := NewProcessEngineDAO(db).ListAccessiblePriorComments(context.Background(), 100, 5)
+	_, err := NewProcessEngineDAO(db).ListAccessiblePriorComments(context.Background(), 100, 5, nil)
 	require.Error(t, err, "缺少租户上下文必须失败，不能退化成全量可见")
 }

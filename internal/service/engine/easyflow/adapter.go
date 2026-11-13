@@ -14,6 +14,7 @@ import (
 	easyEngine "github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
+	compiler "github.com/Duke1616/eflow/internal/pkg/compiler/easyflow"
 	"github.com/Duke1616/eflow/internal/repository"
 	"github.com/Duke1616/eflow/internal/service/engine"
 	"github.com/samber/lo"
@@ -653,6 +654,12 @@ func (a *adapter) GetPriorComments(ctx context.Context, instanceID domain.ID, li
 		return nil, 0, fmt.Errorf("%w: easyflow 流程实例 ID 非法: %s", engine.ErrInvalidParameter, instanceID)
 	}
 
+	// 机器节点须先解析出来再下推，否则 LIMIT 与 COUNT 会被固定文案污染
+	excludeNodeIDs, err := a.machineNodeIDs(ctx, procInstID)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	var (
 		tasks []model.Task
 		total int64
@@ -660,12 +667,12 @@ func (a *adapter) GetPriorComments(ctx context.Context, instanceID domain.ID, li
 	)
 	eg.Go(func() error {
 		var err error
-		tasks, err = a.repo.ListAccessiblePriorComments(ctx, procInstID, limit)
+		tasks, err = a.repo.ListAccessiblePriorComments(ctx, procInstID, limit, excludeNodeIDs)
 		return err
 	})
 	eg.Go(func() error {
 		var err error
-		total, err = a.repo.CountAccessiblePriorComments(ctx, procInstID)
+		total, err = a.repo.CountAccessiblePriorComments(ctx, procInstID, excludeNodeIDs)
 		return err
 	})
 	if err := eg.Wait(); err != nil {
@@ -682,4 +689,38 @@ func (a *adapter) GetPriorComments(ctx context.Context, instanceID domain.ID, li
 			OccurredAt: t.FinishedTime.String(),
 		}
 	}), total, nil
+}
+
+// machineNodeIDs 识别机器节点，交由 SQL 层排除。
+// 按实例锁定的版本回源定义：改版后的拓扑不能用来解释历史工单。
+// 取「排除机器」而非「只留人工」：未识别的节点默认保留，宁可漏排一条系统文案，也不误删真实审批意见
+func (a *adapter) machineNodeIDs(ctx context.Context, procInstID int) ([]string, error) {
+	inst, err := a.repo.GetInstanceByID(ctx, procInstID)
+	if err != nil {
+		return nil, fmt.Errorf("easyflow 查询流程实例失败 [procInstID=%d]: %w", procInstID, err)
+	}
+
+	def, err := a.repo.GetProcessDefineByVersion(ctx, inst.ProcID, inst.ProcVersion)
+	if err != nil {
+		return nil, fmt.Errorf("easyflow 查询流程定义失败 [procID=%d version=%d]: %w", inst.ProcID, inst.ProcVersion, err)
+	}
+
+	return lo.FilterMap(def.Nodes, func(n model.Node, _ int) (string, bool) {
+		return n.NodeID, isMachineNode(n)
+	}), nil
+}
+
+// isMachineNode 机器裁决节点的意见是执行器写死的固定文案，不是人工审批意见。
+// easyflow 把抄送/群聊/自动化都编译成 TaskNode，节点类型区分不了，只能靠 NodeStartEvents 标记；
+// 标记随定义 JSON 落在 proc_def.resource（历史版本走 hist_proc_def），因此判定与工单锁定的拓扑一致。
+// 开始节点不在此列：驳回回退到起点时它退化成普通任务节点，由提单人填写真实意见
+func isMachineNode(n model.Node) bool {
+	for _, ev := range n.NodeStartEvents {
+		switch ev {
+		case compiler.EventCarbonCopy, compiler.EventChatGroup, compiler.EventAutomation:
+			return true
+		}
+	}
+	// 系统代理节点挂的是普通 EventNotify，事件标记区分不了，只能靠占位处理人兜住
+	return len(n.UserIDs) > 0 && n.UserIDs[0] == compiler.SysAutoUser
 }
