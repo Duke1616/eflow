@@ -14,8 +14,9 @@ type walkAction struct {
 }
 
 // walk 以 roots 为起点按指定方向广度遍历拓扑，返回按访问顺序收集的节点。
-// visited 由原语内部统一维护，因此对含环定义天然安全——流程定义的静态校验只拦自环、
-// 不拦多节点环路，若把防环责任留给各调用方，任何一处遗漏都会导致递归栈溢出并击穿整个进程。
+// visited 由原语内部统一维护，因此对含环定义天然安全——发布期 Validate 虽已拦下多节点环路，
+// 存量库仍可能留有修复前落库的环定义，若把防环责任留给各调用方，任何一处遗漏都会栈溢出并击穿整个进程。
+// 注意本原语只做可达性，环会被 visited 静默吞掉，故不能用它判环（判环须靠入度归零，见 model.Validate）。
 func (p *ExecutionPlan) walk(roots []string, forward bool, visit func(model.NodeSpec) walkAction) []model.NodeSpec {
 	var collected []model.NodeSpec
 	visited := make(map[string]struct{}, len(p.NodesMap))

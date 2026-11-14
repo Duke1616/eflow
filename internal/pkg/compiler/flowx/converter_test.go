@@ -343,6 +343,45 @@ func TestFlowxConverter(t *testing.T) {
 			errSubStr: "流程必须有且仅有 1 个开始节点",
 		},
 		{
+			name:     "异常校验_审批节点成环发布期拦截",
+			procKey:  "cycle_proc",
+			procName: "审批成环流程",
+			flow: map[string]any{
+				"nodes": []any{
+					map[string]any{"id": "start_1", "type": "start", "properties": map[string]any{"name": "提单"}},
+					map[string]any{
+						"id":   "approval_1",
+						"type": "user",
+						"properties": map[string]any{
+							"name": "主管审批",
+							"assignees": []map[string]any{
+								{"rule": "appoint", "values": []string{"zhangsan"}},
+							},
+						},
+					},
+					map[string]any{
+						"id":   "approval_2",
+						"type": "user",
+						"properties": map[string]any{
+							"name": "总监审批",
+							"assignees": []map[string]any{
+								{"rule": "appoint", "values": []string{"lisi"}},
+							},
+						},
+					},
+					map[string]any{"id": "end_1", "type": "end", "properties": map[string]any{"name": "归档办结"}},
+				},
+				"edges": []any{
+					map[string]any{"id": "e1", "sourceNodeId": "start_1", "targetNodeId": "approval_1"},
+					map[string]any{"id": "e2", "sourceNodeId": "approval_1", "targetNodeId": "approval_2"},
+					map[string]any{"id": "e3", "sourceNodeId": "approval_2", "targetNodeId": "approval_1"},
+					map[string]any{"id": "e4", "sourceNodeId": "approval_2", "targetNodeId": "end_1"},
+				},
+			},
+			wantErr:   true,
+			errSubStr: "死循环环路（路径: 主管审批 → 总监审批 → 主管审批）",
+		},
+		{
 			name:      "异常校验_graph为nil拦截",
 			procKey:   "nil_graph_proc",
 			nilGraph:  true,

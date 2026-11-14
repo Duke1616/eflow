@@ -44,7 +44,7 @@ type ProcessDefinition struct {
 	Edges   []EdgeSpec `json:"edges"`   // 有向边集合
 }
 
-// Validate 静态校验流程定义拓扑完整性、连通性与端点度数（Fail-Fast 实体领域自卫）
+// Validate 静态校验流程定义拓扑完整性、连通性、端点度数与无环性（Fail-Fast 实体领域自卫）
 func (def ProcessDefinition) Validate() error {
 	if def.Key == "" {
 		return fmt.Errorf("流程唯一标识 (Key) 不能为空")
@@ -118,7 +118,9 @@ func (def ProcessDefinition) Validate() error {
 		}
 	}
 
-	return nil
+	// 审批节点成环不触发瞬时穿透深度护栏：实例会永远停在 Running 且在途任务无限增长，
+	// 运行期兜底救不回来，必须在发布期拒绝
+	return def.validateAcyclic(inDegree)
 }
 
 // NodeSpec 节点规格定义

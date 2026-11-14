@@ -13,8 +13,8 @@ import (
 )
 
 // autoCycleDefinition 构造两个同类自动节点互相成环的定义。
-// 静态校验刻意只拦自环（防环由 kernel 遍历原语自身保证），故此类定义可以正常部署，
-// 但瞬时穿透递归没有天然停止点，必须由调度层的深度护栏收敛为业务错误
+// 发布期 Validate 已拦截此类环路，但存量库仍可能留有修复前落库的环定义；
+// 瞬时穿透递归没有天然停止点，必须由调度层的深度护栏收敛为业务错误
 func autoCycleDefinition(key string, nodeType model.NodeType) model.ProcessDefinition {
 	b := NewProcess(key, "自动节点成环").Start("s", "发起")
 	switch nodeType {
@@ -46,16 +46,21 @@ func TestApplyStepDecision_AutoNodeCycleFailsFastNotCrash(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			engine := NewEngine(memory.NewStorage())
+			store := memory.NewStorage()
+			engine := NewEngine(store)
 			engine.RegisterWorker("noop", func(context.Context, *TaskContext) (*TaskResult, error) {
 				return &TaskResult{}, nil
 			})
 
 			def := autoCycleDefinition("cycle_"+string(tc.nodeType), tc.nodeType)
-			require.NoError(t, def.Validate(), "此类定义可部署，护栏必须在运行期生效")
+			require.ErrorContains(t, def.Validate(), "死循环环路", "发布期必须拒绝环定义")
 
+			// 绕过 Deploy 直接落库，模拟修复前已部署的存量环定义，护栏仍须在运行期生效。
 			// 修复前此处为 runtime fatal error: stack overflow，recover 兜不住，整个进程直接死
-			_, err := engine.Start(ctx, StartReq{Def: def, Starter: "alice", Variables: model.Variables{}})
+			require.NoError(t, store.SaveDefinition(ctx, def))
+			_, err := engine.Start(ctx, StartReq{
+				Key: def.Key, Version: def.Version, Starter: "alice", Variables: model.Variables{},
+			})
 			require.Error(t, err)
 			assert.ErrorIs(t, err, ErrPenetrationTooDeep)
 		})

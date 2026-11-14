@@ -122,7 +122,7 @@ func TestExecutionPlan_Walk(t *testing.T) {
 }
 
 // cyclicGatewayPlan 构造网关环路：gw1 -> gw2 -> gw1。
-// 静态校验只拦自环、不拦多节点环路，因此这种定义可以被正常部署，
+// 发布期 Validate 已拦截多节点环路，但存量库仍可能留有修复前落库的环定义，
 // 遍历原语必须自带 visited，否则逆向递归会栈溢出并击穿整个进程。
 func cyclicGatewayPlan(t *testing.T) *ExecutionPlan {
 	t.Helper()
@@ -143,7 +143,8 @@ func cyclicGatewayPlan(t *testing.T) *ExecutionPlan {
 			{Source: "gw2", Target: "end"},
 		},
 	}
-	require.NoError(t, def.Validate(), "环路定义当前可被部署，故遍历必须自身环安全")
+	require.ErrorContains(t, def.Validate(), "死循环环路", "发布期已拦截环路")
+	// 直接建计划绕过发布校验，验证存量环定义下遍历原语自身的环安全
 	return NewExecutionPlan(def)
 }
 
