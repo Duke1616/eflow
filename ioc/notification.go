@@ -8,14 +8,17 @@ import (
 	"github.com/Duke1616/eflow/internal/pkg/notification/provider"
 	"github.com/Duke1616/eflow/internal/pkg/notification/provider/feishu"
 	"github.com/Duke1616/eflow/internal/pkg/notification/provider/sequential"
+	"github.com/Duke1616/eflow/internal/pkg/notification/provider/wechat"
 	"github.com/Duke1616/eflow/internal/pkg/notification/sender"
 	lark "github.com/larksuite/oapi-sdk-go/v3"
+	"github.com/xen0n/go-workwx"
 )
 
 // InitNotificationSender 初始化通知发送器，提供给底层 Service 和 Event 逻辑使用
 // NOTE: 该函数高度聚合了 gRPC 飞书卡片发送、物理连接降级直连飞书卡片等高可用容灾逻辑
 func InitNotificationSender(
 	larkClient *lark.Client,
+	workApp *workwx.WorkwxApp,
 	notificationSvc notificationv1.NotificationServiceClient,
 	templateSvc templatev1.TemplateServiceClient,
 ) (sender.NotificationSender, error) {
@@ -41,12 +44,17 @@ func InitNotificationSender(
 	larkTextSelector := sequential.NewSelectorBuilder([]provider.Provider{larkTextProvider})
 	larkTextChannel := channel.NewLarkTextChannel(larkTextSelector)
 
-	// 4. 构建分发器并挂载两个渠道
+	// 4. Wechat 渠道：企微应用 markdown 消息，个人/群聊由 SDK 按收件人类型自动路由
+	wechatSelector := sequential.NewSelectorBuilder([]provider.Provider{wechat.NewProvider(workApp)})
+	wechatChannel := channel.NewWechatChannel(wechatSelector)
+
+	// 5. 构建分发器并挂载渠道
 	dispatcher := channel.NewDispatcher(map[notification.Channel]channel.Channel{
 		notification.ChannelLarkCard: larkCardChannel,
 		notification.ChannelLarkText: larkTextChannel,
+		notification.ChannelWechat:   wechatChannel,
 	})
 
-	// 5. 实例化并返回最终的通知发送器
+	// 6. 实例化并返回最终的通知发送器
 	return sender.NewSender(dispatcher), nil
 }
