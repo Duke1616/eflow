@@ -192,15 +192,14 @@ func (h *Handler) GetTaskFormConfig(ctx *ginx.Context, req TaskFormConfigReq) (g
 }
 
 func (h *Handler) CreateTicket(ctx *ginx.Context, req CreateTicketReq) (ginx.Result, error) {
-	if req.CreateBy == "" {
-		username, err := h.getSessUsername(ctx)
-		if err != nil {
-			return systemErrorResult, err
-		}
-		req.CreateBy = username
+	// 发起人以登录会话为唯一权威来源，杜绝请求体冒名顶替；
+	// 系统级代发起走 gRPC CreateBizTicket 契约，不经过本入口
+	username, err := h.getSessUsername(ctx)
+	if err != nil {
+		return systemErrorResult, err
 	}
 
-	err := h.svc.CreateTicket(ctx.Context, h.toDomain(req))
+	err = h.svc.CreateTicket(ctx.Context, h.toDomain(req, username))
 	if err != nil {
 		if res, errHandled := handleTaskOperationError(err); res.Code != 500 {
 			return res, errHandled
@@ -445,7 +444,7 @@ func (h *Handler) Detail(ctx *ginx.Context, req DetailProcessInstIdReq) (ginx.Re
 		return ginx.Result{Code: 400, Msg: "流程实例标识不能为空 (process_instance_id)"}, nil
 	}
 
-	ticket, err := h.svc.GetByProcessInstance(ctx.Context, req.ProcessInstanceId)
+	ticket, err := h.svc.GetByProcessInstanceScoped(ctx.Context, req.ProcessInstanceId)
 	if err != nil {
 		if errors.Is(err, domain.ErrTicketNotAccessible) {
 			return ticketNotAccessibleResult, nil
@@ -509,6 +508,9 @@ func (h *Handler) TaskRecord(ctx *ginx.Context, req RecordTaskReq) (ginx.Result,
 func (h *Handler) TaskTimeline(ctx *ginx.Context, req TaskTimelineReq) (ginx.Result, error) {
 	events, total, err := h.querySvc.TaskTimeline(ctx.Context, req.ProcessInstId, int(req.Offset), int(req.Limit))
 	if err != nil {
+		if errors.Is(err, domain.ErrTicketNotAccessible) {
+			return ticketNotAccessibleResult, nil
+		}
 		return systemErrorResult, err
 	}
 
@@ -576,9 +578,9 @@ func toVoPriorComments(comments []domain.PriorComment) []PriorCommentVO {
 	})
 }
 
-func (h *Handler) toDomain(req CreateTicketReq) domain.Ticket {
+func (h *Handler) toDomain(req CreateTicketReq, username string) domain.Ticket {
 	return domain.Ticket{
-		CreateBy:   req.CreateBy,
+		CreateBy:   username,
 		TemplateId: req.TemplateId,
 		WorkflowId: req.WorkflowId,
 		Data:       req.Data,

@@ -86,6 +86,21 @@ func (mr *MockTicketRepositoryMockRecorder) CountTicket(ctx, userId, status any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountTicket", reflect.TypeOf((*MockTicketRepository)(nil).CountTicket), ctx, userId, status)
 }
 
+// CountTodo mocks base method.
+func (m *MockTicketRepository) CountTodo(ctx context.Context, userId string, status []int) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountTodo", ctx, userId, status)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountTodo indicates an expected call of CountTodo.
+func (mr *MockTicketRepositoryMockRecorder) CountTodo(ctx, userId, status any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountTodo", reflect.TypeOf((*MockTicketRepository)(nil).CountTodo), ctx, userId, status)
+}
+
 // CreateBizTicket mocks base method.
 func (m *MockTicketRepository) CreateBizTicket(ctx context.Context, ticket domain.Ticket) (domain.Ticket, error) {
 	m.ctrl.T.Helper()
@@ -173,6 +188,21 @@ func (m *MockTicketRepository) DetailByProcessInstance(ctx context.Context, inst
 func (mr *MockTicketRepositoryMockRecorder) DetailByProcessInstance(ctx, instanceID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DetailByProcessInstance", reflect.TypeOf((*MockTicketRepository)(nil).DetailByProcessInstance), ctx, instanceID)
+}
+
+// DetailByProcessInstanceScoped mocks base method.
+func (m *MockTicketRepository) DetailByProcessInstanceScoped(ctx context.Context, instanceID domain.ID) (domain.Ticket, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DetailByProcessInstanceScoped", ctx, instanceID)
+	ret0, _ := ret[0].(domain.Ticket)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DetailByProcessInstanceScoped indicates an expected call of DetailByProcessInstanceScoped.
+func (mr *MockTicketRepositoryMockRecorder) DetailByProcessInstanceScoped(ctx, instanceID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DetailByProcessInstanceScoped", reflect.TypeOf((*MockTicketRepository)(nil).DetailByProcessInstanceScoped), ctx, instanceID)
 }
 
 // FindByBizIdAndKey mocks base method.
@@ -278,6 +308,21 @@ func (m *MockTicketRepository) ListTicketByProcessInstances(ctx context.Context,
 func (mr *MockTicketRepositoryMockRecorder) ListTicketByProcessInstances(ctx, instanceIDs any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTicketByProcessInstances", reflect.TypeOf((*MockTicketRepository)(nil).ListTicketByProcessInstances), ctx, instanceIDs)
+}
+
+// ListTodo mocks base method.
+func (m *MockTicketRepository) ListTodo(ctx context.Context, userId string, status []int, offset, limit int64) ([]domain.Ticket, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListTodo", ctx, userId, status, offset, limit)
+	ret0, _ := ret[0].([]domain.Ticket)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListTodo indicates an expected call of ListTodo.
+func (mr *MockTicketRepositoryMockRecorder) ListTodo(ctx, userId, status, offset, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTodo", reflect.TypeOf((*MockTicketRepository)(nil).ListTodo), ctx, userId, status, offset, limit)
 }
 
 // MarkProcessStartFailed mocks base method.

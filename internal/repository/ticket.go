@@ -21,6 +21,8 @@ type TicketRepository interface {
 	CreateTicket(ctx context.Context, req domain.Ticket) (int64, error)
 	// DetailByProcessInstance 根据流程实例标识（自适应整型 ID 或字符串 Key）多态检索本地工单数据
 	DetailByProcessInstance(ctx context.Context, instanceID domain.ID) (domain.Ticket, error)
+	// DetailByProcessInstanceScoped 详情读路由专用：在租户隔离与 PBAC 决策双闸门下按流程实例标识检索工单
+	DetailByProcessInstanceScoped(ctx context.Context, instanceID domain.ID) (domain.Ticket, error)
 	// DetailByEngineInstance 显式指定工作流引擎类型与实例标识精准检索工单数据
 	DetailByEngineInstance(ctx context.Context, engineType domain.EngineType, instanceID domain.ID) (domain.Ticket, error)
 	// Detail 根据主键 ID 获取指定的物理工单明细数据
@@ -49,6 +51,10 @@ type TicketRepository interface {
 	ListHistory(ctx context.Context, userId string, status []int, offset, limit int64) ([]domain.Ticket, error)
 	// CountHistory 使用与 ListHistory 相同的 PBAC 和查询条件统计历史工单总数。
 	CountHistory(ctx context.Context, userId string, status []int) (int64, error)
+	// ListTodo 获取经过 PBAC AccessScope 约束的待办工单列表，userId 仅作为附加收窄条件。
+	ListTodo(ctx context.Context, userId string, status []int, offset, limit int64) ([]domain.Ticket, error)
+	// CountTodo 使用与 ListTodo 相同的 PBAC 和查询条件统计待办工单总数。
+	CountTodo(ctx context.Context, userId string, status []int) (int64, error)
 	// FindByBizIdAndKey 依据外部业务场景 ID 及业务唯一单据号 Key 查找匹配工单
 	FindByBizIdAndKey(ctx context.Context, bizId int64, key string, status []domain.Status) (domain.Ticket, error)
 	// MergeTicketData 高效增量合并更新工单内已存盘的动态表单变量变量集
@@ -84,6 +90,11 @@ func (repo *ticketRepository) CreateTicket(ctx context.Context, req domain.Ticke
 
 func (repo *ticketRepository) DetailByProcessInstance(ctx context.Context, instanceID domain.ID) (domain.Ticket, error) {
 	ticket, err := repo.dao.DetailByProcessInstance(ctx, instanceID.String())
+	return repo.toDomain(ticket), err
+}
+
+func (repo *ticketRepository) DetailByProcessInstanceScoped(ctx context.Context, instanceID domain.ID) (domain.Ticket, error) {
+	ticket, err := repo.dao.DetailByProcessInstanceScoped(ctx, instanceID.String())
 	return repo.toDomain(ticket), err
 }
 
@@ -169,6 +180,17 @@ func (repo *ticketRepository) ListHistory(ctx context.Context, userId string, st
 // CountHistory 统计经 PBAC 决策允许访问的历史工单。
 func (repo *ticketRepository) CountHistory(ctx context.Context, userId string, status []int) (int64, error) {
 	return repo.dao.CountHistory(ctx, userId, status)
+}
+
+// ListTodo 查询经 PBAC 决策允许访问的待办工单。
+func (repo *ticketRepository) ListTodo(ctx context.Context, userId string, status []int, offset, limit int64) ([]domain.Ticket, error) {
+	tickets, err := repo.dao.ListTodo(ctx, userId, status, offset, limit)
+	return slice.Map(tickets, func(idx int, src dao.Ticket) domain.Ticket { return repo.toDomain(src) }), err
+}
+
+// CountTodo 统计经 PBAC 决策允许访问的待办工单。
+func (repo *ticketRepository) CountTodo(ctx context.Context, userId string, status []int) (int64, error) {
+	return repo.dao.CountTodo(ctx, userId, status)
 }
 
 func (repo *ticketRepository) FindByBizIdAndKey(ctx context.Context, bizId int64, key string, status []domain.Status) (domain.Ticket, error) {

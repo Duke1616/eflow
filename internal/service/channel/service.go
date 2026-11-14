@@ -120,7 +120,7 @@ func (s *channelActionService) DispatchAction(ctx context.Context, evt domain.Ch
 	case domain.ChannelActionReject:
 		return s.handleReject(ctx, evt, engineType, operator, isAdmin, comment)
 	case domain.ChannelActionRevoke:
-		return s.handleRevoke(ctx, evt, operator, comment)
+		return s.handleRevoke(ctx, evt, operator, isAdmin, comment)
 	default:
 		s.logger.Warn("收到不支持的渠道动作指令", elog.String("action", string(evt.Action)))
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedAction, evt.Action)
@@ -200,7 +200,7 @@ func formatTaskActionError(action domain.ChannelActionType, err error) string {
 }
 
 // handleRevoke 统一处理工单撤单逻辑
-func (s *channelActionService) handleRevoke(ctx context.Context, evt domain.ChannelActionEvent, operator string, reason string) (*domain.ChannelActionResult, error) {
+func (s *channelActionService) handleRevoke(ctx context.Context, evt domain.ChannelActionEvent, operator string, isAdmin bool, reason string) (*domain.ChannelActionResult, error) {
 	ticket, err := s.ticketSvc.GetByID(ctx, evt.TicketID)
 	if err != nil {
 		return &domain.ChannelActionResult{
@@ -208,6 +208,22 @@ func (s *channelActionService) handleRevoke(ctx context.Context, evt domain.Chan
 			Action:   domain.ChannelActionRevoke,
 			Operator: operator,
 			Remark:   "撤回失败: 工单实体不存在",
+			Error:    err,
+		}, nil
+	}
+
+	// 与 Web 撤回入口同口径的归属防卫：渠道身份解析只证明"是谁"，不证明"有权撤谁的单"，
+	// 缺失此闸门时任何已绑定账号都能凭 TicketID 撤销他人工单
+	if err = ticket.CanRevokeBy(operator, isAdmin); err != nil {
+		remark := err.Error()
+		if errors.Is(err, domain.ErrTicketUnauthorized) {
+			remark = "无权撤回他人发起的工单"
+		}
+		return &domain.ChannelActionResult{
+			Success:  false,
+			Action:   domain.ChannelActionRevoke,
+			Operator: operator,
+			Remark:   remark,
 			Error:    err,
 		}, nil
 	}

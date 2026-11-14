@@ -115,6 +115,21 @@ func (mr *MockServiceMockRecorder) GetByProcessInstance(ctx, instanceID any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByProcessInstance", reflect.TypeOf((*MockService)(nil).GetByProcessInstance), ctx, instanceID)
 }
 
+// GetByProcessInstanceScoped mocks base method.
+func (m *MockService) GetByProcessInstanceScoped(ctx context.Context, instanceID domain.ID) (domain.Ticket, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetByProcessInstanceScoped", ctx, instanceID)
+	ret0, _ := ret[0].(domain.Ticket)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetByProcessInstanceScoped indicates an expected call of GetByProcessInstanceScoped.
+func (mr *MockServiceMockRecorder) GetByProcessInstanceScoped(ctx, instanceID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByProcessInstanceScoped", reflect.TypeOf((*MockService)(nil).GetByProcessInstanceScoped), ctx, instanceID)
+}
+
 // GetRejectTargets mocks base method.
 func (m *MockService) GetRejectTargets(ctx context.Context, ticketId int64, taskId string) ([]domain.RejectTarget, error) {
 	m.ctrl.T.Helper()

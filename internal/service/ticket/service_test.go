@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	"github.com/Duke1616/eflow/internal/repository"
 	repomocks "github.com/Duke1616/eflow/internal/repository/mocks"
 	enginemocks "github.com/Duke1616/eflow/internal/service/engine/mocks"
 	workflowSvc "github.com/Duke1616/eflow/internal/service/workflow"
@@ -149,12 +150,12 @@ func TestTicketService_Pass(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			name:      "表单必填字段校验失败",
-			ticketId:  1001,
-			taskId:    "103",
-			operator:  "auditor1",
-			isAdmin:   false,
-			comment:   "同意",
+			name:     "表单必填字段校验失败",
+			ticketId: 1001,
+			taskId:   "103",
+			operator: "auditor1",
+			isAdmin:  false,
+			comment:  "同意",
 			extraData: map[string]interface{}{
 				"reason": "",
 			},
@@ -201,12 +202,12 @@ func TestTicketService_Pass(t *testing.T) {
 			wantErr: ValidationError,
 		},
 		{
-			name:      "包含表单字段时成功合并数据、归档快照并推进流程",
-			ticketId:  1001,
-			taskId:    "104",
-			operator:  "admin_user",
-			isAdmin:   true,
-			comment:   "通过",
+			name:     "包含表单字段时成功合并数据、归档快照并推进流程",
+			ticketId: 1001,
+			taskId:   "104",
+			operator: "admin_user",
+			isAdmin:  true,
+			comment:  "通过",
 			extraData: map[string]interface{}{
 				"opinion": "审批通过，准予发布",
 			},
@@ -283,12 +284,12 @@ func TestTicketService_Pass(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			name:      "Flowx 引擎任务通过且根据 InstanceKey 寻址工单完成数据合并",
-			ticketId:  999,
-			taskId:    "task_flowx_999",
-			operator:  "flowx_auditor",
-			isAdmin:   false,
-			comment:   "flowx 审批通过",
+			name:     "Flowx 引擎任务通过且根据 InstanceKey 寻址工单完成数据合并",
+			ticketId: 999,
+			taskId:   "task_flowx_999",
+			operator: "flowx_auditor",
+			isAdmin:  false,
+			comment:  "flowx 审批通过",
 			extraData: map[string]interface{}{
 				"opinion": "同意",
 			},
@@ -1042,6 +1043,57 @@ func TestTicketService_GetRejectTargets(t *testing.T) {
 				assert.Len(t, targets, tc.wantLen)
 				assert.True(t, targets[0].IsStarter)
 			}
+		})
+	}
+}
+
+func TestTicketService_GetByProcessInstanceScoped(t *testing.T) {
+	testCases := []struct {
+		name       string
+		repoTicket domain.Ticket
+		repoErr    error
+		wantErr    error
+		wantID     int64
+	}{
+		{
+			name:       "可见工单正常返回并挂载流程策略",
+			repoTicket: domain.Ticket{Id: 1001, CreateBy: "alice"},
+			wantID:     1001,
+		},
+		{
+			name:    "查无可见记录统一抛不可访问_隐藏不存在与越权差异",
+			repoErr: repository.ErrTicketNotFound,
+			wantErr: domain.ErrTicketNotAccessible,
+		},
+		{
+			name:    "其他仓储错误保留根因不被吞没",
+			repoErr: errors.New("db down"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			repo := repomocks.NewMockTicketRepository(ctrl)
+			repo.EXPECT().DetailByProcessInstanceScoped(gomock.Any(), domain.NewID("inst_1")).
+				Return(tc.repoTicket, tc.repoErr)
+
+			svc := NewService(repo, nil, nil, nil, nil)
+			ticket, err := svc.GetByProcessInstanceScoped(context.Background(), domain.NewID("inst_1"))
+			if tc.wantErr != nil {
+				assert.ErrorIs(t, err, tc.wantErr)
+				return
+			}
+			if tc.repoErr != nil {
+				require.Error(t, err)
+				assert.ErrorContains(t, err, "db down")
+				assert.NotErrorIs(t, err, domain.ErrTicketNotAccessible)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantID, ticket.Id)
 		})
 	}
 }

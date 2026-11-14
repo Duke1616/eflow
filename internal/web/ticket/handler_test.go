@@ -1,6 +1,7 @@
 package ticket
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -396,7 +397,7 @@ func TestHandler_Detail(t *testing.T) {
 			name: "通过process_instance_id雪花纯数字查询成功且携带最近驳回与审批评论",
 			req:  DetailProcessInstIdReq{ProcessInstanceId: InstanceID("377374770910412800")},
 			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService, mockQuery *ticketmocks.MockQueryService) {
-				mockSvc.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID("377374770910412800")).
+				mockSvc.EXPECT().GetByProcessInstanceScoped(gomock.Any(), domain.NewID("377374770910412800")).
 					Return(domain.Ticket{Id: 101, CreateBy: "alice"}, nil)
 				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice"}}, nil)
@@ -443,7 +444,7 @@ func TestHandler_Detail(t *testing.T) {
 			name: "审批上下文整体降级为空_工单详情仍可打开",
 			req:  DetailProcessInstIdReq{ProcessInstanceId: InstanceID("377374770910412800")},
 			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService, mockQuery *ticketmocks.MockQueryService) {
-				mockSvc.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID("377374770910412800")).
+				mockSvc.EXPECT().GetByProcessInstanceScoped(gomock.Any(), domain.NewID("377374770910412800")).
 					Return(domain.Ticket{Id: 101, CreateBy: "alice"}, nil)
 				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice"}}, nil)
@@ -462,7 +463,7 @@ func TestHandler_Detail(t *testing.T) {
 			name: "仅驳回横幅有值时意见摘要缺省_两区块独立映射",
 			req:  DetailProcessInstIdReq{ProcessInstanceId: InstanceID("377374770910412800")},
 			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService, mockQuery *ticketmocks.MockQueryService) {
-				mockSvc.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID("377374770910412800")).
+				mockSvc.EXPECT().GetByProcessInstanceScoped(gomock.Any(), domain.NewID("377374770910412800")).
 					Return(domain.Ticket{Id: 101, CreateBy: "alice"}, nil)
 				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice"}}, nil)
@@ -484,7 +485,7 @@ func TestHandler_Detail(t *testing.T) {
 			name: "链路无可读意见时不下发空摘要字段",
 			req:  DetailProcessInstIdReq{ProcessInstanceId: InstanceID("377374770910412800")},
 			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService, mockQuery *ticketmocks.MockQueryService) {
-				mockSvc.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID("377374770910412800")).
+				mockSvc.EXPECT().GetByProcessInstanceScoped(gomock.Any(), domain.NewID("377374770910412800")).
 					Return(domain.Ticket{Id: 101, CreateBy: "alice"}, nil)
 				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
 					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice"}}, nil)
@@ -502,11 +503,20 @@ func TestHandler_Detail(t *testing.T) {
 			name: "未检索到工单返回明确错误包装",
 			req:  DetailProcessInstIdReq{ProcessInstanceId: InstanceID("377374770910412800")},
 			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService, mockQuery *ticketmocks.MockQueryService) {
-				mockSvc.EXPECT().GetByProcessInstance(gomock.Any(), domain.NewID("377374770910412800")).
+				mockSvc.EXPECT().GetByProcessInstanceScoped(gomock.Any(), domain.NewID("377374770910412800")).
 					Return(domain.Ticket{}, errors.New("record not found"))
 			},
 			wantErr:    true,
 			wantErrMsg: "根据流程实例标识 [377374770910412800] 查询工单详情失败",
+		},
+		{
+			name: "工单不可访问返回403统一文案_隐藏不存在与越权差异",
+			req:  DetailProcessInstIdReq{ProcessInstanceId: InstanceID("377374770910412800")},
+			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockSvc *ticketmocks.MockService, mockRating *ratingmocks.MockService, mockQuery *ticketmocks.MockQueryService) {
+				mockSvc.EXPECT().GetByProcessInstanceScoped(gomock.Any(), domain.NewID("377374770910412800")).
+					Return(domain.Ticket{}, domain.ErrTicketNotAccessible)
+			},
+			wantCode: 403,
 		},
 	}
 
@@ -712,6 +722,115 @@ func TestHandler_GetRejectTargets(t *testing.T) {
 			require.True(t, ok)
 			assert.Len(t, targets, tc.wantLen)
 			assert.True(t, targets[0].IsStarter)
+		})
+	}
+}
+
+func TestHandler_CreateTicket_SessionAuthoritative(t *testing.T) {
+	testCases := []struct {
+		name      string
+		userID    int64
+		mockSetup func(mockUser *usermocks.MockUserServiceClient, mockTicket *ticketmocks.MockService)
+		wantErr   bool
+	}{
+		{
+			name:   "发起人以登录会话为唯一权威来源",
+			userID: 1,
+			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockTicket *ticketmocks.MockService) {
+				mockUser.EXPECT().QueryById(gomock.Any(), &userv1.QueryByIdReq{Id: 1}).
+					Return(&userv1.QueryUserResp{User: &userv1.User{Id: 1, Username: "alice"}}, nil)
+				mockTicket.EXPECT().CreateTicket(gomock.Any(), gomock.Any()).
+					DoAndReturn(func(_ context.Context, ticket domain.Ticket) error {
+						assert.Equal(t, "alice", ticket.CreateBy, "发起人必须来自登录会话而非请求体")
+						assert.Equal(t, domain.START, ticket.Status)
+						assert.Equal(t, int64(9), ticket.TemplateId)
+						return nil
+					})
+			},
+		},
+		{
+			name:   "会话缺失用户身份时拒绝创建且不触达服务",
+			userID: 0,
+			mockSetup: func(mockUser *usermocks.MockUserServiceClient, mockTicket *ticketmocks.MockService) {
+				// 不声明任何期望：身份缺失时不得查询用户，更不得创建工单
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockUser := usermocks.NewMockUserServiceClient(ctrl)
+			mockTicket := ticketmocks.NewMockService(ctrl)
+			tc.mockSetup(mockUser, mockTicket)
+
+			h := &Handler{
+				logger:  elog.DefaultLogger,
+				userSvc: mockUser,
+				svc:     mockTicket,
+			}
+			ctx := newTestContext(tc.userID)
+			res, err := h.CreateTicket(ctx, CreateTicketReq{
+				TemplateId: 9,
+				WorkflowId: 8,
+				Data:       map[string]interface{}{"reason": "测试发起"},
+			})
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "创建工单成功", res.Msg)
+		})
+	}
+}
+
+func TestHandler_TaskTimeline_AccessGate(t *testing.T) {
+	testCases := []struct {
+		name     string
+		svcErr   error
+		wantCode int
+		wantMsg  string
+	}{
+		{
+			name:     "工单不可访问时返回403统一文案",
+			svcErr:   domain.ErrTicketNotAccessible,
+			wantCode: 403,
+			wantMsg:  "工单不存在或无权访问",
+		},
+		{
+			name:     "其他错误返回系统内部错误",
+			svcErr:   errors.New("engine down"),
+			wantCode: 500,
+			wantMsg:  "系统内部错误",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockQuery := ticketmocks.NewMockQueryService(ctrl)
+			mockQuery.EXPECT().TaskTimeline(gomock.Any(), domain.NewID("inst_1"), 0, 10).
+				Return(nil, int64(0), tc.svcErr)
+
+			h := &Handler{
+				logger:   elog.DefaultLogger,
+				querySvc: mockQuery,
+			}
+			ctx := newTestContext(1)
+			res, err := h.TaskTimeline(ctx, TaskTimelineReq{ProcessInstId: InstanceID("inst_1"), Offset: 0, Limit: 10})
+			if tc.wantCode == 500 {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tc.wantCode, res.Code)
+			assert.Equal(t, tc.wantMsg, res.Msg)
 		})
 	}
 }

@@ -15,7 +15,6 @@ type CreateTicketReq struct {
 	TemplateId int64                  `json:"template_id"`
 	WorkflowId int64                  `json:"workflow_id"`
 	Data       map[string]interface{} `json:"data"`
-	CreateBy   string                 `json:"create_by"`
 }
 
 type DetailProcessInstIdReq struct {

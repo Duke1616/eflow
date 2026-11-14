@@ -2,6 +2,7 @@ package ticket
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	userv1 "github.com/Duke1616/eflow/api/proto/gen/eiam/user/v1"
@@ -99,7 +100,8 @@ func (q *queryService) ListUserTodo(ctx context.Context, username, processName s
 	return views, total, nil
 }
 
-// ListAllTodo 查询系统全量流转中的待办工单列表，以业务工单主表为权威事实源，天然实现全局时间倒序与精准分页
+// ListAllTodo 查询系统全量流转中的待办工单列表，以业务工单主表为权威事实源，天然实现全局时间倒序与精准分页。
+// 路由声明了 Todo AccessScope，可见范围由 ListTodo/CountTodo 下推 PBAC 决策强制执行
 func (q *queryService) ListAllTodo(ctx context.Context, _ string, _ string, _ bool, offset, limit int64) ([]domain.TicketTaskView, int64, error) {
 	statuses := []int{
 		domain.START.ToInt(),
@@ -111,10 +113,10 @@ func (q *queryService) ListAllTodo(ctx context.Context, _ string, _ string, _ bo
 	// 1. 并发查询全量流转中工单主记录与总数，天然按 ctime 倒序排列，分页绝对精确
 	tickets, total, err := fetchPagedParallel(
 		func() ([]domain.Ticket, error) {
-			return q.repo.ListTicket(ctx, "", statuses, offset, limit)
+			return q.repo.ListTodo(ctx, "", statuses, offset, limit)
 		},
 		func() (int64, error) {
-			return q.repo.CountTicket(ctx, "", statuses)
+			return q.repo.CountTodo(ctx, "", statuses)
 		},
 	)
 	if err != nil {
@@ -285,10 +287,18 @@ func (q *queryService) TaskRecord(ctx context.Context, processInstID domain.ID, 
 	return records, total, nil
 }
 
-// TaskTimeline 以节点执行批次为单位返回流转历史时间线，聚合审批汇总与参与人真名
+// TaskTimeline 以节点执行批次为单位返回流转历史时间线，聚合审批汇总与参与人真名。
+// 路由声明了 AccessScope，但 flowx 引擎侧时间线读路径不带 PBAC 闸门，
+// 故在聚合入口先过租户+决策双闸门，并顺带从可见工单上解析引擎类型，取代无防护的独立反查
 func (q *queryService) TaskTimeline(ctx context.Context, processInstID domain.ID, offset, limit int) ([]domain.TaskTimelineEvent, int64, error) {
-	engineType := q.resolveEngineType(ctx, processInstID)
-	groups, total, err := q.engine.GetTaskTimeline(ctx, engineType, processInstID, offset, limit)
+	ticket, err := q.repo.DetailByProcessInstanceScoped(ctx, processInstID)
+	if err != nil {
+		if errors.Is(err, repository.ErrTicketNotFound) {
+			return nil, 0, domain.ErrTicketNotAccessible
+		}
+		return nil, 0, err
+	}
+	groups, total, err := q.engine.GetTaskTimeline(ctx, ticket.Process.ResolveEngineType(), processInstID, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}

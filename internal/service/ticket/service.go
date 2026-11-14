@@ -36,6 +36,9 @@ type Service interface {
 	CreateTicket(ctx context.Context, req domain.Ticket) error
 	// GetByProcessInstance 根据流程实例唯一标识统一检索工单明细
 	GetByProcessInstance(ctx context.Context, instanceID domain.ID) (domain.Ticket, error)
+	// GetByProcessInstanceScoped 详情读路由专用：在租户与 PBAC 决策双闸门下检索工单，
+	// 不可见时统一返回 domain.ErrTicketNotAccessible，不区分不存在与越权
+	GetByProcessInstanceScoped(ctx context.Context, instanceID domain.ID) (domain.Ticket, error)
 	// GetByID 根据自增主键 ID 查询物理工单及其动态表单属性详情
 	GetByID(ctx context.Context, id int64) (domain.Ticket, error)
 	// UpdateStatusByProcessInstance 根据流程实例唯一标识统一更新本地物理工单状态
@@ -196,6 +199,20 @@ func (s *ticketService) GetByProcessInstance(ctx context.Context, instanceID dom
 			return domain.Ticket{}, errs.NotFound("TICKET_NOT_FOUND", fmt.Sprintf("工单流程实例不存在: %s", instanceID)).WithCause(err)
 		}
 		return domain.Ticket{}, fmt.Errorf("根据流程实例标识 [%s] 获取工单失败: %w", instanceID, err)
+	}
+	ticket.FlowPolicy = s.resolveTicketPolicy(ctx, ticket)
+	return ticket, nil
+}
+
+// GetByProcessInstanceScoped 详情读路由专用检索：租户隔离与 PBAC 决策双闸门由 DAO 下推执行。
+// 查无可见记录时统一抛 ErrTicketNotAccessible，对外隐藏"不存在"与"越权"的差异，避免实例标识枚举探测
+func (s *ticketService) GetByProcessInstanceScoped(ctx context.Context, instanceID domain.ID) (domain.Ticket, error) {
+	ticket, err := s.repo.DetailByProcessInstanceScoped(ctx, instanceID)
+	if err != nil {
+		if errors.Is(err, repository.ErrTicketNotFound) {
+			return domain.Ticket{}, domain.ErrTicketNotAccessible
+		}
+		return domain.Ticket{}, fmt.Errorf("根据流程实例标识 [%s] 获取工单详情失败: %w", instanceID, err)
 	}
 	ticket.FlowPolicy = s.resolveTicketPolicy(ctx, ticket)
 	return ticket, nil

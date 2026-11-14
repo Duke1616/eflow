@@ -123,12 +123,12 @@ func TestChannelActionService_DispatchAction(t *testing.T) {
 			},
 			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
 				mockTicket.EXPECT().GetByID(gomock.Any(), int64(2735)).Return(domain.Ticket{
-					CreateBy: "luankz",
+					CreateBy: "lisi",
 					Process:  domain.Process{EngineType: domain.EngineTypeFlowx},
 				}, nil).AnyTimes()
 				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelFeishu, "observer_feishu_id", domain.EngineTypeFlowx, domain.NewID("")).
 					Return(nil, ErrChannelUserNotFound)
-				mockResolver.EXPECT().ResolveStarter(gomock.Any(), domain.ChannelFeishu, "observer_feishu_id", "luankz").
+				mockResolver.EXPECT().ResolveStarter(gomock.Any(), domain.ChannelFeishu, "observer_feishu_id", "lisi").
 					Return(nil, errors.New("not starter"))
 			},
 			wantSuccess: true,
@@ -146,17 +146,110 @@ func TestChannelActionService_DispatchAction(t *testing.T) {
 			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
 				mockTicket.EXPECT().GetByID(gomock.Any(), int64(2735)).Return(domain.Ticket{
 					Id:       2735,
-					CreateBy: "luankz",
+					CreateBy: "lisi",
+					Status:   domain.PROCESS,
 					Process:  domain.Process{EngineType: domain.EngineTypeFlowx, InstanceID: domain.NewID("inst_123")},
 				}, nil).AnyTimes()
 				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelFeishu, "starter_feishu_id", domain.EngineTypeFlowx, domain.NewID("")).
 					Return(nil, ErrChannelUserNotFound)
-				mockResolver.EXPECT().ResolveStarter(gomock.Any(), domain.ChannelFeishu, "starter_feishu_id", "luankz").
-					Return(&userv1.User{Username: "luankz"}, nil)
-				mockWithdrawal.EXPECT().Revoke(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("inst_123"), true, "luankz", "不再需要发布").Return(nil)
+				mockResolver.EXPECT().ResolveStarter(gomock.Any(), domain.ChannelFeishu, "starter_feishu_id", "lisi").
+					Return(&userv1.User{Username: "lisi"}, nil)
+				mockWithdrawal.EXPECT().Revoke(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("inst_123"), true, "lisi", "不再需要发布").Return(nil)
 			},
 			wantSuccess: true,
 			wantRemark:  "你已撤销该申请, 原因：不再需要发布",
+		},
+		{
+			name: "非发起人非管理员撤销他人工单被归属闸门拦截",
+			evt: domain.ChannelActionEvent{
+				Channel:       domain.ChannelFeishu,
+				ChannelUserID: "mallory_feishu_id",
+				Action:        domain.ChannelActionRevoke,
+				TicketID:      2735,
+				Comment:       "尝试撤他人的单",
+			},
+			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
+				mockTicket.EXPECT().GetByID(gomock.Any(), int64(2735)).Return(domain.Ticket{
+					Id:       2735,
+					CreateBy: "bob",
+					Status:   domain.PROCESS,
+					Process:  domain.Process{EngineType: domain.EngineTypeFlowx, InstanceID: domain.NewID("inst_123")},
+				}, nil).AnyTimes()
+				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelFeishu, "mallory_feishu_id", domain.EngineTypeFlowx, domain.NewID("")).
+					Return(&userv1.User{Username: "mallory", IsAdmin: false}, nil)
+				// 不声明 Revoke 期望：闸门必须在触达撤回服务之前拦截
+			},
+			wantSuccess: false,
+			wantRemark:  "无权撤回他人发起的工单",
+		},
+		{
+			name: "管理员可撤销任意发起人的运行中工单",
+			evt: domain.ChannelActionEvent{
+				Channel:       domain.ChannelFeishu,
+				ChannelUserID: "admin_feishu_id",
+				Action:        domain.ChannelActionRevoke,
+				TicketID:      2735,
+				Comment:       "管理员强撤",
+			},
+			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
+				mockTicket.EXPECT().GetByID(gomock.Any(), int64(2735)).Return(domain.Ticket{
+					Id:       2735,
+					CreateBy: "bob",
+					Status:   domain.PROCESS,
+					Process:  domain.Process{EngineType: domain.EngineTypeFlowx, InstanceID: domain.NewID("inst_123")},
+				}, nil).AnyTimes()
+				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelFeishu, "admin_feishu_id", domain.EngineTypeFlowx, domain.NewID("")).
+					Return(&userv1.User{Username: "admin", IsAdmin: true}, nil)
+				mockWithdrawal.EXPECT().Revoke(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("inst_123"), true, "admin", "管理员强撤").Return(nil)
+			},
+			wantSuccess: true,
+			wantRemark:  "你已撤销该申请, 原因：管理员强撤",
+		},
+		{
+			name: "撤回处理中的工单阻止重复撤回",
+			evt: domain.ChannelActionEvent{
+				Channel:       domain.ChannelFeishu,
+				ChannelUserID: "starter_feishu_id",
+				Action:        domain.ChannelActionRevoke,
+				TicketID:      2735,
+			},
+			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
+				mockTicket.EXPECT().GetByID(gomock.Any(), int64(2735)).Return(domain.Ticket{
+					Id:       2735,
+					CreateBy: "alice",
+					Status:   domain.WITHDRAWING,
+					Process:  domain.Process{EngineType: domain.EngineTypeFlowx, InstanceID: domain.NewID("inst_123")},
+				}, nil).AnyTimes()
+				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelFeishu, "starter_feishu_id", domain.EngineTypeFlowx, domain.NewID("")).
+					Return(nil, ErrChannelUserNotFound)
+				mockResolver.EXPECT().ResolveStarter(gomock.Any(), domain.ChannelFeishu, "starter_feishu_id", "alice").
+					Return(&userv1.User{Username: "alice"}, nil)
+			},
+			wantSuccess: false,
+			wantRemark:  "工单撤回处理中，不可重复发起撤回",
+		},
+		{
+			name: "已办结工单不支持撤回",
+			evt: domain.ChannelActionEvent{
+				Channel:       domain.ChannelFeishu,
+				ChannelUserID: "starter_feishu_id",
+				Action:        domain.ChannelActionRevoke,
+				TicketID:      2735,
+			},
+			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
+				mockTicket.EXPECT().GetByID(gomock.Any(), int64(2735)).Return(domain.Ticket{
+					Id:       2735,
+					CreateBy: "alice",
+					Status:   domain.END,
+					Process:  domain.Process{EngineType: domain.EngineTypeFlowx, InstanceID: domain.NewID("inst_123")},
+				}, nil).AnyTimes()
+				mockResolver.EXPECT().ResolveUser(gomock.Any(), domain.ChannelFeishu, "starter_feishu_id", domain.EngineTypeFlowx, domain.NewID("")).
+					Return(nil, ErrChannelUserNotFound)
+				mockResolver.EXPECT().ResolveStarter(gomock.Any(), domain.ChannelFeishu, "starter_feishu_id", "alice").
+					Return(&userv1.User{Username: "alice"}, nil)
+			},
+			wantSuccess: false,
+			wantRemark:  "当前工单状态不支持撤回: 当前状态为 已结束",
 		},
 	}
 

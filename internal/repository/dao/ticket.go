@@ -60,6 +60,9 @@ type TicketDAO interface {
 	DetailByProcessInstKey(ctx context.Context, instanceKey string) (Ticket, error)
 	// DetailByProcessInstance 根据流程实例标识（覆盖 key 与历史整型 id）获取工单
 	DetailByProcessInstance(ctx context.Context, instanceID string) (Ticket, error)
+	// DetailByProcessInstanceScoped 详情读路由专用：在租户隔离与 PBAC AccessScope 双闸门下按流程实例标识检索工单，
+	// 上下文缺失决策时 fail-closed 拒绝，不得用于无 AccessScope 的操作与内部反查路径
+	DetailByProcessInstanceScoped(ctx context.Context, instanceID string) (Ticket, error)
 	// UpdateStatusByProcessInstance 根据流程实例标识更新工单流转状态
 	UpdateStatusByProcessInstance(ctx context.Context, instanceID string, status uint8, wtime int64) error
 	// Detail 依据物理主键 ID 获取单条工单详情
@@ -88,6 +91,10 @@ type TicketDAO interface {
 	ListHistory(ctx context.Context, userId string, status []int, offset, limit int64) ([]Ticket, error)
 	// CountHistory 使用与 ListHistory 相同的 PBAC 和查询条件统计历史工单总数。
 	CountHistory(ctx context.Context, userId string, status []int) (int64, error)
+	// ListTodo 分页查询流转中的待办工单并应用上下文中的 PBAC AccessScope，userId 仅作为附加收窄条件。
+	ListTodo(ctx context.Context, userId string, status []int, offset, limit int64) ([]Ticket, error)
+	// CountTodo 使用与 ListTodo 相同的 PBAC 和查询条件统计待办工单总数。
+	CountTodo(ctx context.Context, userId string, status []int) (int64, error)
 	// FindByBizIdAndKey 依据场景 ID、单据号和允许的状态列表查找满足条件的唯一活跃工单记录
 	FindByBizIdAndKey(ctx context.Context, bizId int64, key string, status []int) (Ticket, error)
 	// MergeTicketData 高效利用原子更新将新表单属性合并至已持久化的 JSON 列中
@@ -156,6 +163,43 @@ func (g *gormTicketDAO) DetailByProcessInstance(ctx context.Context, instanceID 
 		return g.DetailByProcessInstId(ctx, intID)
 	}
 	return res, gorm.ErrRecordNotFound
+}
+
+// DetailByProcessInstanceScoped 详情读路由专用检索：不豁免租户隔离，并强制应用上下文中的 PBAC 决策。
+// 与共享的 DetailByProcessInstance 分离，避免撤回、内部反查等无 AccessScope 路径被决策缺失误伤
+func (g *gormTicketDAO) DetailByProcessInstanceScoped(ctx context.Context, instanceID string) (Ticket, error) {
+	var res Ticket
+	query, err := g.scopedHistoryQuery(ctx)
+	if err != nil {
+		return Ticket{}, err
+	}
+	err = query.Where("process_instance_key = ?", instanceID).First(&res).Error
+	if err == nil {
+		return res, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return Ticket{}, err
+	}
+	// 兜底支持历史 EasyFlow 小整型自增 ID，同样置于双闸门之下
+	if intID, parseErr := strconv.Atoi(instanceID); parseErr == nil && intID > 0 {
+		fallback, applyErr := g.scopedHistoryQuery(ctx)
+		if applyErr != nil {
+			return Ticket{}, applyErr
+		}
+		err = fallback.Where("process_instance_id = ?", intID).First(&res).Error
+		if err == nil {
+			return res, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return Ticket{}, err
+		}
+	}
+	return Ticket{}, gorm.ErrRecordNotFound
+}
+
+// scopedHistoryQuery 构建已应用历史工单 PBAC 决策的基础查询，租户隔离由全局插件织入
+func (g *gormTicketDAO) scopedHistoryQuery(ctx context.Context) (*gorm.DB, error) {
+	return pbacgorm.Apply(ctx, g.db.WithContext(ctx).Model(&Ticket{}), ticketpbac.History)
 }
 
 func (g *gormTicketDAO) UpdateStatusByProcessInstance(ctx context.Context, instanceID string, status uint8, wtime int64) error {
@@ -356,6 +400,41 @@ func (g *gormTicketDAO) CountHistory(ctx context.Context, userId string, status 
 	}
 	err = query.Count(&total).Error
 	return total, err
+}
+
+// ListTodo 使用待办 profile 应用 PBAC 决策后分页查询可见的流转中工单。
+func (g *gormTicketDAO) ListTodo(ctx context.Context, userId string, status []int, offset, limit int64) ([]Ticket, error) {
+	var result []Ticket
+	query, err := g.todoScopedQuery(ctx, userId, status)
+	if err != nil {
+		return nil, err
+	}
+	err = query.Order("t.ctime desc").Limit(int(limit)).Offset(int(offset)).Find(&result).Error
+	return result, err
+}
+
+// CountTodo 使用待办 profile 应用 PBAC 决策后统计可见的流转中工单数。
+func (g *gormTicketDAO) CountTodo(ctx context.Context, userId string, status []int) (int64, error) {
+	var total int64
+	query, err := g.todoScopedQuery(ctx, userId, status)
+	if err != nil {
+		return 0, err
+	}
+	err = query.Count(&total).Error
+	return total, err
+}
+
+// todoScopedQuery 以 ticket AS t 为基准构建待办查询：Todo profile 的谓词统一引用 t 别名，
+// 租户隔离由全局插件织入；userId 仅作附加收窄，真正的可见范围由 PBAC 决策决定
+func (g *gormTicketDAO) todoScopedQuery(ctx context.Context, userId string, status []int) (*gorm.DB, error) {
+	query := g.db.WithContext(ctx).Model(&Ticket{}).Table("ticket AS t")
+	if userId != "" {
+		query = query.Where("t.create_by = ?", userId)
+	}
+	if len(status) > 0 {
+		query = query.Where("t.status IN ?", status)
+	}
+	return pbacgorm.Apply(ctx, query, ticketpbac.Todo)
 }
 
 func (g *gormTicketDAO) ticketQuery(ctx context.Context, userId string, status []int) *gorm.DB {

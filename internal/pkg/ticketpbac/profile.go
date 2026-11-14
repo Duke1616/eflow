@@ -79,9 +79,22 @@ const (
 		"EXISTS (SELECT 1 FROM proc_task pbac_pt WHERE pbac_pt.proc_inst_id = ticket.process_instance_id AND pbac_pt.user_id = ?) OR " +
 		"EXISTS (SELECT 1 FROM hist_proc_task pbac_ht WHERE pbac_ht.proc_inst_id = ticket.process_instance_id AND pbac_ht.user_id = ?)" +
 		")))"
+	// todoAssigneeSQL 双引擎"当前处理人"判定：flowx 以 flow_task 待办态(status=0 即 TaskPending)为准，
+	// easyflow 以 proc_task 未办结为准。谓词只引用外层 t 别名，工单主表查询无需 JOIN 即可编译
+	todoAssigneeSQL = "((t.engine_type = 'flowx' AND EXISTS (" +
+		"SELECT 1 FROM flow_task pbac_ft WHERE pbac_ft.instance_id = t.process_instance_key AND pbac_ft.assignee = ? AND pbac_ft.status = 0" +
+		")) OR " +
+		"(t.engine_type = 'easy-workflow' AND EXISTS (" +
+		"SELECT 1 FROM proc_task pbac_pt WHERE pbac_pt.proc_inst_id = t.process_instance_id AND pbac_pt.user_id = ? AND pbac_pt.is_finished = 0" +
+		")))"
 	todoRelatedUsersSQL = "(t.create_by = ? OR " +
+		"(t.engine_type = 'flowx' AND EXISTS (" +
+		"SELECT 1 FROM flow_task pbac_ft WHERE pbac_ft.instance_id = t.process_instance_key AND pbac_ft.assignee = ?" +
+		")) OR " +
+		"(t.engine_type = 'easy-workflow' AND (" +
 		"EXISTS (SELECT 1 FROM proc_task pbac_pt WHERE pbac_pt.proc_inst_id = t.process_instance_id AND pbac_pt.user_id = ?) OR " +
-		"EXISTS (SELECT 1 FROM hist_proc_task pbac_ht WHERE pbac_ht.proc_inst_id = t.process_instance_id AND pbac_ht.user_id = ?))"
+		"EXISTS (SELECT 1 FROM hist_proc_task pbac_ht WHERE pbac_ht.proc_inst_id = t.process_instance_id AND pbac_ht.user_id = ?)" +
+		")))"
 )
 
 func compileHistory(predicate *pbac.Predicate) (pbacgorm.Expression, error) {
@@ -108,7 +121,7 @@ func compileTodo(predicate *pbac.Predicate) (pbacgorm.Expression, error) {
 	case TicketCreateBy:
 		return stringColumn("t.create_by", predicate.Operator, values)
 	case TaskAssignee:
-		return stringColumn("pt.user_id", predicate.Operator, values)
+		return assigneeMembership(predicate.Operator, values)
 	case TicketRelatedUsers:
 		return membership(predicate.Operator, values, todoRelatedUsersSQL)
 	default:
@@ -134,6 +147,24 @@ func membership(operator pbac.Operator, values []any, fragment string) (pbacgorm
 	if operator != pbac.ForAnyValueStringEquals {
 		return pbacgorm.Expression{}, fmt.Errorf("operator %q is not allowed for membership", operator)
 	}
+	return expandMembership(values, fragment), nil
+}
+
+// assigneeMembership 将处理人谓词编译为双引擎待办 EXISTS 判定，保留 EIAM preset 已下发的
+// 标量等值/不等值算子契约：等值取"任一值命中待办"，不等值取"所有值均未命中待办"
+func assigneeMembership(operator pbac.Operator, values []any) (pbacgorm.Expression, error) {
+	if operator != pbac.StringEquals && operator != pbac.StringNotEquals {
+		return pbacgorm.Expression{}, fmt.Errorf("operator %q is not allowed for assignee", operator)
+	}
+	expression := expandMembership(values, todoAssigneeSQL)
+	if operator == pbac.StringNotEquals {
+		expression.SQL = "NOT (" + expression.SQL + ")"
+	}
+	return expression, nil
+}
+
+// expandMembership 按值展开 SQL 片段并以 OR 连接，每个值独立绑定片段内的全部占位符
+func expandMembership(values []any, fragment string) pbacgorm.Expression {
 	placeholderCount := strings.Count(fragment, "?")
 	clauses := make([]string, 0, len(values))
 	args := make([]any, 0, len(values)*placeholderCount)
@@ -146,5 +177,5 @@ func membership(operator pbac.Operator, values []any, fragment string) (pbacgorm
 	return pbacgorm.Expression{
 		SQL:  strings.Join(clauses, " OR "),
 		Args: args,
-	}, nil
+	}
 }
