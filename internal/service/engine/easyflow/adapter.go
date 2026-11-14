@@ -118,15 +118,47 @@ func (a *adapter) Reject(ctx context.Context, req domain.TaskRejectReq) error {
 }
 
 func (a *adapter) GetRejectTargets(ctx context.Context, taskID domain.ID) ([]domain.RejectTarget, error) {
-	// easyflow 遗留引擎兼容实现：提供流程起点作为通用驳回目标
-	return []domain.RejectTarget{
-		{
-			NodeID:    "Start",
-			NodeName:  "发起人 (重新填报)",
-			NodeType:  "START",
-			IsStarter: true,
-		},
-	}, nil
+	id := taskID.Int()
+	if id <= 0 {
+		return nil, fmt.Errorf("%w: easyflow 任务 ID 无效: %s", engine.ErrInvalidParameter, taskID)
+	}
+
+	task, err := easyEngine.GetTaskInfo(id)
+	if err != nil {
+		return nil, fmt.Errorf("查询 easyflow 任务明细失败 [taskId=%d]: %w", id, err)
+	}
+
+	inst, err := a.repo.GetInstanceByID(ctx, task.ProcInstID)
+	if err != nil {
+		return nil, fmt.Errorf("查询 easyflow 流程实例失败 [instanceID=%d]: %w", task.ProcInstID, err)
+	}
+
+	nodes, err := easyEngine.GetProcCache(inst.ProcID)
+	if err != nil {
+		return nil, fmt.Errorf("加载 easyflow 流程节点失败 [processID=%d]: %w", inst.ProcID, err)
+	}
+
+	target, err := starterRejectTarget(nodes)
+	if err != nil {
+		return nil, fmt.Errorf("解析 easyflow 驳回起点失败 [processID=%d]: %w", inst.ProcID, err)
+	}
+	return []domain.RejectTarget{target}, nil
+}
+
+// starterRejectTarget 从流程节点定义中定位真实的起始节点作为退回发起人目标。
+// 起始节点 ID 由画布 DSL 生成，不能假定为字面量 "Start"，否则自由驳回会指向不存在的节点。
+func starterRejectTarget(nodes easyEngine.ProcNodes) (domain.RejectTarget, error) {
+	for _, node := range nodes {
+		if node.NodeType == model.RootNode {
+			return domain.RejectTarget{
+				NodeID:    node.NodeID,
+				NodeName:  "发起人 (重新填报)",
+				NodeType:  "START",
+				IsStarter: true,
+			}, nil
+		}
+	}
+	return domain.RejectTarget{}, errors.New("流程定义中不存在起始节点")
 }
 
 // toEasyVariables 纯函数：将变量字典单向序列化为 easy-workflow 所需的 []model.Variable 格式

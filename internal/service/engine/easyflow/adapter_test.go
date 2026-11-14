@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/Bunny3th/easy-workflow/workflow/database"
+	easyEngine "github.com/Bunny3th/easy-workflow/workflow/engine"
 	"github.com/Bunny3th/easy-workflow/workflow/model"
 	"github.com/Duke1616/eflow/internal/domain"
 	compiler "github.com/Duke1616/eflow/internal/pkg/compiler/easyflow"
 	repoMocks "github.com/Duke1616/eflow/internal/repository/mocks"
 	"github.com/Duke1616/eflow/internal/service/engine"
+	"github.com/glebarez/sqlite"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -444,6 +446,194 @@ func TestAdapter_GetPriorComments(t *testing.T) {
 				require.NotEmpty(t, comments)
 				assert.Equal(t, *tc.wantFirst, comments[0])
 			}
+		})
+	}
+}
+
+// TestStarterRejectTarget 驳回目标必须取自流程定义中真实的起始节点：
+// 起始节点 ID 由画布 DSL 生成，假定字面量 "Start" 会让自由驳回指向不存在的节点
+func TestStarterRejectTarget(t *testing.T) {
+	starterTarget := func(nodeID string) domain.RejectTarget {
+		return domain.RejectTarget{NodeID: nodeID, NodeName: "发起人 (重新填报)", NodeType: "START", IsStarter: true}
+	}
+
+	testCases := []struct {
+		name       string
+		nodes      easyEngine.ProcNodes
+		wantTarget domain.RejectTarget
+		wantErr    string
+	}{
+		{
+			name: "画布生成的起始节点ID",
+			nodes: easyEngine.ProcNodes{
+				"start_9f3k": {NodeID: "start_9f3k", NodeName: "提单", NodeType: model.RootNode},
+				"approve_1":  {NodeID: "approve_1", NodeName: "主管审批", NodeType: model.TaskNode},
+				"gw_1":       {NodeID: "gw_1", NodeName: "条件分支", NodeType: model.GateWayNode},
+				"end_1":      {NodeID: "end_1", NodeName: "结束", NodeType: model.EndNode},
+			},
+			wantTarget: starterTarget("start_9f3k"),
+		},
+		{
+			name: "历史定义以字面量Start为起始节点仍兼容",
+			nodes: easyEngine.ProcNodes{
+				"Start": {NodeID: "Start", NodeName: "提单", NodeType: model.RootNode},
+			},
+			wantTarget: starterTarget("Start"),
+		},
+		{
+			name: "缺少起始节点时报错",
+			nodes: easyEngine.ProcNodes{
+				"approve_1": {NodeID: "approve_1", NodeName: "主管审批", NodeType: model.TaskNode},
+			},
+			wantErr: "流程定义中不存在起始节点",
+		},
+		{
+			name:    "空节点集报错",
+			nodes:   easyEngine.ProcNodes{},
+			wantErr: "流程定义中不存在起始节点",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			target, err := starterRejectTarget(tc.nodes)
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantTarget, target)
+		})
+	}
+}
+
+// TestAdapter_GetRejectTargets 端到端验证退回发起人目标的解析链路：
+// 引擎任务明细 → 流程实例 → 流程节点缓存 → 真实起始节点。
+// engine.DB 与 ProcCache 是包级全局变量，测试前后保存恢复，避免污染其他用例
+func TestAdapter_GetRejectTargets(t *testing.T) {
+	oldDB, oldCache := easyEngine.DB, easyEngine.ProcCache
+	t.Cleanup(func() { easyEngine.DB, easyEngine.ProcCache = oldDB, oldCache })
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	// :memory: 库随连接私有，多连接会各自看到空库
+	sqlDB.SetMaxOpenConns(1)
+
+	// 时间列声明 DATETIME 且铺数据时置 NULL：LocalTime.Scan 只接受 time.Time，
+	// 本用例只关心任务归属与节点拓扑，不触达时间字段
+	taskColumns := `proc_id INTEGER, proc_inst_id INTEGER, business_id TEXT, starter TEXT,
+		node_id TEXT, node_name TEXT, prev_node_id TEXT, is_cosigned INTEGER, batch_code TEXT,
+		user_id TEXT, status INTEGER, is_finished INTEGER, comment TEXT,
+		proc_inst_create_time DATETIME, create_time DATETIME, finished_time DATETIME`
+	for _, ddl := range []string{
+		"CREATE TABLE proc_task (id INTEGER PRIMARY KEY," + taskColumns + ")",
+		"CREATE TABLE hist_proc_task (id INTEGER PRIMARY KEY, task_id INTEGER," + taskColumns + ")",
+		"CREATE TABLE proc_def (id INTEGER PRIMARY KEY, name TEXT)",
+	} {
+		require.NoError(t, db.Exec(ddl).Error)
+	}
+	require.NoError(t, db.Exec("INSERT INTO proc_def VALUES (7, '请假流程')").Error)
+	// 在办任务与归档任务各覆盖 GetTaskInfo CTE 的一条分支
+	require.NoError(t, db.Exec(`INSERT INTO proc_task (id, proc_id, proc_inst_id, node_id, node_name, user_id, status, is_finished)
+		VALUES (5, 7, 100, 'approve_1', '主管审批', 'bob', 0, 0)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO hist_proc_task (id, task_id, proc_id, proc_inst_id, node_id, node_name, user_id, status, is_finished)
+		VALUES (9, 9, 7, 100, 'approve_1', '主管审批', 'bob', 1, 1)`).Error)
+
+	easyEngine.DB = db
+	easyEngine.ProcCache = map[int]easyEngine.ProcNodes{
+		7: {
+			"start_9f3k": {NodeID: "start_9f3k", NodeName: "提单", NodeType: model.RootNode},
+			"approve_1":  {NodeID: "approve_1", NodeName: "主管审批", NodeType: model.TaskNode},
+		},
+		// 缺失起始节点的异常定义，覆盖解析失败分支
+		8: {
+			"approve_1": {NodeID: "approve_1", NodeName: "主管审批", NodeType: model.TaskNode},
+		},
+	}
+
+	canvasTarget := domain.RejectTarget{NodeID: "start_9f3k", NodeName: "发起人 (重新填报)", NodeType: "START", IsStarter: true}
+
+	testCases := []struct {
+		name       string
+		taskID     domain.ID
+		setupMock  func(m *repoMocks.MockIEngineRepository)
+		want       []domain.RejectTarget
+		wantErrIs  error
+		wantErrStr string
+	}{
+		{
+			name:   "在办任务返回画布生成的起始节点ID",
+			taskID: domain.NewID(5),
+			setupMock: func(m *repoMocks.MockIEngineRepository) {
+				m.EXPECT().GetInstanceByID(gomock.Any(), 100).
+					Return(domain.Instance{ProcInstID: 100, ProcID: 7, ProcVersion: 2}, nil)
+			},
+			want: []domain.RejectTarget{canvasTarget},
+		},
+		{
+			name:   "归档任务经CTE同样解析出真实起始节点",
+			taskID: domain.NewID(9),
+			setupMock: func(m *repoMocks.MockIEngineRepository) {
+				m.EXPECT().GetInstanceByID(gomock.Any(), 100).
+					Return(domain.Instance{ProcInstID: 100, ProcID: 7, ProcVersion: 2}, nil)
+			},
+			want: []domain.RejectTarget{canvasTarget},
+		},
+		{
+			name:      "非法任务ID直接拒绝_不触达引擎与仓储",
+			taskID:    domain.NewID(0),
+			setupMock: func(m *repoMocks.MockIEngineRepository) {},
+			wantErrIs: engine.ErrInvalidParameter,
+		},
+		{
+			name:       "任务不存在时携带根因返回",
+			taskID:     domain.NewID(404),
+			setupMock:  func(m *repoMocks.MockIEngineRepository) {},
+			wantErrStr: "查询 easyflow 任务明细失败",
+		},
+		{
+			name:   "实例查询失败时携带根因返回",
+			taskID: domain.NewID(5),
+			setupMock: func(m *repoMocks.MockIEngineRepository) {
+				m.EXPECT().GetInstanceByID(gomock.Any(), 100).Return(domain.Instance{}, errors.New("db down"))
+			},
+			wantErrStr: "查询 easyflow 流程实例失败",
+		},
+		{
+			name:   "流程定义缺失起始节点时报错",
+			taskID: domain.NewID(5),
+			setupMock: func(m *repoMocks.MockIEngineRepository) {
+				m.EXPECT().GetInstanceByID(gomock.Any(), 100).
+					Return(domain.Instance{ProcInstID: 100, ProcID: 8, ProcVersion: 1}, nil)
+			},
+			wantErrStr: "解析 easyflow 驳回起点失败",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockRepo := repoMocks.NewMockIEngineRepository(ctrl)
+			tc.setupMock(mockRepo)
+
+			targets, err := NewEngine(mockRepo).GetRejectTargets(context.Background(), tc.taskID)
+			if tc.wantErrIs != nil || tc.wantErrStr != "" {
+				require.Error(t, err)
+				if tc.wantErrIs != nil {
+					assert.ErrorIs(t, err, tc.wantErrIs)
+				}
+				if tc.wantErrStr != "" {
+					assert.Contains(t, err.Error(), tc.wantErrStr)
+				}
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, targets)
 		})
 	}
 }
