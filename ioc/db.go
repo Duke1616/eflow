@@ -54,6 +54,9 @@ func InitDB() *gorm.DB {
 		},
 		Logger: myLogger,
 	})
+	if err != nil {
+		panic(err)
+	}
 
 	// AutoMigrate 创建/更新表结构（新增列、新建表）
 	err = dao.InitTables(db)

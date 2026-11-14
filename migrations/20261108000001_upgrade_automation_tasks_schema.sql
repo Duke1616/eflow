@@ -9,6 +9,9 @@ BEGIN
     DECLARE CONTINUE HANDLER FOR 1061 BEGIN END; -- 索引已存在时忽略
     DECLARE CONTINUE HANDLER FOR 1091 BEGIN END; -- 索引或列不存在时忽略
     DECLARE CONTINUE HANDLER FOR 1146 BEGIN END; -- 表不存在时忽略
+    -- 全新库由 AutoMigrate 直接建成新结构（无 process_instance_id 列），
+    -- 1.1 的 AFTER 定位与 1.2 的存量刷盘都会报 1054，此时无存量可迁移，直接跳过
+    DECLARE CONTINUE HANDLER FOR 1054 BEGIN END;
 
     -- 1.1 新增字符串形态的实例全局标识 Key
     ALTER TABLE `automation_tasks`
