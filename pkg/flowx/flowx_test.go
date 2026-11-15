@@ -1189,19 +1189,19 @@ func (s *FlowxTestSuite) TestEventBus_Architecture() {
 			Edge("cosigned_node", "end").
 			Build()
 
-		// 以 "luankz" 作为发起人启动流程
-		instID, err := engine.Start(s.ctx, StartReq{Def: def, Starter: "luankz"})
+		// 以 "carol" 作为发起人启动流程
+		instID, err := engine.Start(s.ctx, StartReq{Def: def, Starter: "carol"})
 		require.NoError(s.T(), err)
 
-		// 验证首个审批任务的处理人已就地展开为 "luankz"
+		// 验证首个审批任务的处理人已就地展开为 "carol"
 		tasks, err := store.ListTasksByInstance(s.ctx, instID)
 		require.NoError(s.T(), err)
 		require.Len(s.T(), tasks, 1)
 		assert.Equal(s.T(), "submitter_review", tasks[0].NodeID)
-		assert.Equal(s.T(), "luankz", tasks[0].Assignee)
+		assert.Equal(s.T(), "carol", tasks[0].Assignee)
 
 		// 提单人通过后推进到下一个会签节点
-		err = engine.Pass(s.ctx, PassReq{TaskID: tasks[0].ID, Operator: "luankz"})
+		err = engine.Pass(s.ctx, PassReq{TaskID: tasks[0].ID, Operator: "carol"})
 		require.NoError(s.T(), err)
 
 		nextTasks, err := store.ListTasksByInstance(s.ctx, instID)
@@ -1211,7 +1211,7 @@ func (s *FlowxTestSuite) TestEventBus_Architecture() {
 		activeAssignees := lo.FilterMap(nextTasks, func(t *model.Task, _ int) (string, bool) {
 			return t.Assignee, t.IsPending()
 		})
-		assert.ElementsMatch(s.T(), []string{"luankz", "manager_bob"}, activeAssignees)
+		assert.ElementsMatch(s.T(), []string{"carol", "manager_bob"}, activeAssignees)
 	})
 
 	s.Run("机制策略分离_代理与代办审批流转_内核作为通用状态机推进流程并将操作人记录至审计事件", func() {
@@ -1226,7 +1226,7 @@ func (s *FlowxTestSuite) TestEventBus_Architecture() {
 
 		def := NewProcess("admin_proxy_proc", "代办审批流转测试").
 			Start("start", "开始").
-			Approval("audit_node", "部门审批", model.SignOneVote, "peicg").
+			Approval("audit_node", "部门审批", model.SignOneVote, "dave").
 			End("end", "结束").
 			Edge("start", "audit_node").
 			Edge("audit_node", "end").
@@ -1239,12 +1239,12 @@ func (s *FlowxTestSuite) TestEventBus_Architecture() {
 		require.NoError(s.T(), err)
 		require.Len(s.T(), tasks, 1)
 		task := tasks[0]
-		assert.Equal(s.T(), "peicg", task.Assignee)
+		assert.Equal(s.T(), "dave", task.Assignee)
 
-		// 管理员或受委托人 luankz 推进审批
+		// 管理员或受委托人 carol 推进审批
 		errPass := engine.Pass(s.ctx, PassReq{
 			TaskID:   task.ID,
-			Operator: "luankz",
+			Operator: "carol",
 			Comment:  "管理员代办同意",
 		})
 		require.NoError(s.T(), errPass)
@@ -1253,12 +1253,12 @@ func (s *FlowxTestSuite) TestEventBus_Architecture() {
 		inst, err := store.GetInstance(s.ctx, instID)
 		require.NoError(s.T(), err)
 		assert.True(s.T(), inst.IsFinished())
-		assert.Equal(s.T(), "luankz", passedOperator)
+		assert.Equal(s.T(), "carol", passedOperator)
 
 		// 再次重复操作时受物理防卫拦截
 		errRepeat := engine.Pass(s.ctx, PassReq{
 			TaskID:   task.ID,
-			Operator: "luankz",
+			Operator: "carol",
 		})
 		require.Error(s.T(), errRepeat)
 		require.ErrorIs(s.T(), errRepeat, ErrTaskNotPending)
@@ -1303,7 +1303,7 @@ func TestEngine_GetExecutionView_OrSignPassNotOverwrittenBySkipped(t *testing.T)
 			{
 				ID: "hr_node", Type: model.NodeApproval, Name: "人事",
 				SignRule:  model.SignOneVote,
-				Assignees: []string{"luankz", "peicg"},
+				Assignees: []string{"carol", "dave"},
 			},
 			{ID: "end", Type: model.NodeEnd, Name: "结束"},
 		},
@@ -1325,23 +1325,23 @@ func TestEngine_GetExecutionView_OrSignPassNotOverwrittenBySkipped(t *testing.T)
 	require.NoError(t, err)
 	require.Len(t, tasks, 2)
 
-	// 查找 luankz 的任务并审批通过
-	luanTask, ok := lo.Find(tasks, func(t *model.Task) bool { return t.Assignee == "luankz" })
+	// 查找 carol 的任务并审批通过
+	carolTask, ok := lo.Find(tasks, func(t *model.Task) bool { return t.Assignee == "carol" })
 	require.True(t, ok)
 
 	err = engine.Pass(ctx, PassReq{
-		TaskID:   luanTask.ID,
-		Operator: "luankz",
+		TaskID:   carolTask.ID,
+		Operator: "carol",
 		Comment:  "同意",
 	})
 	require.NoError(t, err)
 
-	// 检查当前任务状态：luankz 任务为 Passed (1)，peicg 任务为 Skipped (5)
+	// 检查当前任务状态：carol 任务为 Passed (1)，dave 任务为 Skipped (5)
 	afterTasks, err := store.ListTasksByInstance(ctx, instID)
 	require.NoError(t, err)
-	peicgTask, ok := lo.Find(afterTasks, func(t *model.Task) bool { return t.Assignee == "peicg" })
+	daveTask, ok := lo.Find(afterTasks, func(t *model.Task) bool { return t.Assignee == "dave" })
 	require.True(t, ok)
-	assert.Equal(t, model.TaskSkipped, peicgTask.Status, "兄弟任务应当被联动置为 Skipped (5)")
+	assert.Equal(t, model.TaskSkipped, daveTask.Status, "兄弟任务应当被联动置为 Skipped (5)")
 
 	// 核心断言：获取执行视图时，hr_node 的综合状态必须为 TaskPassed (1)，绝不能被 5 覆盖！
 	view, err := engine.GetExecutionView(ctx, instID)
@@ -1377,7 +1377,7 @@ func TestEngine_ChatGroupNodeTraversalAndTask(t *testing.T) {
 	// 启动流程：应当自动经过 chat_node 穿透流转，直接全单办结
 	instID, err := engine.Start(ctx, StartReq{
 		Key:     "chat_group_flow",
-		Starter: "luankz",
+		Starter: "carol",
 	})
 	require.NoError(t, err)
 

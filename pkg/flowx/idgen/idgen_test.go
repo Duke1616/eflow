@@ -16,7 +16,7 @@ func TestSnowflakeIDGenerator_Basic(t *testing.T) {
 	assert.False(t, strings.HasPrefix(instID, "inst_"), "不应带 inst_ 前缀")
 	assert.LessOrEqual(t, len(instID), 20, "流程实例 ID 应当紧凑轻量")
 
-	taskID := gen.GenTaskID("957e5acc-6ca1-4103-b7f5-6513d42fec02", "luankz", 1, 1)
+	taskID := gen.GenTaskID("957e5acc-6ca1-4103-b7f5-6513d42fec02", "carol", 1, 1)
 	assert.False(t, strings.HasPrefix(taskID, "task_"), "不应带 task_ 前缀")
 	assert.LessOrEqual(t, len(taskID), 20, "任务 ID 不应再拼接 36 位长 UUID 与前缀")
 }

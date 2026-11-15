@@ -667,22 +667,22 @@ func TestFlowxConverter_FounderAssigneeResolution(t *testing.T) {
 	assert.Equal(t, []string{model.AssigneeStarter}, ccNode.Assignees)
 	assert.Empty(t, ccNode.Hooks) // 确保彻底移除了多余的魔法 Hook！
 
-	// 部署到 FlowX 引擎并以 "luankz" 发起
+	// 部署到 FlowX 引擎并以 "alice" 发起
 	engine := flowx.NewEngine(memory.NewStorage())
 	_, err = engine.Deploy(context.Background(), def)
 	require.NoError(t, err)
 
 	instID, err := engine.Start(context.Background(), flowx.StartReq{
 		Key:     "founder_proc",
-		Starter: "luankz",
+		Starter: "alice",
 	})
 	require.NoError(t, err)
 
-	// 验证抄送任务自动指派给 luankz
+	// 验证抄送任务自动指派给 alice
 	tasks, err := engine.ListTasksByInstance(context.Background(), instID)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
-	assert.Equal(t, "luankz", tasks[0].Assignee)
+	assert.Equal(t, "alice", tasks[0].Assignee)
 	assert.Equal(t, "submitter_cc", tasks[0].NodeID)
 }
 
@@ -696,8 +696,8 @@ func TestFlowxConverter_MultiBranchInclusiveExecution(t *testing.T) {
 			map[string]any{"id": "cond_backend", "type": "condition", "text": map[string]any{"value": "后端条件"}},
 			map[string]any{"id": "cond_frontend", "type": "condition", "text": map[string]any{"value": "前端条件"}},
 			map[string]any{"id": "cond_ocr", "type": "condition", "text": map[string]any{"value": "算法条件"}},
-			map[string]any{"id": "user_backend", "type": "user", "text": map[string]any{"value": "后端"}, "properties": map[string]any{"assignees": []map[string]any{{"rule": "appoint", "values": []string{"peicg"}}}}},
-			map[string]any{"id": "user_frontend", "type": "user", "text": map[string]any{"value": "前端"}, "properties": map[string]any{"assignees": []map[string]any{{"rule": "appoint", "values": []string{"luankz"}}}}},
+			map[string]any{"id": "user_backend", "type": "user", "text": map[string]any{"value": "后端"}, "properties": map[string]any{"assignees": []map[string]any{{"rule": "appoint", "values": []string{"bob"}}}}},
+			map[string]any{"id": "user_frontend", "type": "user", "text": map[string]any{"value": "前端"}, "properties": map[string]any{"assignees": []map[string]any{{"rule": "appoint", "values": []string{"alice"}}}}},
 			map[string]any{"id": "user_ocr", "type": "user", "text": map[string]any{"value": "算法"}, "properties": map[string]any{"assignees": []map[string]any{{"rule": "appoint", "values": []string{"alg_user"}}}}},
 			map[string]any{"id": "gw_join", "type": "parallel", "text": map[string]any{"value": "并行汇聚"}},
 			map[string]any{"id": "user_product", "type": "user", "text": map[string]any{"value": "产品"}, "properties": map[string]any{"assignees": []map[string]any{{"rule": "appoint", "values": []string{"product_lead"}}}}},
@@ -736,7 +736,7 @@ func TestFlowxConverter_MultiBranchInclusiveExecution(t *testing.T) {
 	// 提单：同时选择 "backend" 和 "frontend" (未选 ocr)
 	instID, err := engine.Start(context.Background(), flowx.StartReq{
 		Def:     def,
-		Starter: "luankz",
+		Starter: "alice",
 		Variables: map[string]any{
 			"environment": `["frontend","backend"]`,
 		},
@@ -756,11 +756,11 @@ func TestFlowxConverter_MultiBranchInclusiveExecution(t *testing.T) {
 	assert.False(t, hasOCR, "未选中的算法任务不应处于待办状态")
 
 	// 审批后端任务
-	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: pendingBackend.ID, Operator: "peicg"})
+	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: pendingBackend.ID, Operator: "bob"})
 	require.NoError(t, err)
 
 	// 审批前端任务
-	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: pendingFrontend.ID, Operator: "luankz"})
+	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: pendingFrontend.ID, Operator: "alice"})
 	require.NoError(t, err)
 
 	// 打印所有任务状态帮助分析
@@ -1047,7 +1047,7 @@ func TestFlowxConverter_ComplexRejectMultiBranch(t *testing.T) {
 				"properties": map[string]any{
 					"name": "后端",
 					"assignees": []map[string]any{
-						{"rule": "appoint", "values": []string{"peicg"}},
+						{"rule": "appoint", "values": []string{"bob"}},
 					},
 				},
 			},
@@ -1057,7 +1057,7 @@ func TestFlowxConverter_ComplexRejectMultiBranch(t *testing.T) {
 				"properties": map[string]any{
 					"name": "前端",
 					"assignees": []map[string]any{
-						{"rule": "appoint", "values": []string{"luankz"}},
+						{"rule": "appoint", "values": []string{"alice"}},
 					},
 				},
 			},
@@ -1078,7 +1078,7 @@ func TestFlowxConverter_ComplexRejectMultiBranch(t *testing.T) {
 				"properties": map[string]any{
 					"name": "领导",
 					"assignees": []map[string]any{
-						{"rule": "appoint", "values": []string{"boss_luankz"}},
+						{"rule": "appoint", "values": []string{"boss_alice"}},
 					},
 				},
 			},
@@ -1120,9 +1120,9 @@ func TestFlowxConverter_ComplexRejectMultiBranch(t *testing.T) {
 	frontendTask, _ := lo.Find(tasks, func(t *model.Task) bool { return t.NodeID == "node_frontend" })
 
 	// 2. 第一阶段：后端与前端均通过
-	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: backendTask.ID, Operator: "peicg"})
+	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: backendTask.ID, Operator: "bob"})
 	require.NoError(t, err)
-	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: frontendTask.ID, Operator: "luankz"})
+	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: frontendTask.ID, Operator: "alice"})
 	require.NoError(t, err)
 
 	// 3. 汇聚网关放行，成功激活产品与领导待办
@@ -1139,7 +1139,7 @@ func TestFlowxConverter_ComplexRejectMultiBranch(t *testing.T) {
 	// 4. 核心：领导点击驳回
 	err = engine.Reject(context.Background(), flowx.RejectReq{
 		TaskID:   leaderTask.ID,
-		Operator: "boss_luankz",
+		Operator: "boss_alice",
 		Comment:  "方案不合规，退回重新审核",
 	})
 	require.NoError(t, err)
@@ -1157,13 +1157,13 @@ func TestFlowxConverter_ComplexRejectMultiBranch(t *testing.T) {
 		return t.NodeID == "node_backend" && t.BatchCode == 2 && t.IsPending()
 	})
 	require.True(t, foundB2, "批次 2 必须重新激活后端待办")
-	assert.Equal(t, "peicg", batch2Backend.Assignee)
+	assert.Equal(t, "bob", batch2Backend.Assignee)
 
 	batch2Frontend, foundF2 := lo.Find(allTasks, func(t *model.Task) bool {
 		return t.NodeID == "node_frontend" && t.BatchCode == 2 && t.IsPending()
 	})
 	require.True(t, foundF2, "批次 2 必须重新激活前端待办，绝不能遗漏前端")
-	assert.Equal(t, "luankz", batch2Frontend.Assignee)
+	assert.Equal(t, "alice", batch2Frontend.Assignee)
 
 	// 7. 校验流程图高亮视图（GetExecutionView）
 	view, err := engine.GetExecutionView(context.Background(), instID)
@@ -1176,14 +1176,14 @@ func TestFlowxConverter_ComplexRejectMultiBranch(t *testing.T) {
 	assert.Equal(t, int(model.TaskRejected), view.NodeStatusMap["node_leader"], "领导在流程图中必须高亮为驳回(Rejected)")
 
 	// 8. 校验待办人列表
-	assert.Contains(t, view.PendingUsers, "peicg")
-	assert.Contains(t, view.PendingUsers, "luankz")
-	assert.NotContains(t, view.PendingUsers, "boss_luankz")
+	assert.Contains(t, view.PendingUsers, "bob")
+	assert.Contains(t, view.PendingUsers, "alice")
+	assert.NotContains(t, view.PendingUsers, "boss_alice")
 
 	// 9. 第二轮流转：后端与前端重新审批通过
-	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: batch2Backend.ID, Operator: "peicg"})
+	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: batch2Backend.ID, Operator: "bob"})
 	require.NoError(t, err)
-	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: batch2Frontend.ID, Operator: "luankz"})
+	err = engine.Pass(context.Background(), flowx.PassReq{TaskID: batch2Frontend.ID, Operator: "alice"})
 	require.NoError(t, err)
 
 	// 再次推进到产品和领导（批次 2 重新发起）
@@ -1196,7 +1196,7 @@ func TestFlowxConverter_ComplexRejectMultiBranch(t *testing.T) {
 
 	// 产品与领导最终全员通过办结
 	_ = engine.Pass(context.Background(), flowx.PassReq{TaskID: b2Product.ID, Operator: "langtt"})
-	_ = engine.Pass(context.Background(), flowx.PassReq{TaskID: b2Leader.ID, Operator: "boss_luankz"})
+	_ = engine.Pass(context.Background(), flowx.PassReq{TaskID: b2Leader.ID, Operator: "boss_alice"})
 
 	instFinal, _ := engine.GetInstance(context.Background(), instID)
 	assert.True(t, instFinal.IsFinished(), "二轮全员通过后，工单圆满办结")
