@@ -66,6 +66,7 @@ func (l *FlowxNotificationListener) InterestIn() []flowx.EventType {
 		flowx.EventTaskCreated,    // 审批任务创建 -> 触发审批人待办审批卡片
 		flowx.EventNodeEntered,    // 节点进入 -> 触发抄送通知或群通知
 		flowx.EventTaskRejected,   // 审批任务驳回 -> 触发发起人驳回通知卡片
+		flowx.EventTaskPassed,     // 自动化任务办结 -> 触发发起人执行结果卡片
 	}
 }
 
@@ -213,7 +214,23 @@ func (l *FlowxNotificationListener) handleEvent(safeCtx context.Context, evt flo
 
 	case flowx.EventTaskRejected:
 		l.handleTaskRejected(safeCtx, instanceKey, ticket, wf, evt)
+
+	case flowx.EventTaskPassed:
+		l.handleTaskPassed(safeCtx, instanceKey, ticket, wf, evt)
 	}
+}
+
+// handleTaskPassed 自动化节点执行结果通知。
+// 必须挂 TASK_PASSED 而非 NODE_ENTERED：flowx 自动化 Worker 是异步挂起语义，节点进入时任务尚未执行、
+// Output 为空；只有 PassProcessTaskJob 回写结果后调 engine.Pass 才会广播本事件，此时结果才可渲染。
+// 同时 TASK_PASSED 还由审批/抄送/群聊节点广播，故必须按节点类型收窄，否则会给发起人重复推送无关卡片。
+func (l *FlowxNotificationListener) handleTaskPassed(ctx context.Context, instanceKey string, ticket domain.Ticket, wf domain.Workflow, evt flowx.Event) {
+	if evt.Node == nil || evt.Node.Type != flowxModel.NodeTask {
+		return
+	}
+
+	info := l.buildNotificationInfo(strategy.Automation, instanceKey, ticket, wf, evt.Node.ID, evt.Node.Name, []string{ticket.CreateBy})
+	l.sendSafe(ctx, info, "自动化节点执行结果通知")
 }
 
 func (l *FlowxNotificationListener) handleTaskRejected(ctx context.Context, instanceKey string, ticket domain.Ticket, wf domain.Workflow, evt flowx.Event) {

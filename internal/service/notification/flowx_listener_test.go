@@ -38,6 +38,7 @@ func TestFlowxNotificationListener_InterestIn(t *testing.T) {
 	assert.Contains(t, events, flowx.EventTaskCreated)
 	assert.Contains(t, events, flowx.EventNodeEntered)
 	assert.Contains(t, events, flowx.EventTaskRejected)
+	assert.Contains(t, events, flowx.EventTaskPassed)
 }
 
 func TestFlowxNotificationListener_OnEvent(t *testing.T) {
@@ -235,6 +236,91 @@ func TestFlowxNotificationListener_OnEvent(t *testing.T) {
 			require.NoError(t, err)
 
 			tc.assertFn(t, startMock, userMock, ccMock, chatMock)
+		})
+	}
+}
+
+// TestFlowxNotificationListener_AutomationTaskPassed 覆盖 TASK_PASSED 的节点类型收窄矩阵：
+// 该事件由自动化/审批/抄送/群聊四类节点共同广播，只有自动化节点才允许给发起人推执行结果卡片。
+func TestFlowxNotificationListener_AutomationTaskPassed(t *testing.T) {
+	const instanceKey = "7395001234567890123"
+
+	testCases := []struct {
+		name     string
+		node     *flowxModel.NodeSpec
+		wantCall int
+	}{
+		{
+			name:     "自动化节点通过推送执行结果",
+			node:     &flowxModel.NodeSpec{ID: "auto_deploy", Name: "自动发布", Type: flowxModel.NodeTask},
+			wantCall: 1,
+		},
+		{
+			name:     "审批节点通过不推自动化卡片",
+			node:     &flowxModel.NodeSpec{ID: "leader_audit", Name: "主管审批", Type: flowxModel.NodeApproval},
+			wantCall: 0,
+		},
+		{
+			name:     "抄送节点通过不推自动化卡片",
+			node:     &flowxModel.NodeSpec{ID: "cc_node", Name: "抄送知会", Type: flowxModel.NodeCarbonCopy},
+			wantCall: 0,
+		},
+		{
+			name:     "群聊节点通过不推自动化卡片",
+			node:     &flowxModel.NodeSpec{ID: "chat_node", Name: "群通知", Type: flowxModel.NodeChatGroup},
+			wantCall: 0,
+		},
+		{
+			name:     "缺失节点信息平滑跳过",
+			node:     nil,
+			wantCall: 0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			repo := repomocks.NewMockTicketRepository(ctrl)
+			wf := wfmocks.NewMockService(ctrl)
+			repo.EXPECT().DetailByEngineInstance(gomock.Any(), domain.EngineTypeFlowx, domain.NewID(instanceKey)).
+				Return(domain.Ticket{Id: 88, WorkflowId: 10, CreateBy: "alice", TenantID: 1}, nil)
+			wf.EXPECT().Find(gomock.Any(), int64(10)).
+				Return(domain.Workflow{Id: 10, Name: "发布流程"}, nil)
+
+			startMock := &mockSendStrategy{}
+			userMock := &mockSendStrategy{}
+			autoMock := &mockSendStrategy{}
+			ccMock := &mockSendStrategy{}
+			chatMock := &mockSendStrategy{}
+			dispatcher := strategy.NewDispatcher(userMock, autoMock, startMock, chatMock, ccMock, nil)
+
+			listener := NewFlowxNotificationListener(repo, wf, dispatcher, WithSyncMode(true))
+			require.NoError(t, listener.OnEvent(context.Background(), flowx.Event{
+				Type:     flowx.EventTaskPassed,
+				Instance: &flowxModel.Instance{ID: instanceKey},
+				Node:     tc.node,
+				Task:     &flowxModel.Task{ID: "task_auto", NodeID: "auto_deploy", Assignee: "system"},
+			}))
+
+			require.Equal(t, tc.wantCall, autoMock.calls)
+			assert.Equal(t, 0, startMock.calls)
+			assert.Equal(t, 0, userMock.calls)
+			assert.Equal(t, 0, ccMock.calls)
+			assert.Equal(t, 0, chatMock.calls)
+
+			if tc.wantCall == 0 {
+				return
+			}
+			assert.Equal(t, strategy.Automation, autoMock.lastInfo.NodeName)
+			assert.Equal(t, "auto_deploy", autoMock.lastInfo.CurrentNode.NodeID)
+			assert.Equal(t, "自动发布", autoMock.lastInfo.CurrentNode.NodeName)
+			assert.Equal(t, []string{"alice"}, autoMock.lastInfo.CurrentNode.UserIDs)
+			assert.Equal(t, int64(88), autoMock.lastInfo.Ticket.Id)
+			// flowx 实例标识是雪花字符串，必须原样透传给策略，否则自动化结果按 instance_key 查不到
+			assert.Equal(t, int64(7395001234567890123), autoMock.lastInfo.ResolveInstanceID().Int64())
+			assert.Equal(t, domain.EngineTypeFlowx, autoMock.lastInfo.Ticket.Process.EngineType)
 		})
 	}
 }
