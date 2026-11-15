@@ -76,9 +76,9 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 	// 4. 发送消息（BuildAutomationOutputFields 内部已通过 AddRowSpacers 规范化双列换行排版）
 	fields := strategy.BuildAutomationOutputFields(data.AutomationOutput)
 
-	return n.sender.Send(ctx, notification.Notification{
+	msg := notification.Notification{
 		Channel:    notification.Channel(info.Channel),
-		Receiver:   data.StartUser.LarkUserId,
+		Receiver:   strategy.ResolveRecipientID(data.StartUser, info.Channel),
 		WorkFlowID: info.Workflow.Id,
 		Template: notification.Template{
 			Name:     domain.NotifyTypeApproval,
@@ -86,5 +86,10 @@ func (n *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 			Fields:   fields,
 			HideForm: true,
 		},
-	})
+	}
+	if msg.Receiver == "" {
+		return notification.NewSuccessResponse(0, "发起人在当前渠道无收件标识，跳过发送"), nil
+	}
+
+	return n.sender.Send(ctx, msg)
 }

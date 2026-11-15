@@ -12,6 +12,7 @@ import (
 	"github.com/Duke1616/eflow/internal/service/notification/strategy"
 	"github.com/Duke1616/eflow/internal/service/notification/strategy/automation"
 	"github.com/gotomicro/ego/core/elog"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -80,4 +81,72 @@ func (s *AutomationTestSuite) TestSend() {
 
 func TestAutomationSuite(t *testing.T) {
 	suite.Run(t, new(AutomationTestSuite))
+}
+
+// TestAutomationNotificationChannelReceiver 自动化结果卡片的收件标识必须随通知渠道切换，
+// 且当前渠道解析不出标识时不得投递空收件人。
+func TestAutomationNotificationChannelReceiver(t *testing.T) {
+	bothIDs := domain.User{Username: "luan", LarkUserId: "fs_luan", WechatUserId: "wx_luan"}
+	larkOnly := domain.User{Username: "luan", LarkUserId: "fs_luan"}
+
+	testCases := []struct {
+		name         string
+		channel      strategy.Channel
+		user         domain.User
+		wantReceiver string
+		wantSend     int
+	}{
+		{name: "飞书渠道取飞书标识", channel: strategy.ChannelLarkCard, user: bothIDs, wantReceiver: "fs_luan", wantSend: 1},
+		{name: "企微渠道取企微标识", channel: strategy.ChannelWechat, user: bothIDs, wantReceiver: "wx_luan", wantSend: 1},
+		{name: "渠道缺省按飞书兜底", channel: "", user: bothIDs, wantReceiver: "fs_luan", wantSend: 1},
+		{name: "企微渠道缺企微标识不投递", channel: strategy.ChannelWechat, user: larkOnly, wantSend: 0},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+			mockBase := strategymocks.NewMockService(ctrl)
+			mockSender := sendermocks.NewMockNotificationSender(ctrl)
+			mockBase.EXPECT().Logger().Return(elog.DefaultLogger).AnyTimes()
+
+			info := strategy.Info{
+				Channel: testCase.channel,
+				FlowContext: strategy.FlowContext{
+					InstID:      200,
+					CurrentNode: &strategy.CurrentNode{NodeID: "auto1"},
+				},
+			}
+
+			mockBase.EXPECT().GetNode(gomock.Any(), "auto1").Return([]*flowdsl.Node{}, &flowdsl.Node{
+				ID:   "auto1",
+				Type: flowdsl.NodeAutoTask,
+				AutoTask: &flowdsl.AutoTaskConfig{
+					IsNotify:     true,
+					NotifyMethod: []int64{automation.ProcessNowSend},
+				},
+			}, nil)
+			mockBase.EXPECT().IsGlobalNotify(gomock.Any()).Return(true)
+			mockBase.EXPECT().FetchRequiredData(gomock.Any(), gomock.Any(), gomock.Any()).Return(&strategy.NotificationData{
+				TName:     "发布流程",
+				StartUser: testCase.user,
+			}, nil)
+
+			var sent []notification.Notification
+			mockSender.EXPECT().Send(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context,
+				msg notification.Notification) (notification.Response, error) {
+				sent = append(sent, msg)
+				return notification.NewSuccessResponse(0, "success"), nil
+			}).Times(testCase.wantSend)
+
+			_, err := automation.NewNotification(mockBase, mockSender).Send(context.Background(), info)
+			require.NoError(t, err)
+			require.Len(t, sent, testCase.wantSend)
+			if testCase.wantSend == 0 {
+				return
+			}
+			require.Equal(t, testCase.wantReceiver, sent[0].Receiver)
+			require.Equal(t, notification.Channel(testCase.channel), sent[0].Channel)
+		})
+	}
 }

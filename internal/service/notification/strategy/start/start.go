@@ -53,7 +53,7 @@ func (s *Notification) Send(ctx context.Context, info strategy.Info) (notificati
 	msg := notification.Notification{
 		Channel:    notification.Channel(info.Channel),
 		WorkFlowID: info.Workflow.Id,
-		Receiver:   data.StartUser.LarkUserId,
+		Receiver:   strategy.ResolveRecipientID(data.StartUser, info.Channel),
 		Template: notification.Template{
 			Name:     domain.NotifyTypeRevoke,
 			Title:    title,

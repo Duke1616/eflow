@@ -628,12 +628,18 @@ func NewRecipientMap(users []domain.User, channel Channel) RecipientMap {
 	}
 }
 
+// ResolveRecipientID 按通知渠道解析用户的收件标识。
+// 飞书与企微的用户 ID 命名空间互不相通，取错渠道的 ID 会投递到不存在的人。
+func ResolveRecipientID(u domain.User, channel Channel) string {
+	return lo.Ternary(channel == ChannelWechat, u.WechatUserId, u.LarkUserId)
+}
+
 func (rm RecipientMap) GetID(username string) string {
 	u, ok := rm.users[username]
 	if !ok {
 		return ""
 	}
-	return lo.Ternary(rm.channel == ChannelWechat, u.WechatUserId, u.LarkUserId)
+	return ResolveRecipientID(u, rm.channel)
 }
 
 // ConvertRuleFields 将 rule.Field 转换为 notification.Field
@@ -711,7 +717,7 @@ func GetChatChannel(channel string) notification.Channel {
 
 func (rm RecipientMap) GetIDs() []string {
 	return lo.FilterMap(lo.Values(rm.users), func(u domain.User, _ int) (string, bool) {
-		id := lo.Ternary(rm.channel == ChannelWechat, u.WechatUserId, u.LarkUserId)
+		id := ResolveRecipientID(u, rm.channel)
 		return id, id != ""
 	})
 }
