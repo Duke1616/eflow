@@ -72,7 +72,7 @@ func (s *service) Revoke(ctx context.Context, engineType domain.EngineType, proc
 		}
 		return err
 	}
-	plan, err := s.planner.Build(ctx, processInstanceID.Int())
+	plan, err := s.planner.Build(ctx, processInstanceID)
 	if err != nil {
 		_ = s.repo.Rollback(ctx, processInstanceID)
 		return fmt.Errorf("生成撤回补偿计划失败: %w", err)
@@ -93,7 +93,7 @@ func (s *service) Revoke(ctx context.Context, engineType domain.EngineType, proc
 	revoked = true
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	if err := s.planner.Apply(commitCtx, processInstanceID.Int(), plan); err != nil {
+	if err := s.planner.Apply(commitCtx, processInstanceID, plan); err != nil {
 		return fmt.Errorf("启动撤回补偿失败: %w", err)
 	}
 	if _, err := s.repo.TryFinalize(commitCtx, processInstanceID); err != nil {

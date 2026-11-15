@@ -58,8 +58,8 @@ func (r *withdrawalRepository) ListStale(ctx context.Context, before int64,
 	for _, candidate := range candidates {
 		result = append(result, domain.WithdrawalCandidate{
 			TicketID: candidate.TicketID, TenantID: candidate.TenantID,
-			ProcessInstanceID: candidate.ProcessInstanceID,
-			EngineActive:      candidate.EngineActive, EngineRevoked: candidate.EngineRevoked,
+			ProcessInstanceID: candidate.ProcessInstanceID, ProcessInstanceKey: candidate.ProcessInstanceKey,
+			EngineActive: candidate.EngineActive, EngineRevoked: candidate.EngineRevoked,
 		})
 	}
 	return result, err

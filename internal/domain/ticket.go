@@ -172,11 +172,22 @@ type LatestReject struct {
 
 // WithdrawalCandidate 是长期停留在撤回中状态、等待后台恢复的工单快照。
 type WithdrawalCandidate struct {
-	TicketID          int64
-	TenantID          int64
-	ProcessInstanceID int
-	EngineActive      bool
-	EngineRevoked     bool
+	TicketID           int64
+	TenantID           int64
+	ProcessInstanceID  int
+	ProcessInstanceKey string
+	EngineActive       bool
+	EngineRevoked      bool
+}
+
+// InstanceID 返回恢复撤回时寻址流程实例的多态标识。
+// flowx 只落 process_instance_key（process_instance_id 恒为 0），easyflow 只落自增 ID，
+// 取错字段会让补偿计划与状态回滚全部寻址到空实例。
+func (c WithdrawalCandidate) InstanceID() ID {
+	if c.ProcessInstanceKey != "" {
+		return NewID(c.ProcessInstanceKey)
+	}
+	return NewID(c.ProcessInstanceID)
 }
 
 // ErrInvalidParameter 统一的校验失败错误定义

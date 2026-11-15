@@ -56,15 +56,16 @@ func (j *RecoveryJob) run(ctx context.Context) error {
 		for _, candidate := range candidates {
 			afterID = candidate.TicketID
 			candidateCtx := withdrawalTenantContext(ctx, candidate.TenantID)
+			instanceID := candidate.InstanceID()
 			switch {
 			case candidate.EngineRevoked:
-				err = j.resume(candidateCtx, candidate.ProcessInstanceID)
+				err = j.resume(candidateCtx, instanceID)
 			case candidate.EngineActive:
-				err = j.repo.Rollback(candidateCtx, domain.NewID(candidate.ProcessInstanceID))
+				err = j.repo.Rollback(candidateCtx, instanceID)
 			default:
 				j.logger.Warn("撤回中工单缺少活动和撤销历史流程实例",
 					elog.Int64("ticketID", candidate.TicketID),
-					elog.Int("processInstanceID", candidate.ProcessInstanceID))
+					elog.String("instanceID", instanceID.String()))
 				continue
 			}
 			if err != nil {
@@ -78,14 +79,14 @@ func (j *RecoveryJob) run(ctx context.Context) error {
 	}
 }
 
-func (j *RecoveryJob) resume(ctx context.Context, processInstanceID int) error {
-	plan, err := j.planner.Build(ctx, processInstanceID)
+func (j *RecoveryJob) resume(ctx context.Context, instanceID domain.ID) error {
+	plan, err := j.planner.Build(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("重建撤回补偿计划失败: %w", err)
 	}
-	if err = j.planner.Apply(ctx, processInstanceID, plan); err != nil {
+	if err = j.planner.Apply(ctx, instanceID, plan); err != nil {
 		return err
 	}
-	_, err = j.repo.TryFinalize(ctx, domain.NewID(processInstanceID))
+	_, err = j.repo.TryFinalize(ctx, instanceID)
 	return err
 }

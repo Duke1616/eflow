@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Duke1616/eflow/internal/domain"
+	flowxModel "github.com/Duke1616/eflow/pkg/flowx/model"
 	"github.com/Duke1616/eiam/pkg/gormx"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -32,13 +33,14 @@ type WithdrawalDAO interface {
 	ListStale(ctx context.Context, before int64, afterID, limit int64) ([]WithdrawalCandidate, error)
 }
 
-// WithdrawalCandidate 汇总工单与 easy-workflow 活动、历史实例状态。
+// WithdrawalCandidate 汇总工单与流程引擎活动、历史实例状态。
 type WithdrawalCandidate struct {
-	TicketID          int64 `gorm:"column:ticket_id"`
-	TenantID          int64 `gorm:"column:tenant_id"`
-	ProcessInstanceID int   `gorm:"column:process_instance_id"`
-	EngineActive      bool  `gorm:"column:engine_active"`
-	EngineRevoked     bool  `gorm:"column:engine_revoked"`
+	TicketID           int64  `gorm:"column:ticket_id"`
+	TenantID           int64  `gorm:"column:tenant_id"`
+	ProcessInstanceID  int    `gorm:"column:process_instance_id"`
+	ProcessInstanceKey string `gorm:"column:process_instance_key"`
+	EngineActive       bool   `gorm:"column:engine_active"`
+	EngineRevoked      bool   `gorm:"column:engine_revoked"`
 }
 
 type gormWithdrawalDAO struct{ db *gorm.DB }
@@ -194,12 +196,25 @@ func (g *gormWithdrawalDAO) Rollback(ctx context.Context, instanceID domain.ID) 
 func (g *gormWithdrawalDAO) ListStale(ctx context.Context, before int64,
 	afterID, limit int64) ([]WithdrawalCandidate, error) {
 	var candidates []WithdrawalCandidate
+	// 两个引擎的实例表与终态编码都不同：easyflow 运行中在 proc_inst、撤销后迁入 hist_proc_inst(status=2)；
+	// flowx 始终在 flow_instance，靠 status 区分流转中(1)与已撤回(4)。只探 easyflow 会让 flowx 工单
+	// 两个标记恒为 false，恢复任务判不出引擎状态而永久卡在撤回中。
 	err := g.db.WithContext(ctx).Model(&Ticket{}).
 		Scopes(gormx.IgnoreTenant()).
-		Select(`ticket.id AS ticket_id, ticket.tenant_id, ticket.process_instance_id,
-			EXISTS(SELECT 1 FROM proc_inst pi WHERE pi.id = ticket.process_instance_id) AS engine_active,
-			EXISTS(SELECT 1 FROM hist_proc_inst hpi
-				WHERE hpi.proc_inst_id = ticket.process_instance_id AND hpi.status = 2) AS engine_revoked`).
+		Select(`ticket.id AS ticket_id, ticket.tenant_id, ticket.process_instance_id, ticket.process_instance_key,
+			CASE WHEN ticket.engine_type = ?
+				THEN EXISTS(SELECT 1 FROM flow_instance fi
+					WHERE fi.id = ticket.process_instance_key AND fi.status = ?)
+				ELSE EXISTS(SELECT 1 FROM proc_inst pi WHERE pi.id = ticket.process_instance_id)
+			END AS engine_active,
+			CASE WHEN ticket.engine_type = ?
+				THEN EXISTS(SELECT 1 FROM flow_instance fi
+					WHERE fi.id = ticket.process_instance_key AND fi.status = ?)
+				ELSE EXISTS(SELECT 1 FROM hist_proc_inst hpi
+					WHERE hpi.proc_inst_id = ticket.process_instance_id AND hpi.status = 2)
+			END AS engine_revoked`,
+			domain.EngineTypeFlowx.String(), int(flowxModel.InstanceRunning),
+			domain.EngineTypeFlowx.String(), int(flowxModel.InstanceCancelled)).
 		Where("ticket.status = ? AND ticket.utime <= ? AND ticket.id > ?",
 			domain.WITHDRAWING.ToUint8(), before, afterID).
 		Order("ticket.id ASC").Limit(int(limit)).Scan(&candidates).Error

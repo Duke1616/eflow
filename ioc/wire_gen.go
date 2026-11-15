@@ -94,8 +94,7 @@ func InitApp() (*App, error) {
 	queryService := ticket.NewQueryService(ticketRepository, iEngine, userServiceClient, ratingService)
 	withdrawalDAO := dao.NewWithdrawalDAO(db)
 	withdrawalRepository := repository.NewWithdrawalRepository(withdrawalDAO)
-	easyflowService := easyflow.NewService(iEngineRepository)
-	compensationPlanner := withdrawal.NewCompensationPlanner(taskRepository, withdrawalRepository, taskService, ticketService, easyflowService, workflowService)
+	compensationPlanner := withdrawal.NewCompensationPlanner(taskRepository, withdrawalRepository, taskService, ticketService, iEngine, workflowService)
 	withdrawalService := withdrawal.NewService(withdrawalRepository, compensationPlanner, iEngine)
 	ticketHandler := ticket2.NewHandler(ticketService, queryService, userServiceClient, withdrawalService, ratingService)
 	dispatchHandler := dispatch2.NewHandler(dispatchService)
@@ -103,6 +102,7 @@ func InitApp() (*App, error) {
 	component := InitGinWebServer(v, sdk, syncer, v2, handler, workflowHandler, taskHandler, ticketHandler, dispatchHandler, listener)
 	ticketServiceServer := grpc.NewTicketServer(ticketService, service)
 	server := InitGrpcServer(registry, ticketServiceServer)
+	easyflowService := easyflow.NewService(iEngineRepository)
 	producer, err := InitTicketStatusModifyEventProducer(mq)
 	if err != nil {
 		return nil, err
