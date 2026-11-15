@@ -33,7 +33,7 @@ func InitTasks(
 	return []Task{
 		executeResultConsumer,
 		serviceTask.NewStartTaskJob(taskSvc, 100, 8, 10*time.Second, 30*time.Second),
-		serviceTask.NewTaskRecoveryJob(taskSvc, 100, time.Minute, time.Minute),
+		serviceTask.NewTaskRecoveryJob(taskSvc, 100, time.Minute, time.Minute, 30*time.Second),
 		serviceTask.NewPassProcessTaskJob(taskSvc, engine, 100, 10*time.Second),
 		withdrawalSvc.NewRecoveryJob(withdrawalRepo, compensationPlanner, 100, time.Minute, 5*time.Minute),
 		processConsumer,

@@ -10,19 +10,20 @@ import (
 
 // TaskRecoveryJob 宕线补偿与自动重试后台任务
 type TaskRecoveryJob struct {
-	svc        Service
-	limit      int64
-	interval   time.Duration
-	staleAfter time.Duration
-	logger     *elog.Component
+	svc         Service
+	limit       int64
+	interval    time.Duration
+	staleAfter  time.Duration
+	taskTimeout time.Duration
+	logger      *elog.Component
 }
 
 // NewTaskRecoveryJob 实例化宕机恢复与自动重试补偿任务
 func NewTaskRecoveryJob(svc Service, limit int64,
-	interval, staleAfter time.Duration) *TaskRecoveryJob {
+	interval, staleAfter, taskTimeout time.Duration) *TaskRecoveryJob {
 	return &TaskRecoveryJob{
 		svc: svc, limit: limit, interval: interval,
-		staleAfter: staleAfter, logger: elog.DefaultLogger,
+		staleAfter: staleAfter, taskTimeout: taskTimeout, logger: elog.DefaultLogger,
 	}
 }
 
@@ -58,7 +59,7 @@ func (j *TaskRecoveryJob) run(ctx context.Context) error {
 			if now.Before(time.UnixMilli(task.UTime).Add(j.staleAfter)) {
 				return
 			}
-			if handleErr := current.handle(tenantContext(ctx, task.TenantID), task.ID); handleErr != nil {
+			if handleErr := j.handle(ctx, current.handle, task); handleErr != nil {
 				j.logger.Error(current.log, elog.Int64("taskID", task.ID), elog.FieldErr(handleErr))
 			}
 		})
@@ -67,6 +68,15 @@ func (j *TaskRecoveryJob) run(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// handle 给单次补偿调用套独立超时。etask 客户端拦截器链不含 deadline 也未配 keepalive，
+// 连接黑洞化时 RPC 会永久挂起；补偿是串行扫描，不设上限会让一次挂起停摆全部三类补偿。
+func (j *TaskRecoveryJob) handle(ctx context.Context,
+	handle func(context.Context, int64) error, task domain.Task) error {
+	callCtx, cancel := context.WithTimeout(tenantContext(ctx, task.TenantID), j.taskTimeout)
+	defer cancel()
+	return handle(callCtx, task.ID)
 }
 
 func (j *TaskRecoveryJob) scan(ctx context.Context, status domain.TaskStatus,
