@@ -436,12 +436,29 @@ func (h *Handler) getUid(ctx *ginx.Context) (int64, error) {
 	return uid, nil
 }
 
+// validateRules 写入期拦截会让通知渲染 panic 的表单配置。
+// 解析失败也一并拒绝：通知侧 getRules 同样走 ParseRules 且直接返回错误，
+// 存进去只会把失败推迟到发卡片的时刻。
+func validateRules(rulesData []map[string]interface{}) error {
+	if len(rulesData) == 0 {
+		return nil
+	}
+	rules, err := rule.ParseRules(rulesData)
+	if err != nil {
+		return fmt.Errorf("表单规则解析失败: %w", err)
+	}
+	return rule.ValidateOptionValues(rules)
+}
+
 func (h *Handler) toDomain(req CreateTemplateReq) (domain.Template, error) {
 	var rulesData []map[string]interface{}
 	if req.Rules != "" {
 		if err := json.Unmarshal([]byte(req.Rules), &rulesData); err != nil {
 			return domain.Template{}, err
 		}
+	}
+	if err := validateRules(rulesData); err != nil {
+		return domain.Template{}, err
 	}
 	var optionsData map[string]interface{}
 	if req.Options != "" {
@@ -521,6 +538,9 @@ func (h *Handler) toUpdateDomain(req UpdateTemplateReq) (domain.Template, error)
 		if err := json.Unmarshal([]byte(req.Rules), &rulesData); err != nil {
 			return domain.Template{}, err
 		}
+	}
+	if err := validateRules(rulesData); err != nil {
+		return domain.Template{}, err
 	}
 	var optionsData map[string]interface{}
 	if req.Options != "" {
