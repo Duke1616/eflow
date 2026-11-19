@@ -13,6 +13,12 @@ var (
 	ErrChannelUserNotFound = errors.New("无法定位第三方渠道标识对应的系统账号")
 	// ErrUnsupportedAction 收到未支持的渠道交互动作时返回
 	ErrUnsupportedAction = errors.New("不支持的渠道审批动作类型")
+	// ErrTicketRevoked 当工单已被发起人撤回时返回
+	ErrTicketRevoked = errors.New("工单已撤回")
+	// ErrTicketRevoking 当工单处于撤单处理中时返回
+	ErrTicketRevoking = errors.New("工单撤回处理中")
+	// ErrTicketEnded 当工单已办结不可继续流转时返回
+	ErrTicketEnded = errors.New("工单已办结")
 )
 
 // IChannelIdentityResolver 统一多渠道第三方身份与内部系统用户映射解析接口

@@ -49,15 +49,23 @@ func (s *channelActionService) DispatchAction(ctx context.Context, evt domain.Ch
 	var (
 		engineType domain.EngineType
 		createBy   string
+		ticket     *domain.Ticket
 	)
 	if evt.TicketID > 0 {
-		if ticket, err := s.ticketSvc.GetByID(ctx, evt.TicketID); err == nil {
-			engineType = ticket.Process.EngineType
-			createBy = ticket.CreateBy
+		if t, err := s.ticketSvc.GetByID(ctx, evt.TicketID); err == nil {
+			ticket = &t
+			engineType = t.Process.EngineType
+			createBy = t.CreateBy
 		}
 	}
 
-	// 2. 特权动作与只读交互优化：
+	// 2. 状态机前置守卫：针对审批类写操作（同意/驳回），必须校验工单是否处于可审批流转状态
+	// 若提单人已撤单或工单已办结，必须 Fail-Fast 阻断，避免触发无效身份解析或抛出误导性错误
+	if interceptRes, ok := validateApprovalTicketState(evt.Action, ticket, evt.ChannelUserID); !ok {
+		return interceptRes, nil
+	}
+
+	// 3. 特权动作与只读交互优化：
 	// “查看进度”为只读查询，绝不修改工单或任务状态。优先解析操作人，解析不到也安全放行
 	if evt.Action == domain.ChannelActionProgress {
 		operator := evt.ChannelUserID
@@ -258,4 +266,41 @@ func (s *channelActionService) handleRevoke(ctx context.Context, evt domain.Chan
 		Operator: operator,
 		Remark:   fmt.Sprintf("你已撤销该申请, 原因：%s", reason),
 	}, nil
+}
+
+// terminalStatusPolicy 定义终结状态拦截策略
+type terminalStatusPolicy struct {
+	remark string
+	err    error
+}
+
+// terminalApprovalPolicies 终结态拦截映射表
+// 设计原因：采用表驱动设计隔离业务状态与拦截提示，后续扩展新状态（如挂起、作废等）无需改动核心分发流程
+var terminalApprovalPolicies = map[domain.Status]terminalStatusPolicy{
+	domain.WITHDRAW: {
+		remark: "操作未生效: 提单人已撤回该工单，无需继续审批",
+		err:    ErrTicketRevoked,
+	},
+	domain.WITHDRAWING: {
+		remark: "操作未生效: 工单正在撤销处理中，暂无法审批",
+		err:    ErrTicketRevoking,
+	},
+	domain.END: {
+		remark: "操作未生效: 该工单流程已办结，无需继续审批",
+		err:    ErrTicketEnded,
+	},
+}
+
+// validateApprovalTicketState 校验审批类动作（同意/驳回）的工单状态合法性
+// 设计原因：工单已撤回或已办结时，工作流引擎中的待办任务上下文已被关闭或注销。
+// 若不进行前置拦截，会导致直接进入身份解析失败误报“账号未绑定”，且无法通知端侧废除交互卡片。
+func validateApprovalTicketState(action domain.ChannelActionType, ticket *domain.Ticket, operatorID string) (*domain.ChannelActionResult, bool) {
+	if ticket == nil || (action != domain.ChannelActionPass && action != domain.ChannelActionReject) {
+		return nil, true
+	}
+	policy, isTerminal := terminalApprovalPolicies[ticket.Status]
+	if !isTerminal {
+		return nil, true
+	}
+	return domain.InvalidateCardResult(action, operatorID, policy.remark, policy.err), false
 }

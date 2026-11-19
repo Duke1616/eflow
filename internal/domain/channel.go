@@ -56,6 +56,8 @@ type ChannelActionEvent struct {
 type ChannelActionResult struct {
 	// Success 业务操作是否最终成功（底层 Pass/Reject 是否成功）
 	Success bool `json:"success"`
+	// ShouldInvalidateCard 标识当前工单或任务是否已进入不可逆终态（如已撤回、已办结），卡片必须原地刷新销毁按钮
+	ShouldInvalidateCard bool `json:"should_invalidate_card"`
 	// Action 实际触发的动作类型
 	Action ChannelActionType `json:"action"`
 	// Operator 经身份解析器确认为可信系统用户的登录用户名
@@ -64,5 +66,17 @@ type ChannelActionResult struct {
 	Remark string `json:"remark"`
 	// Error 底层业务失败的原始错误（若执行成功则为 nil）
 	Error error `json:"-"`
+}
+
+// InvalidateCardResult 构造因工单已进入终结态而需将三方审批卡片置为失效态的业务执行结果
+func InvalidateCardResult(action ChannelActionType, operator, remark string, err error) *ChannelActionResult {
+	return &ChannelActionResult{
+		Success:              false,
+		ShouldInvalidateCard: true,
+		Action:               action,
+		Operator:             operator,
+		Remark:               remark,
+		Error:                err,
+	}
 }
 

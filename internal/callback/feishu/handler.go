@@ -166,14 +166,15 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt domain.ChannelActi
 
 	// 状态机守护法则：若操作失败（权限不足、表单校验未过、流程流转异常），严禁将待办卡片刷成成功态（彻底消灭幽灵同意）
 	if !result.Success {
-		h.logger.Warn("飞书卡片审批操作执行未生效，向操作者推送失败告警并保留待办卡片",
+		h.logger.Warn("飞书卡片审批操作执行未生效，向操作者推送失败告警",
 			elog.String("userId", evt.ChannelUserID),
 			elog.String("action", string(result.Action)),
 			elog.String("remark", result.Remark),
+			elog.Any("shouldInvalidateCard", result.ShouldInvalidateCard),
 			elog.FieldErr(result.Error),
 		)
 
-		// 向操作人推送私信错误提示，告知真实拦截原因，同时保留卡片可再次操作
+		// 1. 向操作人推送私信错误提示，告知真实拦截原因
 		_, _ = h.sender.Send(ctx, notification.Notification{
 			Receiver:     evt.ChannelUserID,
 			ReceiverType: enotifyfeishu.ReceiveIDTypeUserID,
@@ -182,6 +183,14 @@ func (h *larkCallbackHandler) Handle(ctx context.Context, evt domain.ChannelActi
 				Text: fmt.Sprintf("【工单操作提醒】您的操作未生效: %s", result.Remark),
 			},
 		})
+
+		// 2. 状态终态守护：若工单已终结（如提单人已撤回、工单已办结），原地更新飞书卡片为失效态，消除操作按钮防止重复点击
+		if result.ShouldInvalidateCard && evt.MessageID != "" {
+			if err := h.withdraw(ctx, evt, result.Remark); err != nil {
+				h.logger.Error("更新飞书失效卡片失败", elog.FieldErr(err))
+			}
+		}
+
 		return result.Error
 	}
 

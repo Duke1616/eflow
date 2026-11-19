@@ -22,6 +22,7 @@ func TestChannelActionService_DispatchAction(t *testing.T) {
 		mockSetup   func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService)
 		wantSuccess bool
 		wantRemark  string
+		wantInvalid bool
 	}{
 		{
 			name: "审批同意且流转成功",
@@ -251,6 +252,49 @@ func TestChannelActionService_DispatchAction(t *testing.T) {
 			wantSuccess: false,
 			wantRemark:  "当前工单状态不支持撤回: 当前状态为 已结束",
 		},
+		{
+			name: "提单人已撤回工单时审批操作前置阻断并废除卡片",
+			evt: domain.ChannelActionEvent{
+				Channel:       domain.ChannelFeishu,
+				ChannelUserID: "bcegag66",
+				Action:        domain.ChannelActionPass,
+				TaskID:        domain.NewID(5242),
+				TicketID:      2735,
+			},
+			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
+				mockTicket.EXPECT().GetByID(gomock.Any(), int64(2735)).Return(domain.Ticket{
+					Id:       2735,
+					CreateBy: "alice",
+					Status:   domain.WITHDRAW,
+					Process:  domain.Process{EngineType: domain.EngineTypeFlowx},
+				}, nil)
+				// 关键断言：绝不调用底层身份解析与流转，必须 Fail-Fast
+			},
+			wantSuccess: false,
+			wantRemark:  "操作未生效: 提单人已撤回该工单，无需继续审批",
+			wantInvalid: true,
+		},
+		{
+			name: "工单已办结终态时审批操作前置阻断并废除卡片",
+			evt: domain.ChannelActionEvent{
+				Channel:       domain.ChannelFeishu,
+				ChannelUserID: "bcegag66",
+				Action:        domain.ChannelActionReject,
+				TaskID:        domain.NewID(5242),
+				TicketID:      2735,
+			},
+			mockSetup: func(mockResolver *channelmocks.MockIChannelIdentityResolver, mockTicket *ticketmocks.MockService, mockWithdrawal *withdrawalmocks.MockService) {
+				mockTicket.EXPECT().GetByID(gomock.Any(), int64(2735)).Return(domain.Ticket{
+					Id:       2735,
+					CreateBy: "alice",
+					Status:   domain.END,
+					Process:  domain.Process{EngineType: domain.EngineTypeFlowx},
+				}, nil)
+			},
+			wantSuccess: false,
+			wantRemark:  "操作未生效: 该工单流程已办结，无需继续审批",
+			wantInvalid: true,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -273,6 +317,7 @@ func TestChannelActionService_DispatchAction(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, res)
 			assert.Equal(t, tc.wantSuccess, res.Success)
+			assert.Equal(t, tc.wantInvalid, res.ShouldInvalidateCard)
 			if tc.wantRemark != "" {
 				assert.Equal(t, tc.wantRemark, res.Remark)
 			}
