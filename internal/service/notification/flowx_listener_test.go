@@ -214,6 +214,58 @@ func TestFlowxNotificationListener_OnEvent(t *testing.T) {
 				assert.Equal(t, "chat_node", ch.lastInfo.CurrentNode.NodeID)
 			},
 		},
+		{
+			name: "融合实例变量时隔离系统内置变量不污染表单数据",
+			event: flowx.Event{
+				Type: flowx.EventNodeEntered,
+				Instance: &flowxModel.Instance{
+					ID: "inst_1001",
+					Variables: map[string]any{
+						"starter":          "luankz",
+						"template_name":    "产线环境发版",
+						"ticket_id":        int64(1130),
+						"operator":         "admin",
+						"comment":          "同意",
+						"deploy_branch":    "main",
+						"custom_parameter": "prod-v1",
+					},
+				},
+				Node: &flowxModel.NodeSpec{
+					ID:        "cc_node",
+					Name:      "抄送节点",
+					Type:      flowxModel.NodeCarbonCopy,
+					Assignees: []string{"auditor"},
+				},
+			},
+			setupMock: func(repo *repomocks.MockTicketRepository, wf *wfmocks.MockService) {
+				repo.EXPECT().DetailByEngineInstance(gomock.Any(), domain.EngineTypeFlowx, domain.NewID("inst_1001")).
+					Return(domain.Ticket{
+						Id:         1130,
+						WorkflowId: 10,
+						CreateBy:   "luankz",
+						TenantID:   1,
+						Data: domain.TicketData{
+							"base_field": "initial_value",
+						},
+					}, nil)
+				wf.EXPECT().Find(gomock.Any(), int64(10)).
+					Return(domain.Workflow{Id: 10, Name: "发布流程"}, nil)
+			},
+			assertFn: func(t *testing.T, s, u, c, ch *mockSendStrategy) {
+				assert.Equal(t, 1, c.calls)
+				ticketData := c.lastInfo.Ticket.Data
+				// 业务字段正常融合
+				assert.Equal(t, "initial_value", ticketData["base_field"])
+				assert.Equal(t, "main", ticketData["deploy_branch"])
+				assert.Equal(t, "prod-v1", ticketData["custom_parameter"])
+				// 系统内置流程变量严格被排除，不污染业务表单
+				assert.NotContains(t, ticketData, "starter")
+				assert.NotContains(t, ticketData, "template_name")
+				assert.NotContains(t, ticketData, "ticket_id")
+				assert.NotContains(t, ticketData, "operator")
+				assert.NotContains(t, ticketData, "comment")
+			},
+		},
 	}
 
 	for _, tc := range testCases {

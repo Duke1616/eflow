@@ -245,3 +245,50 @@ func TestProcessWechatFieldsSafe(t *testing.T) {
 	assert.Len(t, fields, 1)
 	assert.Equal(t, "no_hyphen_id", fields[0].Content[2:14])
 }
+
+func TestGetFields_ExcludeSystemVariables(t *testing.T) {
+	rules := []Rule{
+		{Field: "project_name", Title: "项目名称"},
+		{Field: "commit_message", Title: "提交信息"},
+	}
+
+	data := map[string]interface{}{
+		"project_name":   "eflow",
+		"commit_message": "fix: 隐藏卡片系统保留变量",
+		"starter":        "luankz",
+		"template_name":  "产线环境发版",
+		"ticket_id":      int64(1130),
+		"operator":       "admin",
+		"comment":        "同意",
+	}
+
+	fields := GetFields(rules, SystemProvide, data)
+	assert.NotEmpty(t, fields)
+
+	// 确认正文字段中只包含业务字段，绝不包含 starter、template_name、ticket_id 等系统变量
+	for _, f := range fields {
+		assert.NotContains(t, f.Content, "starter")
+		assert.NotContains(t, f.Content, "luankz")
+		assert.NotContains(t, f.Content, "template_name")
+		assert.NotContains(t, f.Content, "产线环境发版")
+		assert.NotContains(t, f.Content, "ticket_id")
+		assert.NotContains(t, f.Content, "1130")
+	}
+
+	// 验证业务字段正常呈现
+	var hasProject, hasCommit bool
+	for _, f := range fields {
+		if strings.Contains(f.Content, "项目名称") && strings.Contains(f.Content, "eflow") {
+			hasProject = true
+		}
+		if strings.Contains(f.Content, "提交信息") && strings.Contains(f.Content, "fix: 隐藏卡片系统保留变量") {
+			hasCommit = true
+		}
+	}
+	assert.True(t, hasProject)
+	assert.True(t, hasCommit)
+
+	// 验证浅拷贝保护：调用方传入的原 map 结构不受影响
+	assert.Contains(t, data, "starter")
+	assert.Contains(t, data, "ticket_id")
+}

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Duke1616/eflow/internal/domain"
 	"github.com/ecodeclub/ekit/slice"
 	"github.com/samber/lo"
 	"github.com/xen0n/go-workwx"
@@ -27,10 +28,16 @@ type FieldProcessor struct {
 }
 
 func GetFields(rules []Rule, provide uint8, data map[string]interface{}) []Field {
+	// 浅拷贝表单数据，防止内部删除隐藏字段或系统保留变量破坏调用方的原始数据结构
+	clonedData := make(map[string]interface{}, len(data))
+	for k, v := range data {
+		clonedData[k] = v
+	}
+
 	fp := &FieldProcessor{
 		rules:   rules,
 		provide: provide,
-		data:    data,
+		data:    clonedData,
 	}
 
 	fp.initialize()
@@ -70,6 +77,14 @@ func (fp *FieldProcessor) filterHiddenFields() {
 
 		if _, ok := rule.Style["notify_display"]; ok {
 			delete(fp.data, rule.Field)
+		}
+	}
+
+	// 过滤系统保留流程变量：此类变量属于流程运行时元数据（如发起人、工单ID、模板名），
+	// 卡片标题已公示提单人与模板名称，正文字段严禁泄漏此类英文原始 Key
+	for key := range fp.data {
+		if domain.IsSystemVariable(key) {
+			delete(fp.data, key)
 		}
 	}
 }

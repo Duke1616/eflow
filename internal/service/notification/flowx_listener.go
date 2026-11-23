@@ -179,13 +179,16 @@ func (l *FlowxNotificationListener) handleEvent(safeCtx context.Context, evt flo
 		ticket.Process.EngineType = domain.EngineTypeFlowx
 	}
 
-	// 融合 flowx 流程实例最新的动态变量表，保障即时通知卡片渲染不缺失刚填写的业务字段
+	// 融合 flowx 流程实例最新的动态业务变量表，保障即时通知卡片渲染不缺失刚填写的业务字段。
+	// 设计原因：严格过滤系统级内置流程变量（如 starter/ticket_id/template_name），杜绝污染业务表单数据导致卡片泄露展示
 	if evt.Instance != nil && len(evt.Instance.Variables) > 0 {
 		if ticket.Data == nil {
 			ticket.Data = make(domain.TicketData)
 		}
 		for k, v := range evt.Instance.Variables {
-			ticket.Data[k] = v
+			if !domain.IsSystemVariable(k) {
+				ticket.Data[k] = v
+			}
 		}
 	}
 
